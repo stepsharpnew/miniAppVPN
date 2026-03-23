@@ -1,0 +1,98 @@
+.page {
+  padding: 16px;
+}
+
+.hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.heroIcon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(77, 139, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.heroTitle {
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.heroSubtitle {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.accordions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.downloadBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  background: var(--btn-gradient);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  transition: opacity 0.2s ease;
+}
+
+.downloadBtn:active {
+  opacity: 0.8;
+}
+
+.videoLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  margin-left: 4px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(77, 139, 255, 0.12);
+  color: var(--accent-blue);
+  font-weight: 600;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.helpCard {
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  text-align: center;
+  margin-top: 20px;
+}
+
+.helpTitle {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.helpText {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-top: 6px;
+  line-height: 1.5;
+}

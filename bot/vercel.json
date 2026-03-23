@@ -1,0 +1,9 @@
+{
+  "buildCommand": "npm run webapp:build",
+  "outputDirectory": "webapp/dist",
+  "installCommand": "npm install",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/api/vpn-proxy", "destination": "/api/vpn-proxy" }
+  ]
+}

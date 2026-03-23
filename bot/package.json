@@ -1,0 +1,34 @@
+{
+  "name": "meme-vpn",
+  "version": "1.0.0",
+  "description": "MEME VPN — Telegram bot + Mini App",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "bot:start": "ts-node server/index.ts",
+    "bot:check": "tsc --project tsconfig.json --noEmit",
+    "webapp:dev": "vite",
+    "webapp:build": "tsc --project tsconfig.webapp.json --noEmit && vite build",
+    "webapp:preview": "vite preview",
+    "build": "npm run bot:check && npm run webapp:build"
+  },
+  "dependencies": {
+    "@twa-dev/sdk": "^7.0.0",
+    "dotenv": "^17.3.1",
+    "grammy": "^1.30.0",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vercel/node": "^5.6.18",
+    "@vitejs/plugin-react": "^4.3.4",
+    "ts-node": "^10.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0"
+  }
+}
