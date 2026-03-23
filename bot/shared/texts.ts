@@ -1,18 +1,75 @@
-export const BRAND_NAME = 'MEME VPN';
+export const BRAND_NAME = "MEME VPN";
 
-export const SUPPORT_BOT_USERNAME = 'YOUR_SUPPORT_BOT';
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
 
-export const SUPPORT_ADMIN_HEADER = (
+// ── Admin-facing: new ticket from Mini App ──
+
+export const SUPPORT_TICKET_ADMIN = (
+  userName: string,
+  userTag: string,
+  userId: number,
+  message: string,
+): string =>
+  `🆕 <b>Новое обращение</b>\n\n` +
+  `👤 <b>${escapeHtml(userName)}</b> · ${escapeHtml(userTag)}\n` +
+  `🆔 <code>${userId}</code>\n\n` +
+  `<blockquote>${escapeHtml(message)}</blockquote>\n` +
+  `<i>↩️ Ответьте на это сообщение</i>`;
+
+// ── Admin-facing: user text in active dialog ──
+
+export const SUPPORT_USER_TEXT_ADMIN = (
+  userName: string,
+  userTag: string,
+  userId: number,
+  text: string,
+): string =>
+  `💬 <b>${escapeHtml(userName)}</b> · ${escapeHtml(userTag)} · <code>${userId}</code>\n\n` +
+  escapeHtml(text);
+
+// ── Admin-facing: caption for media ──
+
+export const SUPPORT_MEDIA_CAPTION_ADMIN = (
+  userName: string,
+  userTag: string,
+  userId: number,
+  originalCaption?: string,
+): string => {
+  let caption = `👤 <b>${escapeHtml(userName)}</b> · ${escapeHtml(userTag)} · <code>${userId}</code>`;
+  if (originalCaption) caption += `\n\n${escapeHtml(originalCaption)}`;
+  return caption;
+};
+
+// ── Admin-facing: fallback header for unsupported media ──
+
+export const SUPPORT_MEDIA_HEADER_ADMIN = (
   userName: string,
   userTag: string,
   userId: number,
 ): string =>
-  `📨 Обращение в поддержку\n\n👤 От: ${userName}\n🔖 Ник: ${userTag}\n🆔 ID: ${userId}\n\n📝 Сообщение:`;
+  `📎 <b>${escapeHtml(userName)}</b> · ${escapeHtml(userTag)} · <code>${userId}</code>`;
 
-export const SUPPORT_REPLY_PREFIX = '📨 Ответ от менеджера:\n\n';
+// ── User-facing: admin reply notification via bot ──
+
+export const SUPPORT_NEW_REPLY_NOTIFICATION =
+  `📨 <b>Новое сообщение от поддержки</b>\n\nОткройте чат, чтобы прочитать ответ.`;
+
+// ── User-facing: ticket sent confirmation ──
+
+export const SUPPORT_TICKET_SENT_USER =
+  `✅ <b>Обращение отправлено!</b>\n\n` +
+  `Менеджер получил ваше сообщение и скоро ответит прямо в этот чат.\n\n` +
+  `📎 Вы можете отправлять <b>текст, фото и файлы</b> — всё дойдёт до менеджера.`;
 
 export const SUPPORT_REPLY_FAILED =
-  '⚠️ Не удалось отправить ответ — возможно, пользователь заблокировал бота.';
+  `⚠️ Не удалось отправить ответ — возможно, пользователь заблокировал бота.`;
+
+// ── Purchase admin notification ──
 
 export const PURCHASE_ADMIN_TEXT = (
   userName: string,
@@ -21,44 +78,28 @@ export const PURCHASE_ADMIN_TEXT = (
   planName: string,
   months: number,
   total: number,
-): string => `🛒 Заявка на покупку
+): string =>
+  `🛒 <b>Заявка на покупку</b>\n\n` +
+  `👤 <b>${escapeHtml(userName)}</b> · ${escapeHtml(userTag)}\n` +
+  `🆔 <code>${userId}</code>\n\n` +
+  `📦 Тариф: <b>${escapeHtml(planName)}</b>\n` +
+  `🗓 Срок: ${months} мес.\n` +
+  `💰 Сумма: <b>${total}₽</b>\n\n` +
+  `<i>↩️ Ответьте на это сообщение</i>`;
 
-👤 От: ${userName}
-🔖 Ник: ${userTag}
-🆔 ID: ${userId}
-
-📦 Тариф: ${planName}
-🗓 Срок: ${months} мес.
-💰 Сумма: ${total}₽`;
-
-export const SUPPORT_FROM_WEBAPP_ADMIN_TEXT = (
-  userName: string,
-  userTag: string,
-  userId: number,
-  message: string,
-): string => `📨 Обращение из Mini App
-
-👤 От: ${userName}
-🔖 Ник: ${userTag}
-🆔 ID: ${userId}
-
-📝 Сообщение:
-${message}`;
+// ── FAQ (used by Mini App) ──
 
 export const FAQ_ITEMS = [
   {
-    question: 'Как получить конфиг?',
-    answer: 'После оплаты бот автоматически отправит вам ссылку на конфигурацию. Она также будет доступна в разделе «Профиль».',
-    icon: '❓',
+    question: "Как получить конфиг?",
+    answer:
+      "После оплаты бот автоматически отправит вам ссылку на конфигурацию. Она также будет доступна в разделе «Профиль».",
+    icon: "❓",
   },
   {
-    question: 'Сколько устройств можно подключить?',
-    answer: 'Количество устройств зависит от выбранного тарифа: Персональная — 1, Дуо — 2, Семейная — до 6 устройств.',
-    icon: '📱',
-  },
-  {
-    question: 'Как продлить подписку?',
-    answer: 'Просто оформите новую подписку в разделе «Покупка». Срок действия будет добавлен к текущему.',
-    icon: '🔄',
+    question: "Как продлить подписку?",
+    answer:
+      "Просто оформите новую подписку в разделе «Покупка». Срок действия будет добавлен к текущему.",
+    icon: "🔄",
   },
 ] as const;

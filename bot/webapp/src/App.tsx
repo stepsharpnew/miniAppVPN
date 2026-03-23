@@ -63,7 +63,7 @@ export default function App() {
           <InstructionsPage />
         </div>
         <div style={activeTab === "support" ? visibleStyle : hiddenStyle}>
-          <SupportPage />
+          <SupportPage active={activeTab === "support"} />
         </div>
       </div>
       <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />

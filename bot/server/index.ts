@@ -3,11 +3,15 @@ import { Bot, GrammyError, InlineKeyboard, session } from "grammy";
 import { type WebAppPayload } from "../shared/plans";
 import {
   BRAND_NAME,
+  escapeHtml,
   PURCHASE_ADMIN_TEXT,
-  SUPPORT_ADMIN_HEADER,
-  SUPPORT_FROM_WEBAPP_ADMIN_TEXT,
+  SUPPORT_MEDIA_CAPTION_ADMIN,
+  SUPPORT_MEDIA_HEADER_ADMIN,
+  SUPPORT_NEW_REPLY_NOTIFICATION,
   SUPPORT_REPLY_FAILED,
-  SUPPORT_REPLY_PREFIX,
+  SUPPORT_TICKET_ADMIN,
+  SUPPORT_TICKET_SENT_USER,
+  SUPPORT_USER_TEXT_ADMIN,
 } from "../shared/texts";
 import {
   clearActiveDialog,
@@ -17,6 +21,8 @@ import {
   saveForwardedMessage,
   setActiveDialog,
 } from "./store";
+import { addMessage } from "./chat-store";
+import { createApiServer } from "./api";
 import { type MemeContext, type SessionData } from "./types";
 
 const botToken = process.env.BOT_TOKEN;
@@ -26,27 +32,35 @@ const webappUrl = process.env.WEBAPP_URL ?? "";
 if (!webappUrl)
   console.warn("⚠️ WEBAPP_URL не задан — кнопка Mini App не будет работать");
 
+const apiPort = parseInt(process.env.API_PORT ?? "3001", 10);
+
 const bot = new Bot<MemeContext>(botToken);
 
 const initialSession = (): SessionData => ({});
 bot.use(session({ initial: initialSession }));
 
-// /start — приветствие + кнопка открытия Mini App
+function webAppKeyboard() {
+  return new InlineKeyboard().webApp(`🚀 Открыть ${BRAND_NAME}`, webappUrl);
+}
+
+// ────────────────── /start ──────────────────
+
 bot.command("start", async (ctx) => {
   if (ctx.chat) clearActiveDialog(ctx.chat.id);
 
-  const keyboard = new InlineKeyboard().webApp(
-    `🚀 Открыть ${BRAND_NAME}`,
-    webappUrl,
-  );
-
   await ctx.reply(
-    `👋 Добро пожаловать в ${BRAND_NAME}!\n\nЗдесь ты можешь:\n• Оформить подписку на VPN\n• Посмотреть инструкции по настройке\n• Связаться с поддержкой\n\nНажми кнопку ниже 👇`,
-    { reply_markup: keyboard },
+    `👋 Добро пожаловать в <b>${BRAND_NAME}</b>!\n\n` +
+      `Здесь ты можешь:\n` +
+      `• Оформить подписку на VPN\n` +
+      `• Посмотреть инструкции по настройке\n` +
+      `• Связаться с поддержкой\n\n` +
+      `Нажми кнопку ниже 👇`,
+    { reply_markup: webAppKeyboard(), parse_mode: "HTML" },
   );
 });
 
-// --- Mini App web_app_data ---
+// ────────────────── Mini App web_app_data ──────────────────
+
 bot.on("message:web_app_data", async (ctx) => {
   let payload: WebAppPayload;
   try {
@@ -83,6 +97,7 @@ bot.on("message:web_app_data", async (ctx) => {
 
     try {
       const sent = await ctx.api.sendMessage(chatId, adminText, {
+        parse_mode: "HTML",
         ...(topicId !== undefined ? { message_thread_id: topicId } : {}),
       });
       if (userChatId) {
@@ -90,7 +105,11 @@ bot.on("message:web_app_data", async (ctx) => {
         setActiveDialog(userChatId, { chatId, topicId });
       }
       await ctx.reply(
-        `✅ Заявка на «${payload.planName}» (${payload.months} мес.) отправлена!\n\n💰 Сумма: ${payload.total}₽\n\nМенеджер скоро свяжется с тобой.`,
+        `✅ Заявка на «<b>${escapeHtml(payload.planName)}</b>» ` +
+          `(${payload.months} мес.) отправлена!\n\n` +
+          `💰 Сумма: <b>${payload.total}₽</b>\n\n` +
+          `Менеджер скоро свяжется с тобой.`,
+        { parse_mode: "HTML" },
       );
     } catch (error) {
       console.error("Ошибка отправки заявки из Mini App:", error);
@@ -104,7 +123,7 @@ bot.on("message:web_app_data", async (ctx) => {
     }
 
     const { chatId, topicId } = resolveAdminChat(rawSupportChat);
-    const adminText = SUPPORT_FROM_WEBAPP_ADMIN_TEXT(
+    const adminText = SUPPORT_TICKET_ADMIN(
       userName,
       userTag,
       userId,
@@ -113,15 +132,19 @@ bot.on("message:web_app_data", async (ctx) => {
 
     try {
       const sent = await ctx.api.sendMessage(chatId, adminText, {
+        parse_mode: "HTML",
         ...(topicId !== undefined ? { message_thread_id: topicId } : {}),
       });
       if (userChatId) {
         saveForwardedMessage(chatId, sent.message_id, userChatId);
         setActiveDialog(userChatId, { chatId, topicId });
+        addMessage(userChatId, {
+          from: "user",
+          type: "text",
+          text: payload.message,
+        });
       }
-      await ctx.reply(
-        "✅ Сообщение отправлено в поддержку! Менеджер скоро ответит.",
-      );
+      await ctx.reply(SUPPORT_TICKET_SENT_USER, { parse_mode: "HTML" });
     } catch (error) {
       console.error("Ошибка отправки поддержки из Mini App:", error);
       await ctx.reply("⚠️ Не удалось отправить сообщение. Попробуй позже.");
@@ -129,14 +152,14 @@ bot.on("message:web_app_data", async (ctx) => {
   }
 });
 
-// --- Админ-чаты ---
+// ────────────────── Admin → User ──────────────────
+
 const supportAdminChatRaw = process.env.ADMIN_CHAT_ID_SUPPORT ?? "";
 const vipAdminChatRaw = process.env.ADMIN_CHAT_ID_BUY ?? "";
 const adminChats = [supportAdminChatRaw, vipAdminChatRaw]
   .filter((v) => v.length > 0)
   .map((v) => resolveAdminChat(v));
 
-// Админ → юзер: ответ на пересланное сообщение
 if (adminChats.length > 0) {
   bot.on("message", async (ctx, next) => {
     const chatIdStr = ctx.chat.id.toString();
@@ -160,25 +183,50 @@ if (adminChats.length > 0) {
 
     setActiveDialog(replyUserChatId, currentAdminChat);
 
+    // Store admin reply in chat store (Mini App reads via polling)
+    if (ctx.message.text) {
+      addMessage(replyUserChatId, {
+        from: "support",
+        type: "text",
+        text: ctx.message.text,
+      });
+    } else if (ctx.message.photo && ctx.message.photo.length > 0) {
+      addMessage(replyUserChatId, {
+        from: "support",
+        type: "photo",
+        fileId: ctx.message.photo[ctx.message.photo.length - 1].file_id,
+        text: ctx.message.caption,
+      });
+    } else if (ctx.message.document) {
+      addMessage(replyUserChatId, {
+        from: "support",
+        type: "document",
+        fileId: ctx.message.document.file_id,
+        fileName: ctx.message.document.file_name,
+        text: ctx.message.caption,
+      });
+    }
+
+    // Send notification to user via bot message
     try {
-      if (ctx.message.text) {
-        await ctx.api.sendMessage(replyUserChatId, ctx.message.text);
-      } else {
-        await ctx.api.sendMessage(replyUserChatId, SUPPORT_REPLY_PREFIX);
-        await ctx.api.copyMessage(
-          replyUserChatId,
-          ctx.chat.id,
-          ctx.message.message_id,
-        );
-      }
+      const keyboard = new InlineKeyboard().webApp(
+        "💬 Открыть чат",
+        webappUrl,
+      );
+      await ctx.api.sendMessage(
+        replyUserChatId,
+        SUPPORT_NEW_REPLY_NOTIFICATION,
+        { parse_mode: "HTML", reply_markup: keyboard },
+      );
     } catch (error) {
-      console.error("Ошибка отправки ответа юзеру:", error);
+      console.error("Ошибка отправки уведомления:", error);
       await ctx.reply(SUPPORT_REPLY_FAILED);
     }
   });
 }
 
-// Юзер → админ: свободный ответ при активном диалоге
+// ────────────────── User → Admin (fallback: direct bot messages) ──────────────────
+
 bot.on("message", async (ctx) => {
   const userChatId = ctx.chat.id;
   const dialog = getActiveDialog(userChatId);
@@ -192,18 +240,68 @@ bot.on("message", async (ctx) => {
 
   try {
     if (ctx.message.text) {
-      const header = SUPPORT_ADMIN_HEADER(userName, userTag, userId);
-      const sent = await ctx.api.sendMessage(
+      const text = SUPPORT_USER_TEXT_ADMIN(
+        userName,
+        userTag,
+        userId,
+        ctx.message.text,
+      );
+      const sent = await ctx.api.sendMessage(dialog.chatId, text, {
+        parse_mode: "HTML",
+        ...topicOpts,
+      });
+      saveForwardedMessage(dialog.chatId, sent.message_id, userChatId);
+      addMessage(userChatId, {
+        from: "user",
+        type: "text",
+        text: ctx.message.text,
+      });
+    } else if (ctx.message.photo && ctx.message.photo.length > 0) {
+      const fileId =
+        ctx.message.photo[ctx.message.photo.length - 1].file_id;
+      const caption = SUPPORT_MEDIA_CAPTION_ADMIN(
+        userName,
+        userTag,
+        userId,
+        ctx.message.caption,
+      );
+      const sent = await ctx.api.sendPhoto(dialog.chatId, fileId, {
+        caption,
+        parse_mode: "HTML",
+        ...topicOpts,
+      });
+      saveForwardedMessage(dialog.chatId, sent.message_id, userChatId);
+      addMessage(userChatId, {
+        from: "user",
+        type: "photo",
+        text: ctx.message.caption,
+      });
+    } else if (ctx.message.document) {
+      const caption = SUPPORT_MEDIA_CAPTION_ADMIN(
+        userName,
+        userTag,
+        userId,
+        ctx.message.caption,
+      );
+      const sent = await ctx.api.sendDocument(
         dialog.chatId,
-        `${header}\n${ctx.message.text}`,
-        topicOpts,
+        ctx.message.document.file_id,
+        { caption, parse_mode: "HTML", ...topicOpts },
       );
       saveForwardedMessage(dialog.chatId, sent.message_id, userChatId);
+      addMessage(userChatId, {
+        from: "user",
+        type: "document",
+        fileName: ctx.message.document.file_name,
+        text: ctx.message.caption,
+      });
     } else {
-      const header = SUPPORT_ADMIN_HEADER(userName, userTag, userId);
-      const sent = await ctx.api.sendMessage(dialog.chatId, header, topicOpts);
+      const header = SUPPORT_MEDIA_HEADER_ADMIN(userName, userTag, userId);
+      const sent = await ctx.api.sendMessage(dialog.chatId, header, {
+        parse_mode: "HTML",
+        ...topicOpts,
+      });
       saveForwardedMessage(dialog.chatId, sent.message_id, userChatId);
-
       const copied = await ctx.api.copyMessage(
         dialog.chatId,
         userChatId,
@@ -217,6 +315,8 @@ bot.on("message", async (ctx) => {
   }
 });
 
+// ────────────────── Error handler ──────────────────
+
 bot.catch((err) => {
   if (
     err.error instanceof GrammyError &&
@@ -225,6 +325,13 @@ bot.catch((err) => {
     return;
   }
   console.error("Бот словил ошибку:", err.error);
+});
+
+// ────────────────── Start ──────────────────
+
+const apiServer = createApiServer(bot.api, botToken);
+apiServer.listen(apiPort, () => {
+  console.log(`API сервер запущен на порту ${apiPort}`);
 });
 
 bot.start();

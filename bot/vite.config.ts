@@ -13,6 +13,10 @@ export default defineConfig({
     host: true,
     allowedHosts: true,
     proxy: {
+      "/api/support": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
       "/api/vpn-proxy": {
         target: "https://193-108-112-87.nip.io",
         changeOrigin: true,

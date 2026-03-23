@@ -33,3 +33,13 @@ export interface WebAppSupportPayload {
 }
 
 export type WebAppPayload = WebAppPurchasePayload | WebAppSupportPayload;
+
+export interface ChatMessage {
+  id: string;
+  from: "user" | "support";
+  type: "text" | "photo" | "document";
+  text?: string;
+  fileId?: string;
+  fileName?: string;
+  timestamp: number;
+}
