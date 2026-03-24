@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   # ── Telegram Bot ──────────────────────────────────────────────
@@ -10,75 +10,87 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    depends_on:
-      postgres:
-        condition: service_healthy
+    expose:
+      - "3001"
     networks:
       - meme-net
 
   # ── AmneziaWG Backend (VPN management API + Web UI) ──────────
-  amneziawg:
-    build:
-      context: ./amneziawg-web-ui
-      dockerfile: Dockerfile
-    container_name: amneziawg-api
+  # amneziawg:
+  #   build:
+  #     context: ./amneziawg-web-ui
+  #     dockerfile: Dockerfile
+  #   container_name: amneziawg-api
+  #   restart: unless-stopped
+  #   privileged: true
+  #   cap_add:
+  #     - NET_ADMIN
+  #     - SYS_MODULE
+  #   devices:
+  #     - /dev/net/tun:/dev/net/tun
+  #   sysctls:
+  #     - net.ipv4.ip_forward=1
+  #   ports:
+  #     # Веб-UI Amnezia: снаружи 8443 → nginx внутри контейнера (NGINX_PORT)
+  #     - "${AMNEZIAWG_HTTPS_PORT:-8443}:443"
+  #     - "${VPN_PORT_1:-43457}:${VPN_PORT_1:-43457}/udp"
+  #     - "${VPN_PORT_2:-45297}:${VPN_PORT_2:-45297}/udp"
+  #     - "${VPN_PORT_3:-43724}:${VPN_PORT_3:-43724}/udp"
+  #     - "${VPN_PORT_4:-47295}:${VPN_PORT_4:-47295}/udp"
+  #   volumes:
+  #     - /lib/modules:/lib/modules
+  #     - /etc/amnezia:/etc/amnezia
+  #   environment:
+  #     - NGINX_PORT=${NGINX_PORT:-443}
+  #     - NGINX_USER=${NGINX_USER}
+  #     - NGINX_PASSWORD=${NGINX_PASSWORD}
+  #     - SSL_EMAIL=${SSL_EMAIL}
+  #     - SSL_DOMAIN=${SSL_DOMAIN}
+  #     - DEFAULT_PORT=${AMNEZIAWG_DEFAULT_PORT:-51820}
+  #     - DEFAULT_MTU=${AMNEZIAWG_MTU:-1420}
+  #     - DEFAULT_SUBNET=${AMNEZIAWG_SUBNET:-10.0.0.0/24}
+  #     - DEFAULT_DNS=${AMNEZIAWG_DNS:-8.8.8.8,1.1.1.1}
+  #     - AUTO_START_SERVERS=${AMNEZIAWG_AUTO_START:-true}
+  #   networks:
+  #     - meme-net
+
+  nginx:
+    image: nginx:stable-alpine
+    container_name: edge-nginx
     restart: unless-stopped
-    privileged: true
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    sysctls:
-      - net.ipv4.ip_forward=1
     ports:
       - "80:80"
       - "443:443"
-      - "${VPN_PORT_1:-43457}:${VPN_PORT_1:-43457}/udp"
-      - "${VPN_PORT_2:-45297}:${VPN_PORT_2:-45297}/udp"
-      - "${VPN_PORT_3:-43724}:${VPN_PORT_3:-43724}/udp"
-      - "${VPN_PORT_4:-47295}:${VPN_PORT_4:-47295}/udp"
     volumes:
-      - /lib/modules:/lib/modules
-      - /etc/amnezia:/etc/amnezia
-    environment:
-      - NGINX_PORT=${NGINX_PORT:-443}
-      - NGINX_USER=${NGINX_USER}
-      - NGINX_PASSWORD=${NGINX_PASSWORD}
-      - SSL_EMAIL=${SSL_EMAIL}
-      - SSL_DOMAIN=${SSL_DOMAIN}
-      - DEFAULT_PORT=${AMNEZIAWG_DEFAULT_PORT:-51820}
-      - DEFAULT_MTU=${AMNEZIAWG_MTU:-1420}
-      - DEFAULT_SUBNET=${AMNEZIAWG_SUBNET:-10.0.0.0/24}
-      - DEFAULT_DNS=${AMNEZIAWG_DNS:-8.8.8.8,1.1.1.1}
-      - AUTO_START_SERVERS=${AMNEZIAWG_AUTO_START:-true}
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx-certs:/etc/nginx/certs:ro
+      - ./bot/webapp/dist:/usr/share/nginx/miniapp:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      - bot
     networks:
       - meme-net
 
   # ── PostgreSQL ────────────────────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
-    container_name: meme-postgres
-    restart: unless-stopped
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-meme}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-meme_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-meme_db}
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-meme} -d ${POSTGRES_DB:-meme_db}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    networks:
-      - meme-net
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: meme-postgres
+  #   restart: unless-stopped
+  #   ports:
+  #     - "${POSTGRES_PORT:-5432}:5432"
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER:-meme}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-meme_secret}
+  #     POSTGRES_DB: ${POSTGRES_DB:-meme_db}
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-meme} -d ${POSTGRES_DB:-meme_db}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 10s
+  #   networks:
+  #     - meme-net
 
 volumes:
   postgres-data:
