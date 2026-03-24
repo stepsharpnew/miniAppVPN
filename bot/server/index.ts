@@ -28,9 +28,28 @@ import { type MemeContext, type SessionData } from "./types";
 const botToken = process.env.BOT_TOKEN;
 if (!botToken) throw new Error("BOT_TOKEN is not set");
 
-const webappUrl = process.env.WEBAPP_URL ?? "";
-if (!webappUrl)
+const webappUrl = (process.env.WEBAPP_URL ?? "").trim();
+
+/** Telegram принимает web_app-кнопку только с валидным https:// URL; иначе sendMessage падает без ответа пользователю. */
+function resolvedMiniAppUrl(): string | undefined {
+  if (!webappUrl) return undefined;
+  try {
+    const u = new URL(webappUrl);
+    if (u.protocol !== "https:") return undefined;
+    return u.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+const miniAppHttpsUrl = resolvedMiniAppUrl();
+if (!webappUrl) {
   console.warn("⚠️ WEBAPP_URL не задан — кнопка Mini App не будет работать");
+} else if (!miniAppHttpsUrl) {
+  console.warn(
+    "⚠️ WEBAPP_URL должен быть полным https:// URL (как в BotFather), иначе Telegram отклонит кнопку приложения",
+  );
+}
 
 const apiPort = parseInt(process.env.API_PORT ?? "3001", 10);
 
@@ -39,8 +58,10 @@ const bot = new Bot<MemeContext>(botToken);
 const initialSession = (): SessionData => ({});
 bot.use(session({ initial: initialSession }));
 
-function webAppKeyboard() {
-  return new InlineKeyboard().webApp(`🚀 Открыть ${BRAND_NAME}`, webappUrl);
+function webAppKeyboard(buttonText: string) {
+  const url = resolvedMiniAppUrl();
+  if (!url) return undefined;
+  return new InlineKeyboard().webApp(buttonText, url);
 }
 
 // ────────────────── /start ──────────────────
@@ -48,15 +69,25 @@ function webAppKeyboard() {
 bot.command("start", async (ctx) => {
   if (ctx.chat) clearActiveDialog(ctx.chat.id);
 
-  await ctx.reply(
+  const openKb = webAppKeyboard(`🚀 Открыть ${BRAND_NAME}`);
+  let text =
     `👋 Добро пожаловать в <b>${BRAND_NAME}</b>!\n\n` +
-      `Здесь ты можешь:\n` +
-      `• Оформить подписку на VPN\n` +
-      `• Посмотреть инструкции по настройке\n` +
-      `• Связаться с поддержкой\n\n` +
-      `Нажми кнопку ниже 👇`,
-    { reply_markup: webAppKeyboard(), parse_mode: "HTML" },
-  );
+    `Здесь ты можешь:\n` +
+    `• Оформить подписку на VPN\n` +
+    `• Посмотреть инструкции по настройке\n` +
+    `• Связаться с поддержкой\n\n`;
+
+  if (openKb) {
+    text += "Нажми кнопку ниже 👇";
+  } else {
+    text +=
+      "⚠️ Кнопка приложения сейчас недоступна: укажи в настройках бота переменную <code>WEBAPP_URL</code> — полный адрес Mini App с <b>https://</b> (тот же, что в BotFather → Bot Settings → Menu Button).";
+  }
+
+  await ctx.reply(text, {
+    parse_mode: "HTML",
+    ...(openKb ? { reply_markup: openKb } : {}),
+  });
 });
 
 // ────────────────── Mini App web_app_data ──────────────────
@@ -209,15 +240,11 @@ if (adminChats.length > 0) {
 
     // Send notification to user via bot message
     try {
-      const keyboard = new InlineKeyboard().webApp(
-        "💬 Открыть чат",
-        webappUrl,
-      );
-      await ctx.api.sendMessage(
-        replyUserChatId,
-        SUPPORT_NEW_REPLY_NOTIFICATION,
-        { parse_mode: "HTML", reply_markup: keyboard },
-      );
+      const keyboard = webAppKeyboard("💬 Открыть чат");
+      await ctx.api.sendMessage(replyUserChatId, SUPPORT_NEW_REPLY_NOTIFICATION, {
+        parse_mode: "HTML",
+        ...(keyboard ? { reply_markup: keyboard } : {}),
+      });
     } catch (error) {
       console.error("Ошибка отправки уведомления:", error);
       await ctx.reply(SUPPORT_REPLY_FAILED);
@@ -334,5 +361,26 @@ apiServer.listen(apiPort, () => {
   console.log(`API сервер запущен на порту ${apiPort}`);
 });
 
-bot.start();
-console.log(`${BRAND_NAME} бот запущен 🚀`);
+void (async () => {
+  const url = resolvedMiniAppUrl();
+  if (url) {
+    try {
+      await bot.api.setChatMenuButton({
+        menu_button: {
+          type: "web_app",
+          text: `Открыть ${BRAND_NAME}`,
+          web_app: { url },
+        },
+      });
+    } catch (e) {
+      console.warn("Не удалось установить кнопку меню Mini App:", e);
+    }
+  }
+
+  await bot.api.setMyCommands([
+    { command: "start", description: "О сервисе и запуск приложения" },
+  ]);
+
+  await bot.start();
+  console.log(`${BRAND_NAME} бот запущен 🚀`);
+})();

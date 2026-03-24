@@ -208,7 +208,13 @@ export function createApiServer(api: Api, botToken: string) {
 
   app.get("/api/support/file/:fileId", auth, async (req, res) => {
     try {
-      const tgFile = await api.getFile(req.params.fileId);
+      const raw = req.params.fileId;
+      const fileId = typeof raw === "string" ? raw : raw?.[0];
+      if (!fileId) {
+        res.status(400).json({ error: "Missing file id" });
+        return;
+      }
+      const tgFile = await api.getFile(fileId);
       const url = `https://api.telegram.org/file/bot${botToken}/${tgFile.file_path}`;
 
       https
