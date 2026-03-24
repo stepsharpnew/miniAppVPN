@@ -6,6 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "bot:start": "ts-node server/index.ts",
+    "bot:build": "tsc -p tsconfig.json",
     "bot:check": "tsc --project tsconfig.json --noEmit",
     "webapp:dev": "vite",
     "webapp:build": "tsc --project tsconfig.webapp.json --noEmit && vite build",
