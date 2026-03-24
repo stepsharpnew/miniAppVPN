@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import WebApp from "@twa-dev/sdk";
 import { Accordion } from "../components/Accordion";
 import { FAQ_ITEMS } from "../../../shared/texts";
@@ -226,8 +227,10 @@ export function SupportPage({ active = false }: SupportPageProps) {
   }
 
   // ── Chat view ──
+  // Портал в body: иначе position:fixed привязывается к предку с overflow (App),
+  // и в Telegram/WebKit ломается раскладка (поле ввода «уезжает» вверх).
 
-  return (
+  const chatTree = (
     <div className={styles.chatContainer}>
       <div className={styles.chatHeader}>
         <div className={styles.chatAvatar}>🛡️</div>
@@ -293,6 +296,8 @@ export function SupportPage({ active = false }: SupportPageProps) {
       </div>
     </div>
   );
+
+  return <>{active && createPortal(chatTree, document.body)}</>;
 }
 
 const BRAND_NAME = "MEME VPN";
