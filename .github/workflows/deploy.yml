@@ -61,10 +61,17 @@ jobs:
             --exclude="__pycache__" \
             ./ ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }}:~/meme_bot/
 
+      # DOTENV via echo '...' breaks on quotes/newlines in values. Pipe from runner env instead.
       - name: Create .env on server
+        env:
+          DOTENV_CONTENT: ${{ secrets.DOTENV }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
-            "echo '${{ secrets.DOTENV }}' > ~/meme_bot/.env"
+          if [ -z "${DOTENV_CONTENT}" ]; then
+            echo "::error::Secret DOTENV is empty or not set (Repo → Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+          printf '%s\n' "$DOTENV_CONTENT" | ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
+            "tee ~/meme_bot/.env ~/meme_bot/bot/.env > /dev/null"
 
       - name: Build and restart services
         run: |
