@@ -63,7 +63,7 @@ services:
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx-certs:/etc/nginx/certs:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro # ← вместо ./nginx-certs
       - ./bot/webapp/dist:/usr/share/nginx/miniapp:ro
     depends_on:
       - bot
