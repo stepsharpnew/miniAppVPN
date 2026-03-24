@@ -25,7 +25,7 @@ import { addMessage } from "./chat-store";
 import { createApiServer } from "./api";
 import { type MemeContext, type SessionData } from "./types";
 
-const botToken = process.env.BOT_TOKEN;
+const botToken = (process.env.BOT_TOKEN ?? "").trim();
 if (!botToken) throw new Error("BOT_TOKEN is not set");
 
 const webappUrl = (process.env.WEBAPP_URL ?? "").trim();
@@ -357,11 +357,24 @@ bot.catch((err) => {
 // ────────────────── Start ──────────────────
 
 const apiServer = createApiServer(bot.api, botToken);
-apiServer.listen(apiPort, () => {
-  console.log(`API сервер запущен на порту ${apiPort}`);
-});
 
 void (async () => {
+  try {
+    await bot.api.getMe();
+  } catch (e) {
+    if (e instanceof GrammyError && e.error_code === 401) {
+      console.error(
+        "Telegram вернул 401: BOT_TOKEN неверный или отозван. Проверь токен в @BotFather, что в .env нет кавычек и лишних пробелов, и что compose подключает тот же env к сервису bot.",
+      );
+      process.exit(1);
+    }
+    throw e;
+  }
+
+  apiServer.listen(apiPort, () => {
+    console.log(`API сервер запущен на порту ${apiPort}`);
+  });
+
   const url = resolvedMiniAppUrl();
   if (url) {
     try {
@@ -377,9 +390,13 @@ void (async () => {
     }
   }
 
-  await bot.api.setMyCommands([
-    { command: "start", description: "О сервисе и запуск приложения" },
-  ]);
+  try {
+    await bot.api.setMyCommands([
+      { command: "start", description: "О сервисе и запуск приложения" },
+    ]);
+  } catch (e) {
+    console.warn("Не удалось установить команды бота:", e);
+  }
 
   await bot.start();
   console.log(`${BRAND_NAME} бот запущен 🚀`);
