@@ -25,7 +25,6 @@ const hiddenStyle: React.CSSProperties = {
 const visibleStyle: React.CSSProperties = {
   ...pageStyle,
   opacity: 1,
-  transform: "translateY(0)",
 };
 
 export default function App() {
