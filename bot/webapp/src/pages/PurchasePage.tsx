@@ -1,6 +1,6 @@
 import WebApp from "@twa-dev/sdk";
 import QRCode from "qrcode";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { PRICING, type PricingOption } from "../../../shared/plans";
 import { Header } from "../components/Header";
 import { PriceList } from "../components/PriceList";
@@ -8,27 +8,9 @@ import { QrModal } from "../components/QrModal";
 import { useMainButton } from "../hooks/useMainButton";
 import { useVpnConfig } from "../hooks/useVpnConfig";
 
-// Wipe leftover cache from the old (pre-payment) version
 try { localStorage.removeItem("vpn_config"); } catch { /* ok */ }
 
-type PaymentStatus = "idle" | "loading" | "polling" | "error";
-
-const POLL_INTERVAL = 1500;
-const POLL_MAX_ATTEMPTS = 20;
-
-async function pollConfig(): Promise<string> {
-  for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
-    const res = await fetch("/api/payments/config", {
-      headers: { "X-Telegram-Init-Data": WebApp.initData },
-    });
-    if (res.ok) {
-      const { config } = await res.json();
-      return config as string;
-    }
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL));
-  }
-  throw new Error("Конфиг не готов. Попробуйте позже.");
-}
+type PaymentStatus = "idle" | "loading" | "provisioning" | "error";
 
 interface PurchasePageProps {
   active: boolean;
@@ -39,25 +21,57 @@ export function PurchasePage({ active }: PurchasePageProps) {
   const [status, setStatus] = useState<PaymentStatus>("idle");
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [configText, setConfigText] = useState("");
-  const abortRef = useRef(false);
   const { save: saveConfig } = useVpnConfig();
 
-  const showConfig = useCallback(async (config: string) => {
-    saveConfig(config);
-    setConfigText(config);
-    const dataUrl = await QRCode.toDataURL(config, {
-      width: 260,
-      margin: 2,
-      color: { dark: "#000000", light: "#FFFFFF" },
-    });
-    setQrDataUrl(dataUrl);
-  }, [saveConfig]);
+  const showConfig = useCallback(
+    async (config: string) => {
+      saveConfig(config);
+      setConfigText(config);
+      const dataUrl = await QRCode.toDataURL(config, {
+        width: 260,
+        margin: 2,
+        color: { dark: "#000000", light: "#FFFFFF" },
+      });
+      setQrDataUrl(dataUrl);
+    },
+    [saveConfig],
+  );
+
+  const provisionConfig = useCallback(
+    async (durationCode: string) => {
+      setStatus("provisioning");
+      try {
+        const res = await fetch("/api/payments/provision", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Telegram-Init-Data": WebApp.initData,
+          },
+          body: JSON.stringify({ durationCode }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`Ошибка получения конфига: ${res.status}`);
+        }
+
+        const { config } = await res.json();
+        await showConfig(config);
+        setStatus("idle");
+      } catch (err) {
+        console.error("provision error:", err);
+        WebApp.showAlert(
+          "Оплата прошла, но не удалось получить конфиг. Попробуйте открыть приложение позже — конфиг появится в профиле.",
+        );
+        setStatus("error");
+      }
+    },
+    [showConfig],
+  );
 
   const handleClick = useCallback(async () => {
-    if (status === "loading" || status === "polling") return;
+    if (status === "loading" || status === "provisioning") return;
 
     setStatus("loading");
-    abortRef.current = false;
 
     try {
       WebApp.MainButton.showProgress(false);
@@ -78,28 +92,8 @@ export function PurchasePage({ active }: PurchasePageProps) {
       WebApp.MainButton.hideProgress();
 
       WebApp.openInvoice(invoiceLink, (invoiceStatus: string) => {
-        if (invoiceStatus === "paid") {
-          setStatus("polling");
-          WebApp.MainButton.showProgress(false);
-
-          pollConfig()
-            .then((config) => {
-              if (!abortRef.current) {
-                showConfig(config);
-                setStatus("idle");
-              }
-            })
-            .catch((err) => {
-              if (!abortRef.current) {
-                WebApp.showAlert(
-                  err instanceof Error ? err.message : "Ошибка получения конфига",
-                );
-                setStatus("error");
-              }
-            })
-            .finally(() => {
-              WebApp.MainButton.hideProgress();
-            });
+        if (invoiceStatus === "paid" || invoiceStatus === "pending") {
+          provisionConfig(selected.durationCode);
         } else if (invoiceStatus === "cancelled") {
           setStatus("idle");
         } else {
@@ -114,10 +108,10 @@ export function PurchasePage({ active }: PurchasePageProps) {
     } finally {
       WebApp.MainButton.hideProgress();
     }
-  }, [status, selected, showConfig]);
+  }, [status, selected, provisionConfig]);
 
   const buttonText =
-    status === "loading" || status === "polling"
+    status === "loading" || status === "provisioning"
       ? "ЗАГРУЗКА..."
       : `КУПИТЬ ЗА ${selected.price}₽`;
 
@@ -142,14 +136,13 @@ export function PurchasePage({ active }: PurchasePageProps) {
           }}
         />
 
-        {status === "polling" && (
+        {status === "provisioning" && (
           <p style={pollingText}>Получаем ваш конфиг...</p>
         )}
 
         {status === "error" && (
           <p style={errorText}>
-            Что-то пошло не так. Попробуйте ещё раз или обратитесь в
-            поддержку.
+            Оплата прошла. Конфиг появится в профиле или в чате с ботом.
           </p>
         )}
       </section>
@@ -182,7 +175,7 @@ const pollingText: React.CSSProperties = {
 };
 
 const errorText: React.CSSProperties = {
-  color: "#FF6B6B",
+  color: "#AAAACC",
   fontSize: 14,
   textAlign: "center",
   marginTop: 16,

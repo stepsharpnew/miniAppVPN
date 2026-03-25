@@ -13,7 +13,8 @@ import {
   SUPPORT_USER_TEXT_ADMIN,
 } from "../shared/texts";
 import { type InvoicePayload, PRICING } from "../shared/plans";
-import { getConfig } from "./config-store";
+import { getConfig, saveConfig } from "./config-store";
+import { provisionVpnClient } from "./vpn";
 
 interface TelegramUser {
   id: number;
@@ -235,7 +236,7 @@ export function createApiServer(api: Api, botToken: string) {
     }
   });
 
-  // ── Poll config after successful payment ──
+  // ── Get or provision VPN config after payment ──
 
   app.get("/api/payments/config", auth, (req, res) => {
     const user = getUser(req);
@@ -245,6 +246,28 @@ export function createApiServer(api: Api, botToken: string) {
       return;
     }
     res.json({ config });
+  });
+
+  app.post("/api/payments/provision", auth, async (req, res) => {
+    const user = getUser(req);
+
+    const existing = getConfig(user.id);
+    if (existing) {
+      res.json({ config: existing });
+      return;
+    }
+
+    const clientName = user.username || `tg_${user.id}`;
+    const { durationCode } = req.body ?? {};
+
+    try {
+      const config = await provisionVpnClient(clientName, durationCode || "1m");
+      saveConfig(user.id, config);
+      res.json({ config });
+    } catch (err) {
+      console.error("Provision from Mini App failed:", err);
+      res.status(502).json({ error: "VPN API unavailable" });
+    }
   });
 
   // ── Create invoice link for Telegram Payments ──
