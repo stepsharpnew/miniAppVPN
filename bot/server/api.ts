@@ -13,6 +13,7 @@ import {
   SUPPORT_USER_TEXT_ADMIN,
 } from "../shared/texts";
 import { type InvoicePayload, PRICING } from "../shared/plans";
+import { getConfig } from "./config-store";
 
 interface TelegramUser {
   id: number;
@@ -234,6 +235,18 @@ export function createApiServer(api: Api, botToken: string) {
     }
   });
 
+  // ── Poll config after successful payment ──
+
+  app.get("/api/payments/config", auth, (req, res) => {
+    const user = getUser(req);
+    const config = getConfig(user.id);
+    if (!config) {
+      res.status(404).json({ error: "Config not ready" });
+      return;
+    }
+    res.json({ config });
+  });
+
   // ── Create invoice link for Telegram Payments ──
 
   const paymentToken = (process.env.PAYMENT_TOKEN ?? "").trim();
@@ -252,7 +265,7 @@ export function createApiServer(api: Api, botToken: string) {
     }
 
     const payload: InvoicePayload = {
-      type: "vpn",
+      type: plan.durationCode === "test" ? "test" : "vpn",
       months: plan.months,
       dc: plan.durationCode,
     };

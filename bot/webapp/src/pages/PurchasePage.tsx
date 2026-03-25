@@ -1,11 +1,30 @@
 import WebApp from "@twa-dev/sdk";
-import { useCallback, useState } from "react";
+import QRCode from "qrcode";
+import { useCallback, useRef, useState } from "react";
 import { PRICING, type PricingOption } from "../../../shared/plans";
 import { Header } from "../components/Header";
 import { PriceList } from "../components/PriceList";
+import { QrModal } from "../components/QrModal";
 import { useMainButton } from "../hooks/useMainButton";
 
-type PaymentStatus = "idle" | "loading" | "paid" | "error";
+type PaymentStatus = "idle" | "loading" | "polling" | "error";
+
+const POLL_INTERVAL = 1500;
+const POLL_MAX_ATTEMPTS = 20;
+
+async function pollConfig(): Promise<string> {
+  for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
+    const res = await fetch("/api/payments/config", {
+      headers: { "X-Telegram-Init-Data": WebApp.initData },
+    });
+    if (res.ok) {
+      const { config } = await res.json();
+      return config as string;
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+  }
+  throw new Error("Конфиг не готов. Попробуйте позже.");
+}
 
 interface PurchasePageProps {
   active: boolean;
@@ -14,11 +33,26 @@ interface PurchasePageProps {
 export function PurchasePage({ active }: PurchasePageProps) {
   const [selected, setSelected] = useState<PricingOption>(PRICING[0]);
   const [status, setStatus] = useState<PaymentStatus>("idle");
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [configText, setConfigText] = useState("");
+  const abortRef = useRef(false);
+
+  const showConfig = useCallback(async (config: string) => {
+    setConfigText(config);
+    const dataUrl = await QRCode.toDataURL(config, {
+      width: 260,
+      margin: 2,
+      color: { dark: "#000000", light: "#FFFFFF" },
+    });
+    setQrDataUrl(dataUrl);
+  }, []);
 
   const handleClick = useCallback(async () => {
-    if (status === "loading") return;
+    if (status === "loading" || status === "polling") return;
 
     setStatus("loading");
+    abortRef.current = false;
+
     try {
       WebApp.MainButton.showProgress(false);
 
@@ -39,7 +73,27 @@ export function PurchasePage({ active }: PurchasePageProps) {
 
       WebApp.openInvoice(invoiceLink, (invoiceStatus: string) => {
         if (invoiceStatus === "paid") {
-          setStatus("paid");
+          setStatus("polling");
+          WebApp.MainButton.showProgress(false);
+
+          pollConfig()
+            .then((config) => {
+              if (!abortRef.current) {
+                showConfig(config);
+                setStatus("idle");
+              }
+            })
+            .catch((err) => {
+              if (!abortRef.current) {
+                WebApp.showAlert(
+                  err instanceof Error ? err.message : "Ошибка получения конфига",
+                );
+                setStatus("error");
+              }
+            })
+            .finally(() => {
+              WebApp.MainButton.hideProgress();
+            });
         } else if (invoiceStatus === "cancelled") {
           setStatus("idle");
         } else {
@@ -54,19 +108,17 @@ export function PurchasePage({ active }: PurchasePageProps) {
     } finally {
       WebApp.MainButton.hideProgress();
     }
-  }, [status, selected]);
+  }, [status, selected, showConfig]);
 
   const buttonText =
-    status === "loading"
+    status === "loading" || status === "polling"
       ? "ЗАГРУЗКА..."
-      : status === "paid"
-        ? "✅ ОПЛАЧЕНО"
-        : `КУПИТЬ ЗА ${selected.price}₽`;
+      : `КУПИТЬ ЗА ${selected.price}₽`;
 
   useMainButton({
     text: buttonText,
     onClick: handleClick,
-    visible: active && status !== "paid",
+    visible: active,
   });
 
   return (
@@ -74,30 +126,18 @@ export function PurchasePage({ active }: PurchasePageProps) {
       <Header />
 
       <section style={{ padding: "0 16px 24px" }}>
-        {status === "paid" ? (
-          <div style={successBlock}>
-            <div style={{ fontSize: 48 }}>🎉</div>
-            <h3 style={{ margin: "12px 0 8px", color: "#FFFFFF" }}>
-              Оплата прошла успешно!
-            </h3>
-            <p style={{ color: "#AAAACC", lineHeight: 1.5 }}>
-              Ваш VPN-конфиг отправлен в чат с ботом.
-              <br />
-              Откройте чат, чтобы скопировать конфиг.
-            </p>
-          </div>
-        ) : (
-          <>
-            <h3 style={sectionTitle}>Тариф</h3>
-            <PriceList
-              options={PRICING}
-              selectedMonths={selected.months}
-              onSelect={(m) => {
-                const opt = PRICING.find((p) => p.months === m);
-                if (opt) setSelected(opt);
-              }}
-            />
-          </>
+        <h3 style={sectionTitle}>Тариф</h3>
+        <PriceList
+          options={PRICING}
+          selectedMonths={selected.months}
+          onSelect={(m) => {
+            const opt = PRICING.find((p) => p.months === m);
+            if (opt) setSelected(opt);
+          }}
+        />
+
+        {status === "polling" && (
+          <p style={pollingText}>Получаем ваш конфиг...</p>
         )}
 
         {status === "error" && (
@@ -107,6 +147,14 @@ export function PurchasePage({ active }: PurchasePageProps) {
           </p>
         )}
       </section>
+
+      {qrDataUrl && (
+        <QrModal
+          qrDataUrl={qrDataUrl}
+          configText={configText}
+          onClose={() => setQrDataUrl(null)}
+        />
+      )}
     </>
   );
 }
@@ -120,9 +168,11 @@ const sectionTitle: React.CSSProperties = {
   marginBottom: 12,
 };
 
-const successBlock: React.CSSProperties = {
+const pollingText: React.CSSProperties = {
+  color: "#AAAACC",
+  fontSize: 14,
   textAlign: "center",
-  padding: "40px 16px",
+  marginTop: 16,
 };
 
 const errorText: React.CSSProperties = {

@@ -17,6 +17,7 @@ import {
   SUPPORT_TICKET_SENT_USER,
   SUPPORT_USER_TEXT_ADMIN,
 } from "../shared/texts";
+import { saveConfig } from "./config-store";
 import { provisionVpnClient } from "./vpn";
 import {
   clearActiveDialog,
@@ -127,7 +128,6 @@ bot.on("pre_checkout_query", async (ctx) => {
 bot.on("message:successful_payment", async (ctx) => {
   const sp = ctx.message!.successful_payment!;
   const userId = ctx.from!.id;
-  const chatId = ctx.chat!.id;
   const userName = ctx.from?.first_name ?? "Аноним";
   const userTag = ctx.from?.username ? `@${ctx.from.username}` : "без @ника";
 
@@ -147,12 +147,13 @@ bot.on("message:successful_payment", async (ctx) => {
     parse_mode: "HTML",
   });
 
-  const clientName = ctx.from?.username ?? `tg_${userId}`;
   let provisionOk = false;
 
   try {
+    const clientName = ctx.from?.username ?? `tg_${userId}`;
     const config = await provisionVpnClient(clientName, payload.dc);
     provisionOk = true;
+    saveConfig(userId, config);
 
     await ctx.reply(PAYMENT_CONFIG_SENT, { parse_mode: "HTML" });
     await ctx.reply(`<pre>${escapeHtml(config)}</pre>`, { parse_mode: "HTML" });
