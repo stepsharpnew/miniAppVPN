@@ -78,7 +78,7 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
             cd ~/meme_bot
             docker compose pull postgres
-            docker compose build --no-cache bot amneziawg
+            docker compose build --no-cache bot nginx
             docker compose up -d --remove-orphans
             docker compose ps
           ENDSSH
