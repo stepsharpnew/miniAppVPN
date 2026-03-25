@@ -7,6 +7,10 @@ import { PriceList } from "../components/PriceList";
 import { QrModal } from "../components/QrModal";
 import { useMainButton } from "../hooks/useMainButton";
 
+// Wipe leftover cache from the old (pre-payment) version so users
+// never get stuck on a "ПОКАЗАТЬ QR-КОД" button that bypasses payment.
+try { localStorage.removeItem("vpn_config"); } catch { /* ok */ }
+
 type PaymentStatus = "idle" | "loading" | "polling" | "error";
 
 const POLL_INTERVAL = 1500;
