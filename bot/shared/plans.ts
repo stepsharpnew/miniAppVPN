@@ -10,7 +10,7 @@ export const PRICING: PricingOption[] = [
   {
     months: 0,
     label: "Тестовый платёж",
-    price: 10,
+    price: 100,
     discount: 0,
     durationCode: "test",
   },

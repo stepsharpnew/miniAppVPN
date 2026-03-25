@@ -73,13 +73,33 @@
   margin: 0 auto 20px;
 }
 
-.copyBtn {
-  width: 100%;
+.buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.downloadBtn {
+  flex: 1;
   padding: 14px;
   border-radius: var(--border-radius-sm);
   background: var(--btn-gradient);
   color: white;
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: opacity 0.15s;
+}
+
+.downloadBtn:active {
+  opacity: 0.85;
+}
+
+.copyBtn {
+  flex: 1;
+  padding: 14px;
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  font-size: 14px;
   font-weight: 600;
   transition: opacity 0.15s;
 }

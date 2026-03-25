@@ -82,16 +82,17 @@
   margin: 12px 0;
 }
 
-.copyBtn {
-  padding: 6px 14px;
+.configBtn {
+  padding: 8px 16px;
   border-radius: 10px;
-  background: rgba(77, 139, 255, 0.15);
-  color: var(--accent-blue);
-  font-size: 12px;
+  background: var(--btn-gradient);
+  color: white;
+  font-size: 13px;
   font-weight: 600;
+  transition: opacity 0.15s;
 }
 
-.copyBtn:active {
+.configBtn:active {
   opacity: 0.7;
 }
 

@@ -1,24 +1,26 @@
-import { useCallback, useState } from 'react';
-import { useTelegramUser } from '../hooks/useTelegramUser';
-import { StatusBadge } from '../components/StatusBadge';
-import { BRAND_NAME } from '../../../shared/texts';
-import styles from './ProfilePage.module.css';
+import QRCode from "qrcode";
+import { useCallback, useState } from "react";
+import { BRAND_NAME } from "../../../shared/texts";
+import { QrModal } from "../components/QrModal";
+import { StatusBadge } from "../components/StatusBadge";
+import { useTelegramUser } from "../hooks/useTelegramUser";
+import { useVpnConfig } from "../hooks/useVpnConfig";
+import styles from "./ProfilePage.module.css";
 
 export function ProfilePage() {
   const user = useTelegramUser();
-  const [copied, setCopied] = useState(false);
+  const { config, hasConfig } = useVpnConfig();
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
-  const configLink = '—';
-  const isActive = false;
-
-  const handleCopy = useCallback(() => {
-    if (configLink && configLink !== '—') {
-      navigator.clipboard.writeText(configLink).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      });
-    }
-  }, [configLink]);
+  const handleShowConfig = useCallback(async () => {
+    if (!config) return;
+    const dataUrl = await QRCode.toDataURL(config, {
+      width: 260,
+      margin: 2,
+      color: { dark: "#000000", light: "#FFFFFF" },
+    });
+    setQrDataUrl(dataUrl);
+  }, [config]);
 
   return (
     <div className={styles.page}>
@@ -37,7 +39,7 @@ export function ProfilePage() {
         <div className={styles.userName}>
           {user.firstName} {user.lastName}
         </div>
-        <div className={styles.userId}>ID: {user.id || '—'}</div>
+        <div className={styles.userId}>ID: {user.id || "—"}</div>
       </div>
 
       <div className={styles.subCard}>
@@ -45,39 +47,38 @@ export function ProfilePage() {
 
         <div className={styles.row}>
           <span className={styles.rowLabel}>Статус:</span>
-          <StatusBadge active={isActive} />
-        </div>
-
-        <div className={styles.divider} />
-
-        <div className={styles.row}>
-          <span className={styles.rowLabel}>Тариф:</span>
-          <span className={styles.rowValue}>—</span>
-        </div>
-
-        <div className={styles.divider} />
-
-        <div className={styles.row}>
-          <span className={styles.rowLabel}>Действует до:</span>
-          <span className={styles.rowValue}>—</span>
+          <StatusBadge active={hasConfig} />
         </div>
 
         <div className={styles.divider} />
 
         <div className={styles.row}>
           <span className={styles.rowLabel}>Конфиг:</span>
-          <button className={styles.copyBtn} onClick={handleCopy}>
-            {copied ? '✓ Скопировано' : '📋 Копировать'}
-          </button>
+          {hasConfig ? (
+            <button className={styles.configBtn} onClick={handleShowConfig}>
+              🔑 Показать
+            </button>
+          ) : (
+            <span className={styles.rowValue}>—</span>
+          )}
         </div>
       </div>
 
-      <div className={styles.infoCard}>
-        <div className={styles.infoText}>
-          После оплаты менеджер отправит конфиг прямо в бот {BRAND_NAME}.
-          Он также появится здесь в разделе «Профиль».
+      {!hasConfig && (
+        <div className={styles.infoCard}>
+          <div className={styles.infoText}>
+            После оплаты конфиг появится здесь и в чате с ботом {BRAND_NAME}.
+          </div>
         </div>
-      </div>
+      )}
+
+      {qrDataUrl && config && (
+        <QrModal
+          qrDataUrl={qrDataUrl}
+          configText={config}
+          onClose={() => setQrDataUrl(null)}
+        />
+      )}
     </div>
   );
 }

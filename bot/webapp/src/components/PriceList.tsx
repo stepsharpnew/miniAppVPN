@@ -12,7 +12,7 @@ export function PriceList({ options, selectedMonths, onSelect }: PriceListProps)
     <div className={styles.list}>
       {options.map((opt) => {
         const isSelected = selectedMonths === opt.months;
-        const perMonth = Math.round(opt.price / opt.months);
+        const perMonth = opt.months > 0 ? Math.round(opt.price / opt.months) : 0;
 
         return (
           <button

@@ -20,6 +20,18 @@ export function QrModal({ qrDataUrl, configText, onClose }: QrModalProps) {
     }
   }, [configText]);
 
+  const handleDownload = useCallback(() => {
+    const blob = new Blob([configText], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "meme-vpn.conf";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [configText]);
+
   return (
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
@@ -38,12 +50,17 @@ export function QrModal({ qrDataUrl, configText, onClose }: QrModalProps) {
           className={styles.qrImage}
         />
 
-        <button
-          className={`${styles.copyBtn} ${copied ? styles.copied : ""}`}
-          onClick={handleCopy}
-        >
-          {copied ? "✓ Скопировано" : "📋 Скопировать конфиг"}
-        </button>
+        <div className={styles.buttons}>
+          <button className={styles.downloadBtn} onClick={handleDownload}>
+            📥 Скачать .conf
+          </button>
+          <button
+            className={`${styles.copyBtn} ${copied ? styles.copied : ""}`}
+            onClick={handleCopy}
+          >
+            {copied ? "✓ Скопировано" : "📋 Скопировать"}
+          </button>
+        </div>
       </div>
     </div>
   );

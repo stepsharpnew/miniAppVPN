@@ -6,9 +6,9 @@ import { Header } from "../components/Header";
 import { PriceList } from "../components/PriceList";
 import { QrModal } from "../components/QrModal";
 import { useMainButton } from "../hooks/useMainButton";
+import { useVpnConfig } from "../hooks/useVpnConfig";
 
-// Wipe leftover cache from the old (pre-payment) version so users
-// never get stuck on a "ПОКАЗАТЬ QR-КОД" button that bypasses payment.
+// Wipe leftover cache from the old (pre-payment) version
 try { localStorage.removeItem("vpn_config"); } catch { /* ok */ }
 
 type PaymentStatus = "idle" | "loading" | "polling" | "error";
@@ -40,8 +40,10 @@ export function PurchasePage({ active }: PurchasePageProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [configText, setConfigText] = useState("");
   const abortRef = useRef(false);
+  const { save: saveConfig } = useVpnConfig();
 
   const showConfig = useCallback(async (config: string) => {
+    saveConfig(config);
     setConfigText(config);
     const dataUrl = await QRCode.toDataURL(config, {
       width: 260,
@@ -49,7 +51,7 @@ export function PurchasePage({ active }: PurchasePageProps) {
       color: { dark: "#000000", light: "#FFFFFF" },
     });
     setQrDataUrl(dataUrl);
-  }, []);
+  }, [saveConfig]);
 
   const handleClick = useCallback(async () => {
     if (status === "loading" || status === "polling") return;
