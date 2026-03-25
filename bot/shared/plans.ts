@@ -34,6 +34,13 @@ export interface WebAppSupportPayload {
 
 export type WebAppPayload = WebAppPurchasePayload | WebAppSupportPayload;
 
+/** Serialised into the `payload` field of Telegram invoice (max 128 bytes). */
+export interface InvoicePayload {
+  type: "vpn";
+  months: number;
+  dc: string; // durationCode
+}
+
 export interface ChatMessage {
   id: string;
   from: "user" | "support";

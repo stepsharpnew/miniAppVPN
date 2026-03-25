@@ -87,6 +87,35 @@ export const PURCHASE_ADMIN_TEXT = (
   `💰 Сумма: <b>${total}₽</b>\n\n` +
   `<i>↩️ Ответьте на это сообщение</i>`;
 
+// ── Payment notifications ──
+
+export const PAYMENT_SUCCESS_USER = (planLabel: string, amount: string): string =>
+  `✅ <b>Оплата прошла успешно!</b>\n\n` +
+  `📦 Тариф: <b>${escapeHtml(planLabel)}</b>\n` +
+  `💰 Сумма: <b>${amount}</b>\n\n` +
+  `⏳ Подготавливаем ваш VPN-конфиг…`;
+
+export const PAYMENT_CONFIG_SENT = `🔑 <b>Ваш конфиг готов!</b>\n\nСкопируйте текст ниже или отсканируйте QR‑код в приложении Amnezia VPN.`;
+
+export const PAYMENT_PROVISION_FAILED_USER =
+  `⚠️ Оплата прошла, но не удалось создать конфиг автоматически.\n` +
+  `Менеджер получил уведомление и решит вопрос вручную.`;
+
+export const PAYMENT_ADMIN_NOTIFY = (
+  userName: string,
+  userTag: string,
+  userId: number,
+  planLabel: string,
+  amount: string,
+  provisionOk: boolean,
+): string =>
+  `💳 <b>Успешная оплата</b>\n\n` +
+  `👤 <b>${escapeHtml(userName)}</b> · ${escapeHtml(userTag)}\n` +
+  `🆔 <code>${userId}</code>\n\n` +
+  `📦 Тариф: <b>${escapeHtml(planLabel)}</b>\n` +
+  `💰 Сумма: <b>${amount}</b>\n` +
+  `🔧 Авто‑выдача: ${provisionOk ? "✅ выдан" : "❌ ошибка — требуется ручная выдача"}`;
+
 // ── FAQ (used by Mini App) ──
 
 export const FAQ_ITEMS = [

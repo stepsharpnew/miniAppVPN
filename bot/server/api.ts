@@ -7,10 +7,12 @@ import { type Api, InputFile } from "grammy";
 import { addMessage, getMessages, hasMessages } from "./chat-store";
 import { resolveAdminChat, saveForwardedMessage, setActiveDialog } from "./store";
 import {
+  BRAND_NAME,
   SUPPORT_MEDIA_CAPTION_ADMIN,
   SUPPORT_TICKET_ADMIN,
   SUPPORT_USER_TEXT_ADMIN,
 } from "../shared/texts";
+import { type InvoicePayload, PRICING } from "../shared/plans";
 
 interface TelegramUser {
   id: number;
@@ -229,6 +231,46 @@ export function createApiServer(api: Api, botToken: string) {
         });
     } catch {
       res.status(404).json({ error: "File not found" });
+    }
+  });
+
+  // ── Create invoice link for Telegram Payments ──
+
+  const paymentToken = (process.env.PAYMENT_TOKEN ?? "").trim();
+
+  app.post("/api/payments/create-invoice", auth, async (req, res) => {
+    if (!paymentToken) {
+      res.status(503).json({ error: "Payments not configured" });
+      return;
+    }
+
+    const { months } = req.body ?? {};
+    const plan = PRICING.find((p) => p.months === months);
+    if (!plan) {
+      res.status(400).json({ error: "Invalid plan" });
+      return;
+    }
+
+    const payload: InvoicePayload = {
+      type: "vpn",
+      months: plan.months,
+      dc: plan.durationCode,
+    };
+
+    try {
+      const link = await api.createInvoiceLink(
+        `${BRAND_NAME} — ${plan.label}`,
+        `Подписка ${BRAND_NAME} на ${plan.label}`,
+        JSON.stringify(payload),
+        paymentToken,
+        "RUB",
+        [{ label: plan.label, amount: plan.price * 100 }],
+      );
+
+      res.json({ invoiceLink: link });
+    } catch (err) {
+      console.error("createInvoiceLink error:", err);
+      res.status(500).json({ error: "Failed to create invoice" });
     }
   });
 

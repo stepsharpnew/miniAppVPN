@@ -1,136 +1,112 @@
 import WebApp from "@twa-dev/sdk";
-import QRCode from "qrcode";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { PRICING, type PricingOption } from "../../../shared/plans";
 import { Header } from "../components/Header";
 import { PriceList } from "../components/PriceList";
-import { QrModal } from "../components/QrModal";
 import { useMainButton } from "../hooks/useMainButton";
-import { useTelegramUser } from "../hooks/useTelegramUser";
 
-const STORAGE_KEY = "vpn_config";
-
-function loadCachedConfig(): string | null {
-  try {
-    return localStorage.getItem(STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function saveCachedConfig(config: string) {
-  try {
-    localStorage.setItem(STORAGE_KEY, config);
-  } catch {
-    /* quota exceeded or unavailable */
-  }
-}
+type PaymentStatus = "idle" | "loading" | "paid" | "error";
 
 interface PurchasePageProps {
   active: boolean;
 }
 
 export function PurchasePage({ active }: PurchasePageProps) {
-  const user = useTelegramUser();
   const [selected, setSelected] = useState<PricingOption>(PRICING[0]);
-  const [loading, setLoading] = useState(false);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [configText, setConfigText] = useState("");
-  const [hasConfig, setHasConfig] = useState(false);
-
-  useEffect(() => {
-    const cached = loadCachedConfig();
-    if (cached) {
-      setConfigText(cached);
-      setHasConfig(true);
-    }
-  }, []);
-
-  const showQr = useCallback(async (config: string) => {
-    const dataUrl = await QRCode.toDataURL(config, {
-      width: 260,
-      margin: 2,
-      color: { dark: "#000000", light: "#FFFFFF" },
-    });
-    setQrDataUrl(dataUrl);
-  }, []);
+  const [status, setStatus] = useState<PaymentStatus>("idle");
 
   const handleClick = useCallback(async () => {
-    if (loading) return;
+    if (status === "loading") return;
 
-    if (hasConfig && configText) {
-      await showQr(configText);
-      return;
-    }
-
-    setLoading(true);
+    setStatus("loading");
     try {
       WebApp.MainButton.showProgress(false);
 
-      const clientName =
-        user.username !== "username" ? user.username : `tg_${user.id}`;
-
-      const res = await fetch("/api/vpn-proxy", {
+      const res = await fetch("/api/payments/create-invoice", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: clientName,
-          duration: selected.durationCode,
-        }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": WebApp.initData,
+        },
+        body: JSON.stringify({ months: selected.months }),
       });
 
-      if (!res.ok) {
-        throw new Error(`Ошибка сервера: ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`Ошибка сервера: ${res.status}`);
 
-      const json = await res.json();
-      const config: string = json.config;
+      const { invoiceLink } = await res.json();
 
-      setConfigText(config);
-      setHasConfig(true);
-      saveCachedConfig(config);
-      await showQr(config);
+      WebApp.MainButton.hideProgress();
+
+      WebApp.openInvoice(invoiceLink, (invoiceStatus: string) => {
+        if (invoiceStatus === "paid") {
+          setStatus("paid");
+        } else if (invoiceStatus === "cancelled") {
+          setStatus("idle");
+        } else {
+          setStatus("error");
+        }
+      });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Неизвестная ошибка";
       WebApp.showAlert(`Ошибка: ${message}`);
+      setStatus("idle");
     } finally {
       WebApp.MainButton.hideProgress();
-      setLoading(false);
     }
-  }, [loading, hasConfig, configText, selected, user, showQr]);
+  }, [status, selected]);
 
-  const buttonText = loading
-    ? "ЗАГРУЗКА..."
-    : hasConfig
-      ? "ПОКАЗАТЬ QR-КОД"
-      : `КУПИТЬ ЗА ${selected.price}₽`;
+  const buttonText =
+    status === "loading"
+      ? "ЗАГРУЗКА..."
+      : status === "paid"
+        ? "✅ ОПЛАЧЕНО"
+        : `КУПИТЬ ЗА ${selected.price}₽`;
 
-  useMainButton({ text: buttonText, onClick: handleClick, visible: active });
+  useMainButton({
+    text: buttonText,
+    onClick: handleClick,
+    visible: active && status !== "paid",
+  });
 
   return (
     <>
       <Header />
 
       <section style={{ padding: "0 16px 24px" }}>
-        <h3 style={sectionTitle}>Тариф</h3>
-        <PriceList
-          options={PRICING}
-          selectedMonths={selected.months}
-          onSelect={(m) => {
-            const opt = PRICING.find((p) => p.months === m);
-            if (opt) setSelected(opt);
-          }}
-        />
-      </section>
+        {status === "paid" ? (
+          <div style={successBlock}>
+            <div style={{ fontSize: 48 }}>🎉</div>
+            <h3 style={{ margin: "12px 0 8px", color: "#FFFFFF" }}>
+              Оплата прошла успешно!
+            </h3>
+            <p style={{ color: "#AAAACC", lineHeight: 1.5 }}>
+              Ваш VPN-конфиг отправлен в чат с ботом.
+              <br />
+              Откройте чат, чтобы скопировать конфиг.
+            </p>
+          </div>
+        ) : (
+          <>
+            <h3 style={sectionTitle}>Тариф</h3>
+            <PriceList
+              options={PRICING}
+              selectedMonths={selected.months}
+              onSelect={(m) => {
+                const opt = PRICING.find((p) => p.months === m);
+                if (opt) setSelected(opt);
+              }}
+            />
+          </>
+        )}
 
-      {qrDataUrl && (
-        <QrModal
-          qrDataUrl={qrDataUrl}
-          configText={configText}
-          onClose={() => setQrDataUrl(null)}
-        />
-      )}
+        {status === "error" && (
+          <p style={errorText}>
+            Что-то пошло не так. Попробуйте ещё раз или обратитесь в
+            поддержку.
+          </p>
+        )}
+      </section>
     </>
   );
 }
@@ -142,4 +118,16 @@ const sectionTitle: React.CSSProperties = {
   textTransform: "uppercase",
   letterSpacing: 1,
   marginBottom: 12,
+};
+
+const successBlock: React.CSSProperties = {
+  textAlign: "center",
+  padding: "40px 16px",
+};
+
+const errorText: React.CSSProperties = {
+  color: "#FF6B6B",
+  fontSize: 14,
+  textAlign: "center",
+  marginTop: 16,
 };
