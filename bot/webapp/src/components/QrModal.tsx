@@ -1,3 +1,4 @@
+import WebApp from "@twa-dev/sdk";
 import { useCallback, useState } from "react";
 import styles from "./QrModal.module.css";
 
@@ -21,15 +22,21 @@ export function QrModal({ qrDataUrl, configText, onClose }: QrModalProps) {
   }, [configText]);
 
   const handleDownload = useCallback(() => {
-    const blob = new Blob([configText], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "meme-vpn.conf";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const dataUri =
+      "data:application/octet-stream;charset=utf-8;base64," +
+      btoa(unescape(encodeURIComponent(configText)));
+
+    try {
+      const a = document.createElement("a");
+      a.href = dataUri;
+      a.download = "meme-vpn.conf";
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch {
+      WebApp.openLink(dataUri);
+    }
   }, [configText]);
 
   return (

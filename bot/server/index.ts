@@ -154,12 +154,8 @@ bot.on("message:successful_payment", async (ctx) => {
     const config = await provisionVpnClient(clientName, payload.dc);
     provisionOk = true;
     saveConfig(userId, config);
-
-    await ctx.reply(PAYMENT_CONFIG_SENT, { parse_mode: "HTML" });
-    await ctx.reply(`<pre>${escapeHtml(config)}</pre>`, { parse_mode: "HTML" });
   } catch (err) {
     console.error("VPN provisioning after payment failed:", err);
-    await ctx.reply(PAYMENT_PROVISION_FAILED_USER, { parse_mode: "HTML" });
   }
 
   const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
