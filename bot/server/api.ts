@@ -260,7 +260,13 @@ export function createApiServer(api: Api, botToken: string) {
 
   app.post("/api/payments/config/send-file", auth, async (req, res) => {
     const user = getUser(req);
-    const config = getConfig(user.id);
+    // Prefer explicit config from client (e.g. when user opens Profile later),
+    // fallback to server-side temporary store (right after payment).
+    const bodyConfig =
+      typeof req.body?.config === "string" ? req.body.config : null;
+    const config = (bodyConfig && bodyConfig.trim().length > 0)
+      ? bodyConfig
+      : getConfig(user.id);
     if (!config) {
       res.status(404).json({ error: "Config not ready" });
       return;

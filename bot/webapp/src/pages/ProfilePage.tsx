@@ -42,7 +42,11 @@ export function ProfilePage() {
     try {
       const res = await fetch("/api/payments/config/send-file", {
         method: "POST",
-        headers: { "X-Telegram-Init-Data": WebApp.initData },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": WebApp.initData,
+        },
+        body: JSON.stringify({ config }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
       setSent(true);
@@ -51,7 +55,7 @@ export function ProfilePage() {
     } finally {
       setSending(false);
     }
-  }, [sending]);
+  }, [sending, config]);
 
   return (
     <div className={styles.page}>
