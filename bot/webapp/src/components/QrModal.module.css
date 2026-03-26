@@ -4,10 +4,12 @@
   background: rgba(0, 0, 0, 0.8);
   backdrop-filter: blur(8px);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   z-index: 1000;
-  padding: 40px 20px 20px;
+  padding: 20px 16px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   animation: fadeIn 0.2s ease;
 }
 
@@ -20,11 +22,11 @@
   background: var(--bg-card);
   border-radius: var(--border-radius);
   padding: 24px 20px 20px;
-  max-width: 340px;
+  max-width: 360px;
   width: 100%;
   position: relative;
   text-align: center;
-  margin-top: 30px;
+  margin: auto 0;
   animation: slideUp 0.25s ease;
 }
 
@@ -47,6 +49,7 @@
   align-items: center;
   justify-content: center;
   transition: background 0.15s;
+  z-index: 1;
 }
 
 .closeBtn:active {
@@ -62,24 +65,106 @@
 .subtitle {
   font-size: 13px;
   color: var(--text-secondary);
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   line-height: 1.4;
 }
 
 .qrImage {
-  width: 260px;
-  height: 260px;
+  width: 220px;
+  height: 220px;
   border-radius: 12px;
-  margin: 0 auto 20px;
+  margin: 0 auto 16px;
 }
 
+/* Instructions block */
+.instructions {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  text-align: left;
+}
+
+.instructionsHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.instructionsIcon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.instructionsTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.stepsList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.stepNum {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(77, 139, 255, 0.15);
+  color: var(--accent-blue);
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+.stepText {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.appBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--btn-gradient);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  transition: opacity 0.2s ease;
+  width: 100%;
+}
+
+.appBtn:active {
+  opacity: 0.8;
+}
+
+/* Download / send config button */
 .downloadBtn {
   width: 100%;
-  padding: 16px;
+  padding: 14px;
   border-radius: var(--border-radius-sm);
-  background: var(--btn-gradient);
-  color: white;
-  font-size: 15px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  font-size: 14px;
   font-weight: 600;
   transition: opacity 0.15s;
 }
@@ -90,5 +175,6 @@
 
 .sent {
   background: var(--accent-green);
+  color: #fff;
   pointer-events: none;
 }

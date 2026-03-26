@@ -1,13 +1,15 @@
 import WebApp from "@twa-dev/sdk";
 import { useCallback, useState } from "react";
+import type { PlatformInfo } from "../../../shared/platforms";
 import styles from "./QrModal.module.css";
 
 interface QrModalProps {
   qrDataUrl: string;
+  platform?: PlatformInfo | null;
   onClose: () => void;
 }
 
-export function QrModal({ qrDataUrl, onClose }: QrModalProps) {
+export function QrModal({ qrDataUrl, platform, onClose }: QrModalProps) {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 
@@ -38,7 +40,7 @@ export function QrModal({ qrDataUrl, onClose }: QrModalProps) {
           ✕
         </button>
 
-        <h2 className={styles.title}>Ваш VPN конфиг</h2>
+        <h2 className={styles.title}>VPN конфиг готов!</h2>
         <p className={styles.subtitle}>
           Отсканируйте QR-код в приложении AmneziaWG
         </p>
@@ -49,11 +51,48 @@ export function QrModal({ qrDataUrl, onClose }: QrModalProps) {
           className={styles.qrImage}
         />
 
+        {platform && (
+          <div className={styles.instructions}>
+            <div className={styles.instructionsHeader}>
+              <span className={styles.instructionsIcon}>{platform.icon}</span>
+              <span className={styles.instructionsTitle}>
+                Что делать ({platform.name})
+              </span>
+            </div>
+
+            <div className={styles.stepsList}>
+              {platform.steps.map((step, i) => (
+                <div key={i} className={styles.step}>
+                  <span className={styles.stepNum}>{i + 1}</span>
+                  <span className={styles.stepText}>{step}</span>
+                </div>
+              ))}
+            </div>
+
+            <a
+              href={platform.downloadUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.appBtn}
+              onClick={(e) => {
+                e.preventDefault();
+                WebApp.openLink(platform.downloadUrl, { try_instant_view: false });
+              }}
+            >
+              📥 Скачать AmneziaWG
+            </a>
+          </div>
+        )}
+
         <button
           className={`${styles.downloadBtn} ${sent ? styles.sent : ""}`}
           onClick={sent ? undefined : handleSendFile}
         >
-          {sending ? "Отправляем..." : sent ? "✓ Файл отправлен в чат" : "📥 Скачать .conf"}
+          {sending
+            ? "Отправляем..."
+            : sent
+              ? "✓ Файл отправлен в чат"
+              : "📄 Получить .conf файлом"}
         </button>
       </div>
     </div>
