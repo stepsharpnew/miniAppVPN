@@ -7,13 +7,6 @@ export interface PricingOption {
 }
 
 export const PRICING: PricingOption[] = [
-  {
-    months: 0,
-    label: "Тестовый платёж",
-    price: 100,
-    discount: 0,
-    durationCode: "test",
-  },
   { months: 1, label: "1 месяц", price: 150, discount: 0, durationCode: "1m" },
   { months: 3, label: "3 месяца", price: 405, discount: 10, durationCode: "3m" },
   { months: 6, label: "6 месяцев", price: 720, discount: 20, durationCode: "6m" },

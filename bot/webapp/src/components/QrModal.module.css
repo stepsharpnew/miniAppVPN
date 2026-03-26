@@ -93,8 +93,14 @@
 }
 
 .instructionsIcon {
-  font-size: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
+}
+
+.platformLogo {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .instructionsTitle {

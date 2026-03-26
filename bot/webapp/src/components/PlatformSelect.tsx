@@ -1,4 +1,5 @@
 import type { PlatformId, PlatformInfo } from "../../../shared/platforms";
+import { PlatformLogo } from "./PlatformLogo";
 import styles from "./PlatformSelect.module.css";
 
 interface PlatformSelectProps {
@@ -20,7 +21,9 @@ export function PlatformSelect({
           className={`${styles.card} ${selectedId === p.id ? styles.selected : ""}`}
           onClick={() => onSelect(p)}
         >
-          <span className={styles.icon}>{p.icon}</span>
+          <span className={styles.icon} aria-hidden>
+            <PlatformLogo platformId={p.id} size={30} className={styles.logo} />
+          </span>
           <span className={styles.name}>{p.name}</span>
         </button>
       ))}

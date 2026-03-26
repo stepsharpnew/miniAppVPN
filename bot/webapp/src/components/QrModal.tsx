@@ -1,6 +1,7 @@
 import WebApp from "@twa-dev/sdk";
 import { useCallback, useState } from "react";
 import type { PlatformInfo } from "../../../shared/platforms";
+import { PlatformLogo } from "./PlatformLogo";
 import styles from "./QrModal.module.css";
 
 interface QrModalProps {
@@ -54,7 +55,9 @@ export function QrModal({ qrDataUrl, platform, onClose }: QrModalProps) {
         {platform && (
           <div className={styles.instructions}>
             <div className={styles.instructionsHeader}>
-              <span className={styles.instructionsIcon}>{platform.icon}</span>
+              <span className={styles.instructionsIcon} aria-hidden>
+                <PlatformLogo platformId={platform.id} size={22} className={styles.platformLogo} />
+              </span>
               <span className={styles.instructionsTitle}>
                 Что делать ({platform.name})
               </span>

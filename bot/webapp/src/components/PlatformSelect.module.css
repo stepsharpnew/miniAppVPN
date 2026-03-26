@@ -26,8 +26,18 @@
 }
 
 .icon {
-  font-size: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
+}
+
+.logo {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.card.selected .logo {
+  color: var(--accent-blue);
 }
 
 .name {
