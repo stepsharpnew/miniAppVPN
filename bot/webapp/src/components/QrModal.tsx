@@ -4,50 +4,32 @@ import styles from "./QrModal.module.css";
 
 interface QrModalProps {
   qrDataUrl: string;
-  configText: string;
   onClose: () => void;
 }
 
-export function QrModal({ qrDataUrl, configText, onClose }: QrModalProps) {
-  const [downloading, setDownloading] = useState(false);
+export function QrModal({ qrDataUrl, onClose }: QrModalProps) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
 
-  const handleDownload = useCallback(async () => {
-    if (downloading) return;
-    setDownloading(true);
+  const handleSendFile = useCallback(async () => {
+    if (sending) return;
+    setSending(true);
 
     try {
-      // Get one-time download token from backend
-      const res = await fetch("/api/payments/config/download-token", {
+      const res = await fetch("/api/payments/config/send-file", {
         method: "POST",
         headers: { "X-Telegram-Init-Data": WebApp.initData },
       });
 
-      if (!res.ok) throw new Error("token failed");
+      if (!res.ok) throw new Error(`${res.status}`);
 
-      const { token } = await res.json();
-      const url = `${window.location.origin}/api/payments/config/download/${token}`;
-
-      // Open in system browser — reliable file download
-      WebApp.openLink(url, { try_instant_view: false });
+      setSent(true);
     } catch {
-      // Fallback: Blob URL for browsers that support it
-      try {
-        const blob = new Blob([configText], { type: "application/octet-stream" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "meme-vpn.conf";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-      } catch {
-        WebApp.showAlert("Не удалось скачать конфиг. Попробуйте из профиля.");
-      }
+      WebApp.showAlert("Не удалось отправить файл. Попробуйте позже.");
     } finally {
-      setDownloading(false);
+      setSending(false);
     }
-  }, [configText, downloading]);
+  }, [sending]);
 
   return (
     <div className={styles.overlay} onClick={onClose}>
@@ -67,8 +49,11 @@ export function QrModal({ qrDataUrl, configText, onClose }: QrModalProps) {
           className={styles.qrImage}
         />
 
-        <button className={styles.downloadBtn} onClick={handleDownload}>
-          {downloading ? "Загрузка..." : "📥 Скачать .conf"}
+        <button
+          className={`${styles.downloadBtn} ${sent ? styles.sent : ""}`}
+          onClick={sent ? undefined : handleSendFile}
+        >
+          {sending ? "Отправляем..." : sent ? "✓ Файл отправлен в чат" : "📥 Скачать .conf"}
         </button>
       </div>
     </div>

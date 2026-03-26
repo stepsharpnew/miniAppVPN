@@ -87,3 +87,8 @@
 .downloadBtn:active {
   opacity: 0.85;
 }
+
+.sent {
+  background: var(--accent-green);
+  pointer-events: none;
+}

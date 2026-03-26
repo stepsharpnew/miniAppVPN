@@ -75,7 +75,6 @@ export function ProfilePage() {
       {qrDataUrl && config && (
         <QrModal
           qrDataUrl={qrDataUrl}
-          configText={config}
           onClose={() => setQrDataUrl(null)}
         />
       )}

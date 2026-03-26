@@ -22,7 +22,6 @@ export function PurchasePage({ active }: PurchasePageProps) {
   const [selected, setSelected] = useState<PricingOption>(PRICING[0]);
   const [status, setStatus] = useState<PaymentStatus>("idle");
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [configText, setConfigText] = useState("");
   const { save: saveConfig } = useVpnConfig();
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -37,7 +36,6 @@ export function PurchasePage({ active }: PurchasePageProps) {
     async (config: string) => {
       try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ok */ }
       saveConfig(config);
-      setConfigText(config);
       const dataUrl = await QRCode.toDataURL(config, {
         width: 260,
         margin: 2,
@@ -193,7 +191,6 @@ export function PurchasePage({ active }: PurchasePageProps) {
       {qrDataUrl && (
         <QrModal
           qrDataUrl={qrDataUrl}
-          configText={configText}
           onClose={() => setQrDataUrl(null)}
         />
       )}
