@@ -1,4 +1,6 @@
 import type { PlatformId } from "../../../shared/platforms";
+import androidLogoUrl from "../assets/icons8-android-os.svg?url";
+import ubuntuLogoUrl from "../assets/ubuntu-svgrepo-com (1).svg?url";
 
 interface PlatformLogoProps {
   platformId: PlatformId;
@@ -7,6 +9,16 @@ interface PlatformLogoProps {
 }
 
 export function PlatformLogo({ platformId, size = 28, className }: PlatformLogoProps) {
+  const imgCommon = {
+    width: size,
+    height: size,
+    className,
+    draggable: false,
+    loading: "lazy" as const,
+    style: { width: size, height: size, objectFit: "contain" as const },
+    alt: "",
+  };
+
   const common = {
     width: size,
     height: size,
@@ -21,21 +33,7 @@ export function PlatformLogo({ platformId, size = 28, className }: PlatformLogoP
 
   switch (platformId) {
     case "android":
-      // Simplified Android robot
-      return (
-        <svg {...common}>
-          <path
-            d="M7.2 9.3c-.8 0-1.45.66-1.45 1.48v5.9c0 .82.65 1.48 1.45 1.48h.65v1.55c0 .72.58 1.3 1.3 1.3s1.3-.58 1.3-1.3v-1.55h2.1v1.55c0 .72.58 1.3 1.3 1.3s1.3-.58 1.3-1.3v-1.55h.65c.8 0 1.45-.66 1.45-1.48v-5.9c0-.82-.65-1.48-1.45-1.48H7.2Z"
-            fill="currentColor"
-          />
-          <path
-            d="M9.05 7.7 7.85 6.2a.6.6 0 0 1 .94-.75l1.3 1.6a6.4 6.4 0 0 1 3.82 0l1.3-1.6a.6.6 0 1 1 .94.75l-1.2 1.5c1.7.9 2.85 2.55 2.85 4.45H6.2c0-1.9 1.15-3.55 2.85-4.45Z"
-            fill="currentColor"
-          />
-          <circle cx="9.6" cy="11.2" r="0.7" fill="#0A0A1A" />
-          <circle cx="14.4" cy="11.2" r="0.7" fill="#0A0A1A" />
-        </svg>
-      );
+      return <img src={androidLogoUrl} {...imgCommon} />;
 
     case "ios":
     case "macos":
@@ -66,23 +64,7 @@ export function PlatformLogo({ platformId, size = 28, className }: PlatformLogoP
 
     case "linux":
     default:
-      // Simple penguin head
-      return (
-        <svg {...common}>
-          <path
-            d="M12 3.2c-3.2 0-5.6 2.6-5.6 6 0 1.4.4 2.7 1.1 3.8-.2.7-.4 1.5-.4 2.3 0 2.9 2.1 5.3 4.9 5.3h0c2.8 0 4.9-2.4 4.9-5.3 0-.8-.1-1.6-.4-2.3.7-1.1 1.1-2.4 1.1-3.8 0-3.4-2.4-6-5.6-6Z"
-            fill="currentColor"
-          />
-          <path
-            d="M12 9.6c-1.4 0-2.6 1.1-2.6 2.6 0 1.1.6 2.1 1.6 2.4-.2.9-.8 1.7-1.6 2.2.8.8 1.7 1.2 2.6 1.2s1.8-.4 2.6-1.2c-.8-.5-1.4-1.3-1.6-2.2 1-.3 1.6-1.3 1.6-2.4 0-1.5-1.1-2.6-2.6-2.6Z"
-            fill="#0A0A1A"
-            opacity="0.35"
-          />
-          <circle cx="10.6" cy="11.6" r="0.6" fill="#0A0A1A" />
-          <circle cx="13.4" cy="11.6" r="0.6" fill="#0A0A1A" />
-          <path d="M12 13.3 11.1 14.3h1.8L12 13.3Z" fill="#F5C542" />
-        </svg>
-      );
+      return <img src={ubuntuLogoUrl} {...imgCommon} />;
   }
 }
 
