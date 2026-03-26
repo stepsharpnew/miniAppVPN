@@ -11,6 +11,7 @@ export function PlatformLogo({ platformId, size = 28, className }: PlatformLogoP
     width: size,
     height: size,
     viewBox: "0 0 24 24",
+    preserveAspectRatio: "xMidYMid meet",
     fill: "none",
     xmlns: "http://www.w3.org/2000/svg",
     className,

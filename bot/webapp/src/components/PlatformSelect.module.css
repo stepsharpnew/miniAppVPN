@@ -34,6 +34,10 @@
 
 .logo {
   color: rgba(255, 255, 255, 0.88);
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: block;
 }
 
 .card.selected .logo {

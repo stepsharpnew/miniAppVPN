@@ -1,5 +1,6 @@
 import { Accordion } from '../components/Accordion';
 import { PLATFORMS } from '../../../shared/platforms';
+import { PlatformLogo } from '../components/PlatformLogo';
 import styles from './InstructionsPage.module.css';
 
 export function InstructionsPage() {
@@ -19,7 +20,7 @@ export function InstructionsPage() {
         {PLATFORMS.map((platform) => (
           <Accordion
             key={platform.id}
-            icon={platform.icon}
+            icon={<PlatformLogo platformId={platform.id} size={18} />}
             title={platform.name}
             iconColor="rgba(0,200,83,0.15)"
           >

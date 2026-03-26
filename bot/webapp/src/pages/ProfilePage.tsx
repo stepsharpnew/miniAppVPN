@@ -1,7 +1,7 @@
+import WebApp from "@twa-dev/sdk";
 import QRCode from "qrcode";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BRAND_NAME } from "../../../shared/texts";
-import { QrModal } from "../components/QrModal";
 import { StatusBadge } from "../components/StatusBadge";
 import { useTelegramUser } from "../hooks/useTelegramUser";
 import { useVpnConfig } from "../hooks/useVpnConfig";
@@ -11,73 +11,108 @@ export function ProfilePage() {
   const user = useTelegramUser();
   const { config, hasConfig } = useVpnConfig();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
 
-  const handleShowConfig = useCallback(async () => {
-    if (!config) return;
-    const dataUrl = await QRCode.toDataURL(config, {
+  useEffect(() => {
+    let alive = true;
+    if (!config) {
+      setQrDataUrl(null);
+      return;
+    }
+    QRCode.toDataURL(config, {
       width: 260,
       margin: 2,
       color: { dark: "#000000", light: "#FFFFFF" },
-    });
-    setQrDataUrl(dataUrl);
+    })
+      .then((dataUrl) => {
+        if (alive) setQrDataUrl(dataUrl);
+      })
+      .catch(() => {
+        if (alive) setQrDataUrl(null);
+      });
+    return () => {
+      alive = false;
+    };
   }, [config]);
+
+  const handleSendFile = useCallback(async () => {
+    if (sending) return;
+    setSending(true);
+    try {
+      const res = await fetch("/api/payments/config/send-file", {
+        method: "POST",
+        headers: { "X-Telegram-Init-Data": WebApp.initData },
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setSent(true);
+    } catch {
+      WebApp.showAlert("Не удалось отправить файл. Попробуйте позже.");
+    } finally {
+      setSending(false);
+    }
+  }, [sending]);
 
   return (
     <div className={styles.page}>
-      <div className={styles.userCard}>
-        {user.photoUrl ? (
-          <img
-            src={user.photoUrl}
-            alt={user.firstName}
-            className={styles.avatar}
-          />
-        ) : (
-          <div className={`${styles.avatar} ${styles.avatarPlaceholder}`}>
-            {user.firstName.charAt(0)}
+      <div className={styles.profileCard}>
+        <div className={styles.profileTop}>
+          {user.photoUrl ? (
+            <img
+              src={user.photoUrl}
+              alt={user.firstName}
+              className={styles.avatar}
+            />
+          ) : (
+            <div className={`${styles.avatar} ${styles.avatarPlaceholder}`}>
+              {user.firstName.charAt(0)}
+            </div>
+          )}
+
+          <div className={styles.profileMeta}>
+            <div className={styles.userName}>
+              {user.firstName} {user.lastName}
+            </div>
+            <div className={styles.userId}>ID: {user.id || "—"}</div>
           </div>
-        )}
-        <div className={styles.userName}>
-          {user.firstName} {user.lastName}
-        </div>
-        <div className={styles.userId}>ID: {user.id || "—"}</div>
-      </div>
 
-      <div className={styles.subCard}>
-        <div className={styles.sectionHeader}>Статус подписки</div>
-
-        <div className={styles.row}>
-          <span className={styles.rowLabel}>Статус:</span>
-          <StatusBadge active={hasConfig} />
+          <div className={styles.statusWrap}>
+            <div className={styles.statusLabel}>Подписка</div>
+            <StatusBadge active={hasConfig} />
+          </div>
         </div>
 
         <div className={styles.divider} />
 
-        <div className={styles.row}>
-          <span className={styles.rowLabel}>Конфиг:</span>
-          {hasConfig ? (
-            <button className={styles.configBtn} onClick={handleShowConfig}>
-              🔑 Показать
-            </button>
+        <div className={styles.configBlock}>
+          <div className={styles.sectionHeader}>VPN конфиг</div>
+
+          {hasConfig && qrDataUrl ? (
+            <>
+              <img
+                src={qrDataUrl}
+                alt="QR код конфигурации"
+                className={styles.qr}
+              />
+
+              <button
+                className={`${styles.sendBtn} ${sent ? styles.sent : ""}`}
+                onClick={sent ? undefined : handleSendFile}
+              >
+                {sending
+                  ? "Отправляем..."
+                  : sent
+                    ? "✓ Файл отправлен в чат"
+                    : "📄 Получить .conf файлом"}
+              </button>
+            </>
           ) : (
-            <span className={styles.rowValue}>—</span>
+            <div className={styles.noConfig}>
+              После оплаты конфиг появится здесь и в чате с ботом {BRAND_NAME}.
+            </div>
           )}
         </div>
       </div>
-
-      {!hasConfig && (
-        <div className={styles.infoCard}>
-          <div className={styles.infoText}>
-            После оплаты конфиг появится здесь и в чате с ботом {BRAND_NAME}.
-          </div>
-        </div>
-      )}
-
-      {qrDataUrl && config && (
-        <QrModal
-          qrDataUrl={qrDataUrl}
-          onClose={() => setQrDataUrl(null)}
-        />
-      )}
     </div>
   );
 }

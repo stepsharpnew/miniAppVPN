@@ -2,7 +2,7 @@ import { useState } from 'react';
 import styles from './Accordion.module.css';
 
 interface AccordionProps {
-  icon: string;
+  icon: React.ReactNode;
   title: string;
   children: React.ReactNode;
   iconColor?: string;
