@@ -256,6 +256,41 @@ export function createApiServer(api: Api, botToken: string) {
     res.json({ config });
   });
 
+  // ── Download config as .conf file (one-time token flow) ──
+
+  const downloadTokens = new Map<string, { config: string; expiresAt: number }>();
+
+  app.post("/api/payments/config/download-token", auth, (req, res) => {
+    const user = getUser(req);
+    const config = getConfig(user.id);
+    if (!config) {
+      res.status(404).json({ error: "Config not ready" });
+      return;
+    }
+    const token = crypto.randomUUID();
+    downloadTokens.set(token, { config, expiresAt: Date.now() + 5 * 60 * 1000 });
+    res.json({ token });
+  });
+
+  app.get("/api/payments/config/download/:token", (req, res) => {
+    const raw = req.params.token;
+    const token = typeof raw === "string" ? raw : raw?.[0];
+    if (!token) {
+      res.status(400).send("Missing token");
+      return;
+    }
+    const entry = downloadTokens.get(token);
+    if (!entry || Date.now() > entry.expiresAt) {
+      downloadTokens.delete(token ?? "");
+      res.status(410).send("Ссылка истекла. Откройте приложение и нажмите «Скачать» ещё раз.");
+      return;
+    }
+    downloadTokens.delete(token);
+    res.set("Content-Type", "application/octet-stream");
+    res.set("Content-Disposition", 'attachment; filename="meme-vpn.conf"');
+    res.send(entry.config);
+  });
+
   // ── YooKassa: create payment (redirect flow) ──
 
   const shopId = (process.env.MERCHANT_SHOP_ID ?? "").trim();

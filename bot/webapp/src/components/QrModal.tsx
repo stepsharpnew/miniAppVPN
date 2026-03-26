@@ -9,35 +9,45 @@ interface QrModalProps {
 }
 
 export function QrModal({ qrDataUrl, configText, onClose }: QrModalProps) {
-  const [copied, setCopied] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(configText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* clipboard unavailable */
-    }
-  }, [configText]);
-
-  const handleDownload = useCallback(() => {
-    const dataUri =
-      "data:application/octet-stream;charset=utf-8;base64," +
-      btoa(unescape(encodeURIComponent(configText)));
+  const handleDownload = useCallback(async () => {
+    if (downloading) return;
+    setDownloading(true);
 
     try {
-      const a = document.createElement("a");
-      a.href = dataUri;
-      a.download = "meme-vpn.conf";
-      a.style.display = "none";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      // Get one-time download token from backend
+      const res = await fetch("/api/payments/config/download-token", {
+        method: "POST",
+        headers: { "X-Telegram-Init-Data": WebApp.initData },
+      });
+
+      if (!res.ok) throw new Error("token failed");
+
+      const { token } = await res.json();
+      const url = `${window.location.origin}/api/payments/config/download/${token}`;
+
+      // Open in system browser — reliable file download
+      WebApp.openLink(url, { try_instant_view: false });
     } catch {
-      WebApp.openLink(dataUri);
+      // Fallback: Blob URL for browsers that support it
+      try {
+        const blob = new Blob([configText], { type: "application/octet-stream" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "meme-vpn.conf";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch {
+        WebApp.showAlert("Не удалось скачать конфиг. Попробуйте из профиля.");
+      }
+    } finally {
+      setDownloading(false);
     }
-  }, [configText]);
+  }, [configText, downloading]);
 
   return (
     <div className={styles.overlay} onClick={onClose}>
@@ -57,17 +67,9 @@ export function QrModal({ qrDataUrl, configText, onClose }: QrModalProps) {
           className={styles.qrImage}
         />
 
-        <div className={styles.buttons}>
-          <button className={styles.downloadBtn} onClick={handleDownload}>
-            📥 Скачать .conf
-          </button>
-          <button
-            className={`${styles.copyBtn} ${copied ? styles.copied : ""}`}
-            onClick={handleCopy}
-          >
-            {copied ? "✓ Скопировано" : "📋 Скопировать"}
-          </button>
-        </div>
+        <button className={styles.downloadBtn} onClick={handleDownload}>
+          {downloading ? "Загрузка..." : "📥 Скачать .conf"}
+        </button>
       </div>
     </div>
   );

@@ -73,41 +73,17 @@
   margin: 0 auto 20px;
 }
 
-.buttons {
-  display: flex;
-  gap: 10px;
-}
-
 .downloadBtn {
-  flex: 1;
-  padding: 14px;
+  width: 100%;
+  padding: 16px;
   border-radius: var(--border-radius-sm);
   background: var(--btn-gradient);
   color: white;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   transition: opacity 0.15s;
 }
 
 .downloadBtn:active {
   opacity: 0.85;
-}
-
-.copyBtn {
-  flex: 1;
-  padding: 14px;
-  border-radius: var(--border-radius-sm);
-  background: rgba(255, 255, 255, 0.08);
-  color: white;
-  font-size: 14px;
-  font-weight: 600;
-  transition: opacity 0.15s;
-}
-
-.copyBtn:active {
-  opacity: 0.85;
-}
-
-.copied {
-  background: var(--accent-green);
 }
