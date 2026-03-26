@@ -1,6 +1,6 @@
 import WebApp from "@twa-dev/sdk";
 import QRCode from "qrcode";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PRICING, type PricingOption } from "../../../shared/plans";
 import { Header } from "../components/Header";
 import { PriceList } from "../components/PriceList";
@@ -10,7 +10,12 @@ import { useVpnConfig } from "../hooks/useVpnConfig";
 
 try { localStorage.removeItem("vpn_config"); } catch { /* ok */ }
 
-type PaymentStatus = "idle" | "loading" | "provisioning" | "error";
+type PaymentStatus =
+  | "idle"
+  | "loading"
+  | "widget"
+  | "polling"
+  | "error";
 
 interface PurchasePageProps {
   active: boolean;
@@ -22,6 +27,16 @@ export function PurchasePage({ active }: PurchasePageProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [configText, setConfigText] = useState("");
   const { save: saveConfig } = useVpnConfig();
+  const checkoutRef = useRef<YooMoneyCheckoutWidget | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const paymentIdRef = useRef<string>("");
+
+  useEffect(() => {
+    return () => {
+      checkoutRef.current?.destroy();
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, []);
 
   const showConfig = useCallback(
     async (config: string) => {
@@ -37,46 +52,57 @@ export function PurchasePage({ active }: PurchasePageProps) {
     [saveConfig],
   );
 
-  const provisionConfig = useCallback(
-    async (durationCode: string) => {
-      setStatus("provisioning");
-      try {
-        const res = await fetch("/api/payments/provision", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Telegram-Init-Data": WebApp.initData,
-          },
-          body: JSON.stringify({ durationCode }),
-        });
+  const pollForConfig = useCallback(
+    (paymentId: string) => {
+      setStatus("polling");
+      let attempts = 0;
+      const MAX_ATTEMPTS = 30;
 
-        if (!res.ok) {
-          throw new Error(`Ошибка получения конфига: ${res.status}`);
+      pollingRef.current = setInterval(async () => {
+        attempts++;
+        try {
+          const res = await fetch(`/api/payments/status/${paymentId}`, {
+            headers: { "X-Telegram-Init-Data": WebApp.initData },
+          });
+          if (!res.ok) return;
+          const data = await res.json();
+
+          if (data.status === "succeeded" && data.config) {
+            if (pollingRef.current) clearInterval(pollingRef.current);
+            pollingRef.current = null;
+            await showConfig(data.config);
+            setStatus("idle");
+            return;
+          }
+        } catch { /* retry */ }
+
+        if (attempts >= MAX_ATTEMPTS) {
+          if (pollingRef.current) clearInterval(pollingRef.current);
+          pollingRef.current = null;
+          WebApp.showAlert(
+            "Оплата прошла, но конфиг ещё не готов. Он появится в профиле или в чате с ботом.",
+          );
+          setStatus("error");
         }
-
-        const { config } = await res.json();
-        await showConfig(config);
-        setStatus("idle");
-      } catch (err) {
-        console.error("provision error:", err);
-        WebApp.showAlert(
-          "Оплата прошла, но не удалось получить конфиг. Попробуйте открыть приложение позже — конфиг появится в профиле.",
-        );
-        setStatus("error");
-      }
+      }, 2000);
     },
     [showConfig],
   );
 
+  const destroyWidget = useCallback(() => {
+    checkoutRef.current?.destroy();
+    checkoutRef.current = null;
+  }, []);
+
   const handleClick = useCallback(async () => {
-    if (status === "loading" || status === "provisioning") return;
+    if (status === "loading" || status === "widget" || status === "polling") return;
 
     setStatus("loading");
 
     try {
       WebApp.MainButton.showProgress(false);
 
-      const res = await fetch("/api/payments/create-invoice", {
+      const res = await fetch("/api/payments/create-payment", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -87,19 +113,46 @@ export function PurchasePage({ active }: PurchasePageProps) {
 
       if (!res.ok) throw new Error(`Ошибка сервера: ${res.status}`);
 
-      const { invoiceLink } = await res.json();
+      const { confirmationToken, paymentId } = await res.json();
+      paymentIdRef.current = paymentId;
 
       WebApp.MainButton.hideProgress();
 
-      WebApp.openInvoice(invoiceLink, (invoiceStatus: string) => {
-        if (invoiceStatus === "paid" || invoiceStatus === "pending") {
-          provisionConfig(selected.durationCode);
-        } else if (invoiceStatus === "cancelled") {
-          setStatus("idle");
-        } else {
+      if (!window.YooMoneyCheckoutWidget) {
+        throw new Error("Виджет ЮКасса не загружен");
+      }
+
+      setStatus("widget");
+
+      const checkout = new window.YooMoneyCheckoutWidget({
+        confirmation_token: confirmationToken,
+        customization: {
+          colors: {
+            control_primary: "#7C3AED",
+            background: "#121225",
+          },
+        },
+        error_callback(error) {
+          console.error("YooKassa widget error:", error);
+          destroyWidget();
           setStatus("error");
-        }
+        },
       });
+
+      checkoutRef.current = checkout;
+
+      checkout.on("success", () => {
+        destroyWidget();
+        pollForConfig(paymentId);
+      });
+
+      checkout.on("fail", () => {
+        destroyWidget();
+        setStatus("idle");
+        WebApp.showAlert("Платёж не прошёл. Попробуйте ещё раз.");
+      });
+
+      await checkout.render("yookassa-payment-form");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Неизвестная ошибка";
@@ -108,17 +161,21 @@ export function PurchasePage({ active }: PurchasePageProps) {
     } finally {
       WebApp.MainButton.hideProgress();
     }
-  }, [status, selected, provisionConfig]);
+  }, [status, selected, pollForConfig, destroyWidget]);
 
   const buttonText =
-    status === "loading" || status === "provisioning"
+    status === "loading" || status === "polling"
       ? "ЗАГРУЗКА..."
-      : `КУПИТЬ ЗА ${selected.price}₽`;
+      : status === "widget"
+        ? "ОПЛАТА..."
+        : `КУПИТЬ ЗА ${selected.price}₽`;
+
+  const hideButton = status === "widget";
 
   useMainButton({
     text: buttonText,
     onClick: handleClick,
-    visible: active,
+    visible: active && !hideButton,
   });
 
   return (
@@ -126,17 +183,29 @@ export function PurchasePage({ active }: PurchasePageProps) {
       <Header />
 
       <section style={{ padding: "0 16px 24px" }}>
-        <h3 style={sectionTitle}>Тариф</h3>
-        <PriceList
-          options={PRICING}
-          selectedMonths={selected.months}
-          onSelect={(m) => {
-            const opt = PRICING.find((p) => p.months === m);
-            if (opt) setSelected(opt);
+        {status !== "widget" && (
+          <>
+            <h3 style={sectionTitle}>Тариф</h3>
+            <PriceList
+              options={PRICING}
+              selectedMonths={selected.months}
+              onSelect={(m) => {
+                const opt = PRICING.find((p) => p.months === m);
+                if (opt) setSelected(opt);
+              }}
+            />
+          </>
+        )}
+
+        <div
+          id="yookassa-payment-form"
+          style={{
+            display: status === "widget" ? "block" : "none",
+            minHeight: status === "widget" ? 400 : 0,
           }}
         />
 
-        {status === "provisioning" && (
+        {status === "polling" && (
           <p style={pollingText}>Получаем ваш конфиг...</p>
         )}
 

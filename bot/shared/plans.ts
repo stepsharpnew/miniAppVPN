@@ -41,11 +41,13 @@ export interface WebAppSupportPayload {
 
 export type WebAppPayload = WebAppPurchasePayload | WebAppSupportPayload;
 
-/** Serialised into the `payload` field of Telegram invoice (max 128 bytes). */
-export interface InvoicePayload {
-  type: "vpn" | "test";
-  months: number;
-  dc: string; // durationCode
+/** Metadata attached to YooKassa payment for webhook/status resolution. */
+export interface PaymentMetadata {
+  telegram_user_id: string;
+  username: string;
+  first_name: string;
+  months: string;
+  duration_code: string;
 }
 
 export interface ChatMessage {

@@ -8,13 +8,21 @@ import { addMessage, getMessages, hasMessages } from "./chat-store";
 import { resolveAdminChat, saveForwardedMessage, setActiveDialog } from "./store";
 import {
   BRAND_NAME,
+  PAYMENT_ADMIN_NOTIFY,
+  PAYMENT_SUCCESS_USER,
   SUPPORT_MEDIA_CAPTION_ADMIN,
   SUPPORT_TICKET_ADMIN,
   SUPPORT_USER_TEXT_ADMIN,
 } from "../shared/texts";
-import { type InvoicePayload, PRICING } from "../shared/plans";
+import { type PaymentMetadata, PRICING } from "../shared/plans";
 import { getConfig, saveConfig } from "./config-store";
 import { provisionVpnClient } from "./vpn";
+import {
+  getPendingPayment,
+  markPaymentCanceled,
+  markPaymentSucceeded,
+  savePendingPayment,
+} from "./payment-store";
 
 interface TelegramUser {
   id: number;
@@ -236,7 +244,7 @@ export function createApiServer(api: Api, botToken: string) {
     }
   });
 
-  // ── Get or provision VPN config after payment ──
+  // ── Get VPN config after payment ──
 
   app.get("/api/payments/config", auth, (req, res) => {
     const user = getUser(req);
@@ -248,34 +256,14 @@ export function createApiServer(api: Api, botToken: string) {
     res.json({ config });
   });
 
-  app.post("/api/payments/provision", auth, async (req, res) => {
-    const user = getUser(req);
+  // ── YooKassa: create payment (embedded widget flow) ──
 
-    const existing = getConfig(user.id);
-    if (existing) {
-      res.json({ config: existing });
-      return;
-    }
+  const shopId = (process.env.MERCHANT_SHOP_ID ?? "").trim();
+  const secretKey = (process.env.MERCHANT_KEY ?? "").trim();
+  const yookassaAuth = Buffer.from(`${shopId}:${secretKey}`).toString("base64");
 
-    const clientName = user.username || `tg_${user.id}`;
-    const { durationCode } = req.body ?? {};
-
-    try {
-      const config = await provisionVpnClient(clientName, durationCode || "1m");
-      saveConfig(user.id, config);
-      res.json({ config });
-    } catch (err) {
-      console.error("Provision from Mini App failed:", err);
-      res.status(502).json({ error: "VPN API unavailable" });
-    }
-  });
-
-  // ── Create invoice link for Telegram Payments ──
-
-  const paymentToken = (process.env.PAYMENT_TOKEN ?? "").trim();
-
-  app.post("/api/payments/create-invoice", auth, async (req, res) => {
-    if (!paymentToken) {
+  app.post("/api/payments/create-payment", auth, async (req, res) => {
+    if (!shopId || !secretKey) {
       res.status(503).json({ error: "Payments not configured" });
       return;
     }
@@ -287,27 +275,205 @@ export function createApiServer(api: Api, botToken: string) {
       return;
     }
 
-    const payload: InvoicePayload = {
-      type: plan.durationCode === "test" ? "test" : "vpn",
-      months: plan.months,
-      dc: plan.durationCode,
+    const user = getUser(req);
+    const idempotenceKey = crypto.randomUUID();
+
+    const metadata: PaymentMetadata = {
+      telegram_user_id: String(user.id),
+      username: user.username ?? "",
+      first_name: user.first_name,
+      months: String(plan.months),
+      duration_code: plan.durationCode,
     };
 
-    try {
-      const link = await api.createInvoiceLink(
-        `${BRAND_NAME} — ${plan.label}`,
-        `Подписка ${BRAND_NAME} на ${plan.label}`,
-        JSON.stringify(payload),
-        paymentToken,
-        "RUB",
-        [{ label: plan.label, amount: plan.price * 100 }],
-      );
+    const body = JSON.stringify({
+      amount: { value: plan.price.toFixed(2), currency: "RUB" },
+      confirmation: { type: "embedded" },
+      capture: true,
+      description: `${BRAND_NAME} — ${plan.label}`,
+      metadata,
+    });
 
-      res.json({ invoiceLink: link });
+    try {
+      const ykRes = await fetch("https://api.yookassa.ru/v3/payments", {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${yookassaAuth}`,
+          "Idempotence-Key": idempotenceKey,
+          "Content-Type": "application/json",
+        },
+        body,
+      });
+
+      if (!ykRes.ok) {
+        const text = await ykRes.text();
+        console.error("YooKassa create-payment error:", ykRes.status, text);
+        res.status(502).json({ error: "Payment provider error" });
+        return;
+      }
+
+      const payment = await ykRes.json();
+      const confirmationToken: string = payment.confirmation?.confirmation_token;
+      if (!confirmationToken) {
+        console.error("YooKassa response missing confirmation_token:", payment);
+        res.status(502).json({ error: "Invalid payment provider response" });
+        return;
+      }
+
+      savePendingPayment({
+        paymentId: payment.id,
+        userId: user.id,
+        username: user.username ?? `tg_${user.id}`,
+        firstName: user.first_name,
+        months: plan.months,
+        durationCode: plan.durationCode,
+        amount: plan.price,
+        status: "pending",
+      });
+
+      res.json({ confirmationToken, paymentId: payment.id });
     } catch (err) {
-      console.error("createInvoiceLink error:", err);
-      res.status(500).json({ error: "Failed to create invoice" });
+      console.error("YooKassa create-payment fetch error:", err);
+      res.status(500).json({ error: "Failed to create payment" });
     }
+  });
+
+  // ── YooKassa: poll payment status from frontend ──
+
+  app.get("/api/payments/status/:paymentId", auth, (req, res) => {
+    const raw = req.params.paymentId;
+    const paymentId = typeof raw === "string" ? raw : raw?.[0];
+    if (!paymentId) {
+      res.status(400).json({ error: "Missing paymentId" });
+      return;
+    }
+    const pending = getPendingPayment(paymentId);
+    if (!pending) {
+      res.status(404).json({ error: "Payment not found" });
+      return;
+    }
+
+    const user = getUser(req);
+    if (pending.userId !== user.id) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    res.json({
+      status: pending.status,
+      config: pending.config ?? null,
+    });
+  });
+
+  // ── YooKassa: webhook (payment.succeeded / payment.canceled) ──
+
+  app.post("/api/payments/webhook", express.json(), async (req, res) => {
+    const event = req.body?.event;
+    const paymentObj = req.body?.object;
+    if (!paymentObj?.id) {
+      res.status(400).json({ error: "Bad request" });
+      return;
+    }
+
+    const paymentId: string = paymentObj.id;
+    const meta = paymentObj.metadata as PaymentMetadata | undefined;
+
+    if (event === "payment.canceled") {
+      markPaymentCanceled(paymentId);
+      res.json({ ok: true });
+      return;
+    }
+
+    if (event !== "payment.succeeded") {
+      res.json({ ok: true });
+      return;
+    }
+
+    // Verify payment status via YooKassa API
+    let verifiedStatus = paymentObj.status;
+    if (shopId && secretKey) {
+      try {
+        const check = await fetch(`https://api.yookassa.ru/v3/payments/${paymentId}`, {
+          headers: { Authorization: `Basic ${yookassaAuth}` },
+        });
+        if (check.ok) {
+          const verified = await check.json();
+          verifiedStatus = verified.status;
+        }
+      } catch (e) {
+        console.error("YooKassa verify fetch error:", e);
+      }
+    }
+
+    if (verifiedStatus !== "succeeded") {
+      res.json({ ok: true });
+      return;
+    }
+
+    const pending = getPendingPayment(paymentId);
+    const userId = pending?.userId ?? (meta ? Number(meta.telegram_user_id) : 0);
+    const username = pending?.username ?? meta?.username ?? "";
+    const firstName = pending?.firstName ?? meta?.first_name ?? "Аноним";
+    const months = pending?.months ?? (meta ? Number(meta.months) : 0);
+    const durationCode = pending?.durationCode ?? meta?.duration_code ?? "1m";
+    const amount = pending?.amount ?? (paymentObj.amount ? Number(paymentObj.amount.value) : 0);
+
+    if (!userId) {
+      console.error("Webhook: cannot resolve userId for payment", paymentId);
+      res.json({ ok: true });
+      return;
+    }
+
+    // Provision VPN (skip if already provisioned)
+    let config = pending?.config ?? getConfig(userId) ?? undefined;
+    let provisionOk = !!config;
+
+    if (!config) {
+      try {
+        const clientName = username || `tg_${userId}`;
+        config = await provisionVpnClient(clientName, durationCode);
+        provisionOk = true;
+        saveConfig(userId, config);
+      } catch (err) {
+        console.error("VPN provisioning after webhook failed:", err);
+      }
+    }
+
+    markPaymentSucceeded(paymentId, config);
+
+    const plan = PRICING.find((p) => p.months === months);
+    const planLabel = plan?.label ?? `${months} мес.`;
+    const amountStr = `${amount.toFixed(0)}₽`;
+    const userTag = username && username !== `tg_${userId}` ? `@${username}` : "без @ника";
+
+    // Notify user via bot
+    try {
+      await api.sendMessage(userId, PAYMENT_SUCCESS_USER(planLabel, amountStr), {
+        parse_mode: "HTML",
+      });
+    } catch (e) {
+      console.error("Не удалось отправить юзеру уведомление об оплате:", e);
+    }
+
+    // Notify admin
+    const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
+    if (rawBuyChat) {
+      const admin = resolveAdminChat(rawBuyChat);
+      try {
+        await api.sendMessage(
+          admin.chatId,
+          PAYMENT_ADMIN_NOTIFY(firstName, userTag, userId, planLabel, amountStr, provisionOk),
+          {
+            parse_mode: "HTML",
+            ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
+          },
+        );
+      } catch (e) {
+        console.error("Не удалось уведомить админа об оплате:", e);
+      }
+    }
+
+    res.json({ ok: true });
   });
 
   return app;

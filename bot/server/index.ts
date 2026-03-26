@@ -1,13 +1,9 @@
 import "dotenv/config";
 import { Bot, GrammyError, InlineKeyboard, session } from "grammy";
-import { type InvoicePayload, PRICING, type WebAppPayload, monthsLabel } from "../shared/plans";
+import { type WebAppPayload } from "../shared/plans";
 import {
   BRAND_NAME,
   escapeHtml,
-  PAYMENT_ADMIN_NOTIFY,
-  PAYMENT_CONFIG_SENT,
-  PAYMENT_PROVISION_FAILED_USER,
-  PAYMENT_SUCCESS_USER,
   PURCHASE_ADMIN_TEXT,
   SUPPORT_MEDIA_CAPTION_ADMIN,
   SUPPORT_MEDIA_HEADER_ADMIN,
@@ -17,8 +13,6 @@ import {
   SUPPORT_TICKET_SENT_USER,
   SUPPORT_USER_TEXT_ADMIN,
 } from "../shared/texts";
-import { saveConfig } from "./config-store";
-import { provisionVpnClient } from "./vpn";
 import {
   clearActiveDialog,
   getActiveDialog,
@@ -57,9 +51,10 @@ if (!webappUrl) {
   );
 }
 
-const paymentToken = (process.env.PAYMENT_TOKEN ?? "").trim();
-if (!paymentToken) {
-  console.warn("⚠️ PAYMENT_TOKEN не задан — оплата через Telegram Payments не будет работать");
+const merchantShopId = (process.env.MERCHANT_SHOP_ID ?? "").trim();
+const merchantKey = (process.env.MERCHANT_KEY ?? "").trim();
+if (!merchantShopId || !merchantKey) {
+  console.warn("⚠️ MERCHANT_SHOP_ID / MERCHANT_KEY не заданы — оплата через ЮКасса не будет работать");
 }
 
 const apiPort = parseInt(process.env.API_PORT ?? "3001", 10);
@@ -99,81 +94,6 @@ bot.command("start", async (ctx) => {
     parse_mode: "HTML",
     ...(openKb ? { reply_markup: openKb } : {}),
   });
-});
-
-// ────────────────── Telegram Payments: pre_checkout_query ──────────────────
-// MUST be registered before any generic `message` handler — Telegram gives only
-// 10 seconds to answer; if we don't, the payment fails.
-
-bot.on("pre_checkout_query", async (ctx) => {
-  try {
-    const raw = ctx.preCheckoutQuery.invoice_payload;
-    const payload: InvoicePayload = JSON.parse(raw);
-    if (payload.type !== "vpn") {
-      await ctx.answerPreCheckoutQuery(false, {
-        error_message: "Неизвестный тип товара",
-      });
-      return;
-    }
-    await ctx.answerPreCheckoutQuery(true);
-  } catch {
-    await ctx.answerPreCheckoutQuery(false, {
-      error_message: "Ошибка проверки заказа",
-    });
-  }
-});
-
-// ────────────────── Telegram Payments: successful_payment ──────────────────
-
-bot.on("message:successful_payment", async (ctx) => {
-  const sp = ctx.message!.successful_payment!;
-  const userId = ctx.from!.id;
-  const userName = ctx.from?.first_name ?? "Аноним";
-  const userTag = ctx.from?.username ? `@${ctx.from.username}` : "без @ника";
-
-  let payload: InvoicePayload;
-  try {
-    payload = JSON.parse(sp.invoice_payload) as InvoicePayload;
-  } catch {
-    console.error("Невалидный payload в successful_payment:", sp.invoice_payload);
-    return;
-  }
-
-  const plan = PRICING.find((p) => p.months === payload.months);
-  const planLabel = plan?.label ?? monthsLabel(payload.months);
-  const amountStr = `${(sp.total_amount / 100).toFixed(0)}₽`;
-
-  await ctx.reply(PAYMENT_SUCCESS_USER(planLabel, amountStr), {
-    parse_mode: "HTML",
-  });
-
-  let provisionOk = false;
-
-  try {
-    const clientName = ctx.from?.username ?? `tg_${userId}`;
-    const config = await provisionVpnClient(clientName, payload.dc);
-    provisionOk = true;
-    saveConfig(userId, config);
-  } catch (err) {
-    console.error("VPN provisioning after payment failed:", err);
-  }
-
-  const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
-  if (rawBuyChat) {
-    const admin = resolveAdminChat(rawBuyChat);
-    try {
-      await ctx.api.sendMessage(
-        admin.chatId,
-        PAYMENT_ADMIN_NOTIFY(userName, userTag, userId, planLabel, amountStr, provisionOk),
-        {
-          parse_mode: "HTML",
-          ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
-        },
-      );
-    } catch (e) {
-      console.error("Не удалось уведомить админа об оплате:", e);
-    }
-  }
 });
 
 // ────────────────── Mini App web_app_data ──────────────────
