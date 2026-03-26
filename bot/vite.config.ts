@@ -17,6 +17,10 @@ export default defineConfig({
         target: "http://localhost:3001",
         changeOrigin: true,
       },
+      "/api/payments": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
       "/api/vpn-proxy": {
         target: "https://193-108-112-87.nip.io",
         changeOrigin: true,

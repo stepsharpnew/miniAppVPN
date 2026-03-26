@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A0A1A" />
+  <title>MEME VPN — Оплата</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0A0A1A;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      text-align: center;
+      padding: 40px 24px;
+      max-width: 360px;
+    }
+    .icon { font-size: 56px; margin-bottom: 20px; }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+    p { color: #AAAACC; font-size: 14px; line-height: 1.5; margin-bottom: 24px; }
+    .btn {
+      display: inline-block;
+      padding: 14px 32px;
+      background: linear-gradient(90deg, #4D8BFF, #7B5FFF);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      border-radius: 12px;
+      text-decoration: none;
+      transition: opacity 0.2s;
+    }
+    .btn:active { opacity: 0.8; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">✅</div>
+    <h1>Оплата обрабатывается</h1>
+    <p>Вернитесь в Telegram — VPN-конфиг появится автоматически в приложении.</p>
+    <a id="bot-link" class="btn" href="#">Вернуться в Telegram</a>
+  </div>
+  <script>
+    var params = new URLSearchParams(location.search);
+    var bot = params.get('bot');
+    var link = document.getElementById('bot-link');
+    if (bot) {
+      link.href = 'https://t.me/' + encodeURIComponent(bot);
+    } else {
+      link.href = 'https://t.me';
+    }
+  </script>
+</body>
+</html>

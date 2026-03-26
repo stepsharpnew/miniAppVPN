@@ -256,11 +256,23 @@ export function createApiServer(api: Api, botToken: string) {
     res.json({ config });
   });
 
-  // ── YooKassa: create payment (embedded widget flow) ──
+  // ── YooKassa: create payment (redirect flow) ──
 
   const shopId = (process.env.MERCHANT_SHOP_ID ?? "").trim();
   const secretKey = (process.env.MERCHANT_KEY ?? "").trim();
   const yookassaAuth = Buffer.from(`${shopId}:${secretKey}`).toString("base64");
+  const webappUrl = (process.env.WEBAPP_URL ?? "").trim();
+
+  let cachedBotUsername: string | null = null;
+  async function getBotUsername(): Promise<string> {
+    if (!cachedBotUsername) {
+      try {
+        const me = await api.getMe();
+        cachedBotUsername = me.username ?? "";
+      } catch { cachedBotUsername = ""; }
+    }
+    return cachedBotUsername;
+  }
 
   app.post("/api/payments/create-payment", auth, async (req, res) => {
     if (!shopId || !secretKey) {
@@ -277,6 +289,7 @@ export function createApiServer(api: Api, botToken: string) {
 
     const user = getUser(req);
     const idempotenceKey = crypto.randomUUID();
+    const botUsername = await getBotUsername();
 
     const metadata: PaymentMetadata = {
       telegram_user_id: String(user.id),
@@ -286,9 +299,18 @@ export function createApiServer(api: Api, botToken: string) {
       duration_code: plan.durationCode,
     };
 
+    // Build return URL: static page on same domain with bot deep-link params
+    const baseUrl = webappUrl ? new URL(webappUrl).origin : "";
+    const returnUrl = baseUrl
+      ? `${baseUrl}/payment-return.html?bot=${encodeURIComponent(botUsername)}`
+      : "https://t.me/" + botUsername;
+
     const body = JSON.stringify({
       amount: { value: plan.price.toFixed(2), currency: "RUB" },
-      confirmation: { type: "embedded" },
+      confirmation: {
+        type: "redirect",
+        return_url: returnUrl,
+      },
       capture: true,
       description: `${BRAND_NAME} — ${plan.label}`,
       metadata,
@@ -313,9 +335,9 @@ export function createApiServer(api: Api, botToken: string) {
       }
 
       const payment = await ykRes.json();
-      const confirmationToken: string = payment.confirmation?.confirmation_token;
-      if (!confirmationToken) {
-        console.error("YooKassa response missing confirmation_token:", payment);
+      const confirmationUrl: string = payment.confirmation?.confirmation_url;
+      if (!confirmationUrl) {
+        console.error("YooKassa response missing confirmation_url:", payment);
         res.status(502).json({ error: "Invalid payment provider response" });
         return;
       }
@@ -331,7 +353,7 @@ export function createApiServer(api: Api, botToken: string) {
         status: "pending",
       });
 
-      res.json({ confirmationToken, paymentId: payment.id });
+      res.json({ confirmationUrl, paymentId: payment.id });
     } catch (err) {
       console.error("YooKassa create-payment fetch error:", err);
       res.status(500).json({ error: "Failed to create payment" });

@@ -12,12 +12,7 @@ try { localStorage.removeItem("vpn_config"); } catch { /* ok */ }
 
 const PENDING_KEY = "pending_payment_id";
 
-type PaymentStatus =
-  | "idle"
-  | "loading"
-  | "widget"
-  | "polling"
-  | "error";
+type PaymentStatus = "idle" | "loading" | "polling" | "error";
 
 interface PurchasePageProps {
   active: boolean;
@@ -29,7 +24,6 @@ export function PurchasePage({ active }: PurchasePageProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [configText, setConfigText] = useState("");
   const { save: saveConfig } = useVpnConfig();
-  const checkoutRef = useRef<YooMoneyCheckoutWidget | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -58,7 +52,7 @@ export function PurchasePage({ active }: PurchasePageProps) {
     (paymentId: string) => {
       setStatus("polling");
       let attempts = 0;
-      const MAX_ATTEMPTS = 45;
+      const MAX_ATTEMPTS = 90;
 
       pollingRef.current = setInterval(async () => {
         attempts++;
@@ -97,27 +91,19 @@ export function PurchasePage({ active }: PurchasePageProps) {
     [showConfig, stopPolling],
   );
 
-  // On mount: check if there's a pending payment from before a page reload
+  // On mount: resume polling if a payment was in progress (user returned from browser)
   useEffect(() => {
     let savedId: string | null = null;
     try { savedId = sessionStorage.getItem(PENDING_KEY); } catch { /* ok */ }
     if (savedId) {
       pollForConfig(savedId);
     }
-    return () => {
-      checkoutRef.current?.destroy();
-      stopPolling();
-    };
+    return () => { stopPolling(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const destroyWidget = useCallback(() => {
-    checkoutRef.current?.destroy();
-    checkoutRef.current = null;
-  }, []);
-
   const handleClick = useCallback(async () => {
-    if (status === "loading" || status === "widget" || status === "polling") return;
+    if (status === "loading" || status === "polling") return;
 
     setStatus("loading");
 
@@ -135,57 +121,17 @@ export function PurchasePage({ active }: PurchasePageProps) {
 
       if (!res.ok) throw new Error(`Ошибка сервера: ${res.status}`);
 
-      const { confirmationToken, paymentId } = await res.json();
+      const { confirmationUrl, paymentId } = await res.json();
 
       try { sessionStorage.setItem(PENDING_KEY, paymentId); } catch { /* ok */ }
 
       WebApp.MainButton.hideProgress();
 
-      if (!window.YooMoneyCheckoutWidget) {
-        throw new Error("Виджет ЮКасса не загружен");
-      }
+      // Open YooKassa payment page in system browser (deep links work there)
+      WebApp.openLink(confirmationUrl, { try_instant_view: false });
 
-      setStatus("widget");
-
-      const checkout = new window.YooMoneyCheckoutWidget({
-        confirmation_token: confirmationToken,
-        customization: {
-          colors: {
-            control_primary: "#7C3AED",
-            background: "#121225",
-          },
-        },
-        error_callback(error) {
-          console.error("YooKassa widget error:", error);
-          const msg = String(error ?? "");
-          destroyWidget();
-          if (/ERR_UNKNOWN_URL_SCHEME|unknown.*scheme/i.test(msg)) {
-            WebApp.showAlert(
-              "СБП не поддерживается в Telegram. Пожалуйста, оплатите картой, через SberPay или T-Pay.",
-            );
-            try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ok */ }
-            setStatus("idle");
-          } else {
-            pollForConfig(paymentId);
-          }
-        },
-      });
-
-      checkoutRef.current = checkout;
-
-      checkout.on("success", () => {
-        destroyWidget();
-        pollForConfig(paymentId);
-      });
-
-      checkout.on("fail", () => {
-        destroyWidget();
-        try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ok */ }
-        setStatus("idle");
-        WebApp.showAlert("Платёж не прошёл. Попробуйте ещё раз.");
-      });
-
-      await checkout.render("yookassa-payment-form");
+      // Start polling — user will return to Mini App after payment
+      pollForConfig(paymentId);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Неизвестная ошибка";
@@ -194,21 +140,17 @@ export function PurchasePage({ active }: PurchasePageProps) {
     } finally {
       WebApp.MainButton.hideProgress();
     }
-  }, [status, selected, pollForConfig, destroyWidget]);
+  }, [status, selected, pollForConfig]);
 
   const buttonText =
     status === "loading" || status === "polling"
       ? "ЗАГРУЗКА..."
-      : status === "widget"
-        ? "ОПЛАТА..."
-        : `КУПИТЬ ЗА ${selected.price}₽`;
-
-  const hideButton = status === "widget";
+      : `КУПИТЬ ЗА ${selected.price}₽`;
 
   useMainButton({
     text: buttonText,
     onClick: handleClick,
-    visible: active && !hideButton,
+    visible: active,
   });
 
   return (
@@ -216,7 +158,7 @@ export function PurchasePage({ active }: PurchasePageProps) {
       <Header />
 
       <section style={{ padding: "0 16px 24px" }}>
-        {status !== "widget" && status !== "polling" && (
+        {status !== "polling" && (
           <>
             <h3 style={sectionTitle}>Тариф</h3>
             <PriceList
@@ -230,18 +172,14 @@ export function PurchasePage({ active }: PurchasePageProps) {
           </>
         )}
 
-        <div
-          id="yookassa-payment-form"
-          style={{
-            display: status === "widget" ? "block" : "none",
-            minHeight: status === "widget" ? 400 : 0,
-          }}
-        />
-
         {status === "polling" && (
           <div style={pollingContainer}>
             <div style={spinnerStyle} />
-            <p style={pollingText}>Оплата прошла! Получаем ваш VPN-конфиг...</p>
+            <p style={pollingTitle}>Ожидаем оплату...</p>
+            <p style={pollingHint}>
+              Оплатите в открывшемся браузере и вернитесь сюда.
+              Конфиг появится автоматически.
+            </p>
           </div>
         )}
 
@@ -276,7 +214,7 @@ const pollingContainer: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
-  gap: 16,
+  gap: 12,
   padding: "48px 16px",
 };
 
@@ -289,10 +227,18 @@ const spinnerStyle: React.CSSProperties = {
   animation: "spin 0.8s linear infinite",
 };
 
-const pollingText: React.CSSProperties = {
-  color: "#AAAACC",
-  fontSize: 14,
+const pollingTitle: React.CSSProperties = {
+  color: "#FFFFFF",
+  fontSize: 16,
+  fontWeight: 600,
   textAlign: "center",
+};
+
+const pollingHint: React.CSSProperties = {
+  color: "#AAAACC",
+  fontSize: 13,
+  textAlign: "center",
+  lineHeight: "1.5",
 };
 
 const errorText: React.CSSProperties = {
