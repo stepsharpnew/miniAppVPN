@@ -71,3 +71,7 @@ img {
   max-width: 100%;
   display: block;
 }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

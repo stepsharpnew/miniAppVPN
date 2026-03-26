@@ -340,7 +340,58 @@ export function createApiServer(api: Api, botToken: string) {
 
   // ── YooKassa: poll payment status from frontend ──
 
-  app.get("/api/payments/status/:paymentId", auth, (req, res) => {
+  async function processSucceededPayment(paymentId: string): Promise<void> {
+    const pending = getPendingPayment(paymentId);
+    if (!pending || pending.status === "succeeded") return;
+
+    const userId = pending.userId;
+    let config = pending.config ?? getConfig(userId) ?? undefined;
+    let provisionOk = !!config;
+
+    if (!config) {
+      try {
+        const clientName = pending.username || `tg_${userId}`;
+        config = await provisionVpnClient(clientName, pending.durationCode);
+        provisionOk = true;
+        saveConfig(userId, config);
+      } catch (err) {
+        console.error("VPN provisioning (status poll) failed:", err);
+      }
+    }
+
+    markPaymentSucceeded(paymentId, config);
+
+    const plan = PRICING.find((p) => p.months === pending.months);
+    const planLabel = plan?.label ?? `${pending.months} мес.`;
+    const amountStr = `${pending.amount.toFixed(0)}₽`;
+    const userTag =
+      pending.username && pending.username !== `tg_${userId}`
+        ? `@${pending.username}`
+        : "без @ника";
+
+    try {
+      await api.sendMessage(userId, PAYMENT_SUCCESS_USER(planLabel, amountStr), {
+        parse_mode: "HTML",
+      });
+    } catch { /* user notification best-effort */ }
+
+    const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
+    if (rawBuyChat) {
+      const admin = resolveAdminChat(rawBuyChat);
+      try {
+        await api.sendMessage(
+          admin.chatId,
+          PAYMENT_ADMIN_NOTIFY(pending.firstName, userTag, userId, planLabel, amountStr, provisionOk),
+          {
+            parse_mode: "HTML",
+            ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
+          },
+        );
+      } catch { /* admin notification best-effort */ }
+    }
+  }
+
+  app.get("/api/payments/status/:paymentId", auth, async (req, res) => {
     const raw = req.params.paymentId;
     const paymentId = typeof raw === "string" ? raw : raw?.[0];
     if (!paymentId) {
@@ -359,15 +410,35 @@ export function createApiServer(api: Api, botToken: string) {
       return;
     }
 
+    // If still pending locally, check YooKassa API directly (webhook may be delayed)
+    if (pending.status === "pending" && shopId && secretKey) {
+      try {
+        const ykRes = await fetch(`https://api.yookassa.ru/v3/payments/${paymentId}`, {
+          headers: { Authorization: `Basic ${yookassaAuth}` },
+        });
+        if (ykRes.ok) {
+          const ykPayment = await ykRes.json();
+          if (ykPayment.status === "succeeded") {
+            await processSucceededPayment(paymentId);
+          } else if (ykPayment.status === "canceled") {
+            markPaymentCanceled(paymentId);
+          }
+        }
+      } catch (e) {
+        console.error("YooKassa status check error:", e);
+      }
+    }
+
+    const updated = getPendingPayment(paymentId);
     res.json({
-      status: pending.status,
-      config: pending.config ?? null,
+      status: updated?.status ?? pending.status,
+      config: updated?.config ?? pending.config ?? null,
     });
   });
 
   // ── YooKassa: webhook (payment.succeeded / payment.canceled) ──
 
-  app.post("/api/payments/webhook", express.json(), async (req, res) => {
+  app.post("/api/payments/webhook", async (req, res) => {
     const event = req.body?.event;
     const paymentObj = req.body?.object;
     if (!paymentObj?.id) {
@@ -410,22 +481,29 @@ export function createApiServer(api: Api, botToken: string) {
       return;
     }
 
+    // If payment is in local store, use shared processing path
     const pending = getPendingPayment(paymentId);
-    const userId = pending?.userId ?? (meta ? Number(meta.telegram_user_id) : 0);
-    const username = pending?.username ?? meta?.username ?? "";
-    const firstName = pending?.firstName ?? meta?.first_name ?? "Аноним";
-    const months = pending?.months ?? (meta ? Number(meta.months) : 0);
-    const durationCode = pending?.durationCode ?? meta?.duration_code ?? "1m";
-    const amount = pending?.amount ?? (paymentObj.amount ? Number(paymentObj.amount.value) : 0);
+    if (pending && pending.status !== "succeeded") {
+      await processSucceededPayment(paymentId);
+      res.json({ ok: true });
+      return;
+    }
 
+    // Fallback: payment not in local store (e.g. server restarted) — use webhook metadata
+    const userId = meta ? Number(meta.telegram_user_id) : 0;
     if (!userId) {
       console.error("Webhook: cannot resolve userId for payment", paymentId);
       res.json({ ok: true });
       return;
     }
 
-    // Provision VPN (skip if already provisioned)
-    let config = pending?.config ?? getConfig(userId) ?? undefined;
+    const username = meta?.username ?? "";
+    const firstName = meta?.first_name ?? "Аноним";
+    const months = meta ? Number(meta.months) : 0;
+    const durationCode = meta?.duration_code ?? "1m";
+    const amount = paymentObj.amount ? Number(paymentObj.amount.value) : 0;
+
+    let config = getConfig(userId) ?? undefined;
     let provisionOk = !!config;
 
     if (!config) {
@@ -439,23 +517,17 @@ export function createApiServer(api: Api, botToken: string) {
       }
     }
 
-    markPaymentSucceeded(paymentId, config);
-
     const plan = PRICING.find((p) => p.months === months);
     const planLabel = plan?.label ?? `${months} мес.`;
     const amountStr = `${amount.toFixed(0)}₽`;
     const userTag = username && username !== `tg_${userId}` ? `@${username}` : "без @ника";
 
-    // Notify user via bot
     try {
       await api.sendMessage(userId, PAYMENT_SUCCESS_USER(planLabel, amountStr), {
         parse_mode: "HTML",
       });
-    } catch (e) {
-      console.error("Не удалось отправить юзеру уведомление об оплате:", e);
-    }
+    } catch { /* best-effort */ }
 
-    // Notify admin
     const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
     if (rawBuyChat) {
       const admin = resolveAdminChat(rawBuyChat);
@@ -468,9 +540,7 @@ export function createApiServer(api: Api, botToken: string) {
             ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
           },
         );
-      } catch (e) {
-        console.error("Не удалось уведомить админа об оплате:", e);
-      }
+      } catch { /* best-effort */ }
     }
 
     res.json({ ok: true });

@@ -10,6 +10,8 @@ import { useVpnConfig } from "../hooks/useVpnConfig";
 
 try { localStorage.removeItem("vpn_config"); } catch { /* ok */ }
 
+const PENDING_KEY = "pending_payment_id";
+
 type PaymentStatus =
   | "idle"
   | "loading"
@@ -29,17 +31,17 @@ export function PurchasePage({ active }: PurchasePageProps) {
   const { save: saveConfig } = useVpnConfig();
   const checkoutRef = useRef<YooMoneyCheckoutWidget | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const paymentIdRef = useRef<string>("");
 
-  useEffect(() => {
-    return () => {
-      checkoutRef.current?.destroy();
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
   }, []);
 
   const showConfig = useCallback(
     async (config: string) => {
+      try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ok */ }
       saveConfig(config);
       setConfigText(config);
       const dataUrl = await QRCode.toDataURL(config, {
@@ -56,7 +58,7 @@ export function PurchasePage({ active }: PurchasePageProps) {
     (paymentId: string) => {
       setStatus("polling");
       let attempts = 0;
-      const MAX_ATTEMPTS = 30;
+      const MAX_ATTEMPTS = 45;
 
       pollingRef.current = setInterval(async () => {
         attempts++;
@@ -68,17 +70,23 @@ export function PurchasePage({ active }: PurchasePageProps) {
           const data = await res.json();
 
           if (data.status === "succeeded" && data.config) {
-            if (pollingRef.current) clearInterval(pollingRef.current);
-            pollingRef.current = null;
+            stopPolling();
             await showConfig(data.config);
+            setStatus("idle");
+            return;
+          }
+
+          if (data.status === "canceled") {
+            stopPolling();
+            try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ok */ }
             setStatus("idle");
             return;
           }
         } catch { /* retry */ }
 
         if (attempts >= MAX_ATTEMPTS) {
-          if (pollingRef.current) clearInterval(pollingRef.current);
-          pollingRef.current = null;
+          stopPolling();
+          try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ok */ }
           WebApp.showAlert(
             "Оплата прошла, но конфиг ещё не готов. Он появится в профиле или в чате с ботом.",
           );
@@ -86,8 +94,22 @@ export function PurchasePage({ active }: PurchasePageProps) {
         }
       }, 2000);
     },
-    [showConfig],
+    [showConfig, stopPolling],
   );
+
+  // On mount: check if there's a pending payment from before a page reload
+  useEffect(() => {
+    let savedId: string | null = null;
+    try { savedId = sessionStorage.getItem(PENDING_KEY); } catch { /* ok */ }
+    if (savedId) {
+      pollForConfig(savedId);
+    }
+    return () => {
+      checkoutRef.current?.destroy();
+      stopPolling();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const destroyWidget = useCallback(() => {
     checkoutRef.current?.destroy();
@@ -114,7 +136,8 @@ export function PurchasePage({ active }: PurchasePageProps) {
       if (!res.ok) throw new Error(`Ошибка сервера: ${res.status}`);
 
       const { confirmationToken, paymentId } = await res.json();
-      paymentIdRef.current = paymentId;
+
+      try { sessionStorage.setItem(PENDING_KEY, paymentId); } catch { /* ok */ }
 
       WebApp.MainButton.hideProgress();
 
@@ -134,8 +157,17 @@ export function PurchasePage({ active }: PurchasePageProps) {
         },
         error_callback(error) {
           console.error("YooKassa widget error:", error);
+          const msg = String(error ?? "");
           destroyWidget();
-          setStatus("error");
+          if (/ERR_UNKNOWN_URL_SCHEME|unknown.*scheme/i.test(msg)) {
+            WebApp.showAlert(
+              "СБП не поддерживается в Telegram. Пожалуйста, оплатите картой, через SberPay или T-Pay.",
+            );
+            try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ok */ }
+            setStatus("idle");
+          } else {
+            pollForConfig(paymentId);
+          }
         },
       });
 
@@ -148,6 +180,7 @@ export function PurchasePage({ active }: PurchasePageProps) {
 
       checkout.on("fail", () => {
         destroyWidget();
+        try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ok */ }
         setStatus("idle");
         WebApp.showAlert("Платёж не прошёл. Попробуйте ещё раз.");
       });
@@ -183,7 +216,7 @@ export function PurchasePage({ active }: PurchasePageProps) {
       <Header />
 
       <section style={{ padding: "0 16px 24px" }}>
-        {status !== "widget" && (
+        {status !== "widget" && status !== "polling" && (
           <>
             <h3 style={sectionTitle}>Тариф</h3>
             <PriceList
@@ -206,7 +239,10 @@ export function PurchasePage({ active }: PurchasePageProps) {
         />
 
         {status === "polling" && (
-          <p style={pollingText}>Получаем ваш конфиг...</p>
+          <div style={pollingContainer}>
+            <div style={spinnerStyle} />
+            <p style={pollingText}>Оплата прошла! Получаем ваш VPN-конфиг...</p>
+          </div>
         )}
 
         {status === "error" && (
@@ -236,11 +272,27 @@ const sectionTitle: React.CSSProperties = {
   marginBottom: 12,
 };
 
+const pollingContainer: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: 16,
+  padding: "48px 16px",
+};
+
+const spinnerStyle: React.CSSProperties = {
+  width: 40,
+  height: 40,
+  border: "3px solid rgba(124, 58, 237, 0.2)",
+  borderTopColor: "#7C3AED",
+  borderRadius: "50%",
+  animation: "spin 0.8s linear infinite",
+};
+
 const pollingText: React.CSSProperties = {
   color: "#AAAACC",
   fontSize: 14,
   textAlign: "center",
-  marginTop: 16,
 };
 
 const errorText: React.CSSProperties = {
