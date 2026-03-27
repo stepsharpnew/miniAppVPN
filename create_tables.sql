@@ -4,13 +4,14 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS users (
     telegram_id     BIGINT          PRIMARY KEY,
     is_blocked      BOOLEAN         NOT NULL DEFAULT FALSE,
-    is_vip          BOOLEAN         NOT NULL DEFAULT FALSE,
+    telegram_nickname VARCHAR(255),
     expired_at      TIMESTAMP WITH TIME ZONE,
     vpn_config      TEXT,
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS vpn_config TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_nickname VARCHAR(255);
 
 -- Таблица серверов
 CREATE TABLE IF NOT EXISTS servers (

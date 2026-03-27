@@ -32,6 +32,15 @@ interface TelegramUser {
   username?: string;
 }
 
+function normalizeTelegramNickname(username?: string): string | null {
+  if (!username) return null;
+  const trimmed = username.trim();
+  if (!trimmed) return null;
+  // Legacy fallback value from older flow should not be stored as nickname.
+  if (trimmed.startsWith("tg_")) return null;
+  return trimmed;
+}
+
 function verifyInitData(
   initData: string,
   botToken: string,
@@ -310,7 +319,7 @@ export function createApiServer(api: Api, botToken: string) {
         active,
         expired_at: row.expired_at,
         is_blocked: row.is_blocked,
-        is_vip: row.is_vip,
+        telegram_nickname: row.telegram_nickname,
         config: active ? row.vpn_config : null,
         created_at: row.created_at,
       });
@@ -409,7 +418,7 @@ export function createApiServer(api: Api, botToken: string) {
       savePendingPayment({
         paymentId: payment.id,
         userId: user.id,
-        username: user.username ?? `tg_${user.id}`,
+        username: user.username ?? "",
         firstName: user.first_name,
         months: plan.months,
         durationCode: plan.durationCode,
@@ -448,7 +457,12 @@ export function createApiServer(api: Api, botToken: string) {
     markPaymentSucceeded(paymentId, config);
 
     try {
-      await upsertUserSubscription(userId, pending.months, config);
+      await upsertUserSubscription(
+        userId,
+        pending.months,
+        config,
+        normalizeTelegramNickname(pending.username),
+      );
     } catch (err) {
       console.error("DB upsert after payment failed:", err);
     }
@@ -610,7 +624,12 @@ export function createApiServer(api: Api, botToken: string) {
     }
 
     try {
-      await upsertUserSubscription(userId, months, config);
+      await upsertUserSubscription(
+        userId,
+        months,
+        config,
+        normalizeTelegramNickname(username),
+      );
     } catch (err) {
       console.error("DB upsert after webhook payment failed:", err);
     }
