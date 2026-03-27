@@ -76,10 +76,24 @@ jobs:
       - name: Build and restart services
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
+            set -euo pipefail
             cd ~/meme_bot
+            docker compose --env-file .env config > /dev/null
             docker compose pull postgres
             docker compose build --no-cache bot nginx
             docker compose up -d --remove-orphans
+            for i in {1..30}; do
+              if docker compose exec -T postgres pg_isready -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" > /dev/null 2>&1; then
+                echo "Postgres is ready"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "Postgres failed to become ready in time"
+                exit 1
+              fi
+              sleep 2
+            done
+            docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" < create_tables.sql
             docker compose ps
           ENDSSH
 

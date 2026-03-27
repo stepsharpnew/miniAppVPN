@@ -76,6 +76,12 @@
   letter-spacing: 1px;
 }
 
+.expiryInfo {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
 .divider {
   height: 1px;
   background: rgba(255, 255, 255, 0.06);

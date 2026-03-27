@@ -23,6 +23,7 @@ import {
   markPaymentSucceeded,
   savePendingPayment,
 } from "./payment-store";
+import { getUserSubscription, upsertUserSubscription } from "./db";
 
 interface TelegramUser {
   id: number;
@@ -284,6 +285,31 @@ export function createApiServer(api: Api, botToken: string) {
     }
   });
 
+  // ── Subscription status ──
+
+  app.get("/api/subscription", auth, async (req, res) => {
+    const user = getUser(req);
+    try {
+      const row = await getUserSubscription(user.id);
+      if (!row) {
+        res.json({ active: false, expired_at: null });
+        return;
+      }
+      const expiredAt = row.expired_at ? new Date(row.expired_at) : null;
+      const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
+      res.json({
+        active,
+        expired_at: row.expired_at,
+        is_blocked: row.is_blocked,
+        is_vip: row.is_vip,
+        created_at: row.created_at,
+      });
+    } catch (err) {
+      console.error("Subscription check error:", err);
+      res.status(500).json({ error: "Internal error" });
+    }
+  });
+
   // ── YooKassa: create payment (redirect flow) ──
 
   const shopId = (process.env.MERCHANT_SHOP_ID ?? "").trim();
@@ -410,6 +436,12 @@ export function createApiServer(api: Api, botToken: string) {
     }
 
     markPaymentSucceeded(paymentId, config);
+
+    try {
+      await upsertUserSubscription(userId, pending.months);
+    } catch (err) {
+      console.error("DB upsert after payment failed:", err);
+    }
 
     const plan = PRICING.find((p) => p.months === pending.months);
     const planLabel = plan?.label ?? `${pending.months} мес.`;
@@ -565,6 +597,12 @@ export function createApiServer(api: Api, botToken: string) {
       } catch (err) {
         console.error("VPN provisioning after webhook failed:", err);
       }
+    }
+
+    try {
+      await upsertUserSubscription(userId, months);
+    } catch (err) {
+      console.error("DB upsert after webhook payment failed:", err);
     }
 
     const plan = PRICING.find((p) => p.months === months);

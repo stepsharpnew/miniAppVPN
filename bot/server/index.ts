@@ -24,6 +24,7 @@ import {
 import { addMessage } from "./chat-store";
 import { createApiServer } from "./api";
 import { type MemeContext, type SessionData } from "./types";
+import { closeDb, initDb } from "./db";
 
 const botToken = (process.env.BOT_TOKEN ?? "").trim();
 if (!botToken) throw new Error("BOT_TOKEN is not set");
@@ -366,6 +367,13 @@ const apiServer = createApiServer(bot.api, botToken);
 
 void (async () => {
   try {
+    await initDb();
+  } catch (e) {
+    console.error("Не удалось подключиться к PostgreSQL:", e);
+    process.exit(1);
+  }
+
+  try {
     await bot.api.getMe();
   } catch (e) {
     if (e instanceof GrammyError && e.error_code === 401) {
@@ -403,6 +411,14 @@ void (async () => {
   } catch (e) {
     console.warn("Не удалось установить команды бота:", e);
   }
+
+  const shutdown = async () => {
+    await bot.stop();
+    await closeDb();
+    process.exit(0);
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
 
   await bot.start();
   console.log(`${BRAND_NAME} бот запущен 🚀`);
