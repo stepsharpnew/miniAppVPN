@@ -30,6 +30,7 @@ export interface UserRow {
   is_blocked: boolean;
   is_vip: boolean;
   expired_at: string | null;
+  vpn_config: string | null;
   created_at: string;
 }
 
@@ -37,22 +38,25 @@ export interface UserRow {
  * Create user if missing, then extend subscription by `months`.
  * If the user already has an active subscription (expired_at > now),
  * the new period is added on top; otherwise it starts from now.
+ * Optionally saves VPN config alongside the subscription.
  */
 export async function upsertUserSubscription(
   telegramId: number,
   months: number,
+  vpnConfig?: string,
 ): Promise<UserRow> {
   const { rows } = await getPool().query<UserRow>(
-    `INSERT INTO users (telegram_id, expired_at)
-     VALUES ($1, NOW() + make_interval(months => $2))
+    `INSERT INTO users (telegram_id, expired_at, vpn_config)
+     VALUES ($1, NOW() + make_interval(months => $2), $3)
      ON CONFLICT (telegram_id) DO UPDATE
        SET expired_at = CASE
          WHEN users.expired_at IS NOT NULL AND users.expired_at > NOW()
            THEN users.expired_at + make_interval(months => $2)
            ELSE NOW() + make_interval(months => $2)
-       END
+       END,
+       vpn_config = COALESCE($3, users.vpn_config)
      RETURNING *`,
-    [telegramId, months],
+    [telegramId, months, vpnConfig ?? null],
   );
   return rows[0];
 }

@@ -12,6 +12,7 @@ interface SubscriptionInfo {
   expired_at: string | null;
   is_blocked?: boolean;
   is_vip?: boolean;
+  config?: string | null;
 }
 
 function formatExpiry(iso: string): string {
@@ -32,11 +33,12 @@ function formatExpiry(iso: string): string {
 
 export function ProfilePage() {
   const user = useTelegramUser();
-  const { config, hasConfig } = useVpnConfig();
+  const { config: localConfig, save: saveLocalConfig } = useVpnConfig();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [sub, setSub] = useState<SubscriptionInfo | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -45,19 +47,33 @@ export function ProfilePage() {
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (alive && data) setSub(data);
+        if (!alive) return;
+        if (data) {
+          setSub(data);
+          if (data.config) saveLocalConfig(data.config);
+        } else {
+          setSub({ active: false, expired_at: null, config: null });
+        }
+        setLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (alive) {
+          setSub({ active: false, expired_at: null, config: null });
+          setLoaded(true);
+        }
+      });
     return () => { alive = false; };
   }, []);
 
+  const activeConfig = sub?.config ?? (sub?.active ? localConfig : null);
+
   useEffect(() => {
     let alive = true;
-    if (!config) {
+    if (!activeConfig) {
       setQrDataUrl(null);
       return;
     }
-    QRCode.toDataURL(config, {
+    QRCode.toDataURL(activeConfig, {
       width: 260,
       margin: 2,
       color: { dark: "#000000", light: "#FFFFFF" },
@@ -71,10 +87,10 @@ export function ProfilePage() {
     return () => {
       alive = false;
     };
-  }, [config]);
+  }, [activeConfig]);
 
   const handleSendFile = useCallback(async () => {
-    if (sending) return;
+    if (sending || !activeConfig) return;
     setSending(true);
     try {
       const res = await fetch("/api/payments/config/send-file", {
@@ -83,7 +99,7 @@ export function ProfilePage() {
           "Content-Type": "application/json",
           "X-Telegram-Init-Data": WebApp.initData,
         },
-        body: JSON.stringify({ config }),
+        body: JSON.stringify({ config: activeConfig }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
       setSent(true);
@@ -92,7 +108,7 @@ export function ProfilePage() {
     } finally {
       setSending(false);
     }
-  }, [sending, config]);
+  }, [sending, activeConfig]);
 
   return (
     <div className={styles.page}>
@@ -119,7 +135,7 @@ export function ProfilePage() {
 
           <div className={styles.statusWrap}>
             <div className={styles.statusLabel}>Подписка</div>
-            <StatusBadge active={sub?.active ?? hasConfig} />
+            <StatusBadge active={sub?.active ?? false} />
             {sub?.active && sub.expired_at && (
               <div className={styles.expiryInfo}>
                 {formatExpiry(sub.expired_at)}
@@ -133,7 +149,9 @@ export function ProfilePage() {
         <div className={styles.configBlock}>
           <div className={styles.sectionHeader}>VPN конфиг</div>
 
-          {hasConfig && qrDataUrl ? (
+          {!loaded ? (
+            <div className={styles.noConfig}>Загрузка...</div>
+          ) : sub?.active && activeConfig && qrDataUrl ? (
             <>
               <img
                 src={qrDataUrl}

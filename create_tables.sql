@@ -6,8 +6,11 @@ CREATE TABLE IF NOT EXISTS users (
     is_blocked      BOOLEAN         NOT NULL DEFAULT FALSE,
     is_vip          BOOLEAN         NOT NULL DEFAULT FALSE,
     expired_at      TIMESTAMP WITH TIME ZONE,
+    vpn_config      TEXT,
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS vpn_config TEXT;
 
 -- Таблица серверов
 CREATE TABLE IF NOT EXISTS servers (

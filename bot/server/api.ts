@@ -247,14 +247,23 @@ export function createApiServer(api: Api, botToken: string) {
 
   // ── Get VPN config after payment ──
 
-  app.get("/api/payments/config", auth, (req, res) => {
+  app.get("/api/payments/config", auth, async (req, res) => {
     const user = getUser(req);
-    const config = getConfig(user.id);
-    if (!config) {
-      res.status(404).json({ error: "Config not ready" });
+    const memConfig = getConfig(user.id);
+    if (memConfig) {
+      res.json({ config: memConfig });
       return;
     }
-    res.json({ config });
+    try {
+      const row = await getUserSubscription(user.id);
+      if (row?.vpn_config) {
+        res.json({ config: row.vpn_config });
+        return;
+      }
+    } catch (err) {
+      console.error("DB config lookup error:", err);
+    }
+    res.status(404).json({ error: "Config not ready" });
   });
 
   // ── Send config as .conf file directly to user's Telegram chat ──
@@ -292,7 +301,7 @@ export function createApiServer(api: Api, botToken: string) {
     try {
       const row = await getUserSubscription(user.id);
       if (!row) {
-        res.json({ active: false, expired_at: null });
+        res.json({ active: false, expired_at: null, config: null });
         return;
       }
       const expiredAt = row.expired_at ? new Date(row.expired_at) : null;
@@ -302,6 +311,7 @@ export function createApiServer(api: Api, botToken: string) {
         expired_at: row.expired_at,
         is_blocked: row.is_blocked,
         is_vip: row.is_vip,
+        config: active ? row.vpn_config : null,
         created_at: row.created_at,
       });
     } catch (err) {
@@ -438,7 +448,7 @@ export function createApiServer(api: Api, botToken: string) {
     markPaymentSucceeded(paymentId, config);
 
     try {
-      await upsertUserSubscription(userId, pending.months);
+      await upsertUserSubscription(userId, pending.months, config);
     } catch (err) {
       console.error("DB upsert after payment failed:", err);
     }
@@ -600,7 +610,7 @@ export function createApiServer(api: Api, botToken: string) {
     }
 
     try {
-      await upsertUserSubscription(userId, months);
+      await upsertUserSubscription(userId, months, config);
     } catch (err) {
       console.error("DB upsert after webhook payment failed:", err);
     }
