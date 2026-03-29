@@ -10,7 +10,11 @@ import { QrModal } from "../components/QrModal";
 import { useVpnConfig } from "../hooks/useVpnConfig";
 import styles from "./PurchasePage.module.css";
 
-try { localStorage.removeItem("vpn_config"); } catch { /* ok */ }
+try {
+  localStorage.removeItem("vpn_config");
+} catch {
+  /* ok */
+}
 
 const PENDING_KEY = "pending_payment_id";
 const PLATFORM_KEY = "selected_platform";
@@ -26,33 +30,49 @@ function getSavedPlatform(): PlatformInfo {
     const id = localStorage.getItem(PLATFORM_KEY);
     const found = PLATFORMS.find((p) => p.id === id);
     if (found) return found;
-  } catch { /* ok */ }
+  } catch {
+    /* ok */
+  }
   return PLATFORMS[0];
 }
 
 export function PurchasePage({ active }: PurchasePageProps) {
-  const [selectedPlatform, setSelectedPlatform] = useState<PlatformInfo>(getSavedPlatform);
+  const [selectedPlatform, setSelectedPlatform] =
+    useState<PlatformInfo>(getSavedPlatform);
   const [selected, setSelected] = useState<PricingOption>(PRICING[0]);
   const [status, setStatus] = useState<PaymentStatus>("idle");
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const { save: saveConfig } = useVpnConfig();
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [hasActiveSub, setHasActiveSub] = useState(false);
+  const [subExpiredAt, setSubExpiredAt] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refreshSubscription = useCallback(() => {
     fetch("/api/subscription", {
       headers: { "X-Telegram-Init-Data": WebApp.initData },
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data?.active) setHasActiveSub(true);
+        else setHasActiveSub(false);
+        setSubExpiredAt(
+          data?.active && data.expired_at ? data.expired_at : null,
+        );
       })
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    refreshSubscription();
+  }, [refreshSubscription]);
+
   const handlePlatformSelect = useCallback((platform: PlatformInfo) => {
     setSelectedPlatform(platform);
-    try { localStorage.setItem(PLATFORM_KEY, platform.id); } catch { /* ok */ }
+    try {
+      localStorage.setItem(PLATFORM_KEY, platform.id);
+    } catch {
+      /* ok */
+    }
   }, []);
 
   const stopPolling = useCallback(() => {
@@ -64,7 +84,11 @@ export function PurchasePage({ active }: PurchasePageProps) {
 
   const showConfig = useCallback(
     async (config: string) => {
-      try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ok */ }
+      try {
+        sessionStorage.removeItem(PENDING_KEY);
+      } catch {
+        /* ok */
+      }
       saveConfig(config);
       const dataUrl = await QRCode.toDataURL(config, {
         width: 260,
@@ -96,22 +120,32 @@ export function PurchasePage({ active }: PurchasePageProps) {
             if (data.config) {
               await showConfig(data.config);
             }
-            setHasActiveSub(true);
+            refreshSubscription();
             setStatus("idle");
             return;
           }
 
           if (data.status === "canceled") {
             stopPolling();
-            try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ok */ }
+            try {
+              sessionStorage.removeItem(PENDING_KEY);
+            } catch {
+              /* ok */
+            }
             setStatus("idle");
             return;
           }
-        } catch { /* retry */ }
+        } catch {
+          /* retry */
+        }
 
         if (attempts >= MAX_ATTEMPTS) {
           stopPolling();
-          try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ok */ }
+          try {
+            sessionStorage.removeItem(PENDING_KEY);
+          } catch {
+            /* ok */
+          }
           WebApp.showAlert(
             "Оплата прошла, но конфиг ещё не готов. Он появится в профиле или в чате с ботом.",
           );
@@ -119,16 +153,22 @@ export function PurchasePage({ active }: PurchasePageProps) {
         }
       }, 2000);
     },
-    [showConfig, stopPolling],
+    [showConfig, stopPolling, refreshSubscription],
   );
 
   useEffect(() => {
     let savedId: string | null = null;
-    try { savedId = sessionStorage.getItem(PENDING_KEY); } catch { /* ok */ }
+    try {
+      savedId = sessionStorage.getItem(PENDING_KEY);
+    } catch {
+      /* ok */
+    }
     if (savedId) {
       pollForConfig(savedId);
     }
-    return () => { stopPolling(); };
+    return () => {
+      stopPolling();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -151,14 +191,17 @@ export function PurchasePage({ active }: PurchasePageProps) {
 
       const { confirmationUrl, paymentId } = await res.json();
 
-      try { sessionStorage.setItem(PENDING_KEY, paymentId); } catch { /* ok */ }
+      try {
+        sessionStorage.setItem(PENDING_KEY, paymentId);
+      } catch {
+        /* ok */
+      }
 
       WebApp.openLink(confirmationUrl, { try_instant_view: false });
 
       pollForConfig(paymentId);
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Неизвестная ошибка";
+      const message = err instanceof Error ? err.message : "Неизвестная ошибка";
       WebApp.showAlert(`Ошибка: ${message}`);
       setStatus("idle");
     }
@@ -187,6 +230,12 @@ export function PurchasePage({ active }: PurchasePageProps) {
             />
 
             <h3 className={styles.sectionTitleSpaced}>Тариф</h3>
+            {hasActiveSub && subExpiredAt && (
+              <p className={styles.renewalHint}>
+                Срок будет добавлен к текущей подписке (до{" "}
+                {new Date(subExpiredAt).toLocaleDateString("ru-RU")})
+              </p>
+            )}
             <PriceList
               options={PRICING}
               selectedMonths={selected.months}
@@ -203,8 +252,8 @@ export function PurchasePage({ active }: PurchasePageProps) {
             <div className={styles.spinner} />
             <p className={styles.pollingTitle}>Ожидаем оплату...</p>
             <p className={styles.pollingHint}>
-              Оплатите в открывшемся браузере и вернитесь сюда.
-              Конфиг появится автоматически.
+              Оплатите в открывшемся браузере и вернитесь сюда. Конфиг появится
+              автоматически.
             </p>
           </div>
         )}
