@@ -1,7 +1,5 @@
-const VPN_BASE = (process.env.VPN_BASE_URL ?? "https://193-108-112-87.nip.io").replace(/\/+$/, "");
-const VPN_USER = process.env.VPN_API_USER ?? "shalos";
-const VPN_PASS = process.env.VPN_API_PASSWORD ?? "DkA8j-ddV_fN";
-const SERVER_ID = process.env.VPN_SERVER_ID ?? "4a2b39";
+const VPN_USER = process.env.VPN_API_USER ?? "";
+const VPN_PASS = process.env.VPN_API_PASSWORD ?? "";
 
 const authHeader = `Basic ${Buffer.from(`${VPN_USER}:${VPN_PASS}`).toString("base64")}`;
 
@@ -53,34 +51,40 @@ function buildConfig(server: Server, client: Client): string {
   ].join("\n");
 }
 
-async function findExistingClient(name: string): Promise<{ id: string; config: string } | null> {
-  const resp = await fetch(`${VPN_BASE}/api/servers`, {
+async function findExistingClient(
+  name: string,
+  baseUrl: string,
+): Promise<{ id: string; config: string; serverId: string } | null> {
+  const resp = await fetch(`${baseUrl}/api/servers`, {
     headers: { Authorization: authHeader },
   });
   if (!resp.ok) return null;
 
   const servers: Server[] = await resp.json();
-  const server = servers.find((s) => s.id === SERVER_ID);
-  if (!server) return null;
-
-  const client = server.clients.find((c) => c.name === name);
-  if (!client) return null;
-
-  return { id: client.id, config: buildConfig(server, client) };
+  for (const server of servers) {
+    const client = server.clients.find((c) => c.name === name);
+    if (client) {
+      return { id: client.id, config: buildConfig(server, client), serverId: server.id };
+    }
+  }
+  return null;
 }
 
 /**
  * Provisions a VPN client: returns an existing config or creates a new one.
+ * `serverId` — the WireGuard server to provision on (from the `servers` table).
  * Throws on network / API errors.
  */
 export async function provisionVpnClient(
   clientName: string,
   durationCode: string,
+  serverId: string,
+  baseUrl: string,
 ): Promise<string> {
-  const existing = await findExistingClient(clientName);
+  const existing = await findExistingClient(clientName, baseUrl);
   if (existing) return existing.config;
 
-  const resp = await fetch(`${VPN_BASE}/api/servers/${SERVER_ID}/clients`, {
+  const resp = await fetch(`${baseUrl}/api/servers/${serverId}/clients`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -100,20 +104,21 @@ export async function provisionVpnClient(
 
 /**
  * Extend an existing VPN client's duration on the server.
- * Finds the client by name, then calls the extend endpoint.
+ * Automatically detects which server the client lives on.
  * Throws if the client is not found or the API call fails.
  */
 export async function extendVpnClient(
   clientName: string,
   durationCode: string,
+  baseUrl: string,
 ): Promise<void> {
-  const existing = await findExistingClient(clientName);
+  const existing = await findExistingClient(clientName, baseUrl);
   if (!existing) {
     throw new Error(`VPN client not found: ${clientName}`);
   }
 
   const resp = await fetch(
-    `${VPN_BASE}/api/servers/${SERVER_ID}/clients/${existing.id}/extend`,
+    `${baseUrl}/api/servers/${existing.serverId}/clients/${existing.id}/extend`,
     {
       method: "POST",
       headers: {

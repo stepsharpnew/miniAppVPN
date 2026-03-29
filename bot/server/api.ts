@@ -23,7 +23,20 @@ import {
   markPaymentSucceeded,
   savePendingPayment,
 } from "./payment-store";
-import { getUserSubscription, upsertUserSubscription } from "./db";
+import {
+  type ServerRow,
+  getAllEnabledServers,
+  getRandomEnabledServer,
+  getUserSubscription,
+  incrementServerUserCount,
+  upsertUserSubscription,
+} from "./db";
+
+function getServerBaseUrl(server: ServerRow): string {
+  const raw = server.domain_server_name;
+  if (!raw) throw new Error(`Server ${server.server_id} has no domain_server_name (base URL)`);
+  return raw.replace(/\/+$/, "");
+}
 
 interface TelegramUser {
   id: number;
@@ -468,7 +481,16 @@ export function createApiServer(api: Api, botToken: string) {
           provisionOk = true;
           const clientName = pending.username || `tg_${userId}`;
           try {
-            await extendVpnClient(clientName, pending.durationCode);
+            const servers = await getAllEnabledServers();
+            let extended = false;
+            for (const srv of servers) {
+              try {
+                await extendVpnClient(clientName, pending.durationCode, getServerBaseUrl(srv));
+                extended = true;
+                break;
+              } catch { /* client not on this VM, try next */ }
+            }
+            if (!extended) console.error("VPN extend (renewal): client not found on any server");
           } catch (err) {
             console.error("VPN extend (renewal) failed:", err);
           }
@@ -480,10 +502,14 @@ export function createApiServer(api: Api, botToken: string) {
 
     if (!config) {
       try {
+        const server = await getRandomEnabledServer();
+        if (!server?.server_id) throw new Error("No enabled VPN servers in DB");
+        const baseUrl = getServerBaseUrl(server);
         const clientName = pending.username || `tg_${userId}`;
-        config = await provisionVpnClient(clientName, pending.durationCode);
+        config = await provisionVpnClient(clientName, pending.durationCode, server.server_id, baseUrl);
         provisionOk = true;
         saveConfig(userId, config);
+        await incrementServerUserCount(server.server_id).catch(() => {});
       } catch (err) {
         console.error("VPN provisioning (status poll) failed:", err);
       }
@@ -656,7 +682,16 @@ export function createApiServer(api: Api, botToken: string) {
           provisionOk = true;
           const clientName = username || `tg_${userId}`;
           try {
-            await extendVpnClient(clientName, durationCode);
+            const servers = await getAllEnabledServers();
+            let extended = false;
+            for (const srv of servers) {
+              try {
+                await extendVpnClient(clientName, durationCode, getServerBaseUrl(srv));
+                extended = true;
+                break;
+              } catch { /* client not on this VM, try next */ }
+            }
+            if (!extended) console.error("VPN extend (webhook renewal): client not found on any server");
           } catch (err) {
             console.error("VPN extend (webhook renewal) failed:", err);
           }
@@ -668,10 +703,14 @@ export function createApiServer(api: Api, botToken: string) {
 
     if (!config) {
       try {
+        const server = await getRandomEnabledServer();
+        if (!server?.server_id) throw new Error("No enabled VPN servers in DB");
+        const baseUrl = getServerBaseUrl(server);
         const clientName = username || `tg_${userId}`;
-        config = await provisionVpnClient(clientName, durationCode);
+        config = await provisionVpnClient(clientName, durationCode, server.server_id, baseUrl);
         provisionOk = true;
         saveConfig(userId, config);
+        await incrementServerUserCount(server.server_id).catch(() => {});
       } catch (err) {
         console.error("VPN provisioning after webhook failed:", err);
       }

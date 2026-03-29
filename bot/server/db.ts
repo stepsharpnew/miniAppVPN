@@ -72,3 +72,41 @@ export async function getUserSubscription(
   );
   return rows[0] ?? null;
 }
+
+// ── Servers ──
+
+export interface ServerRow {
+  id: string;
+  name_server: string | null;
+  location: string | null;
+  ip_address: string | null;
+  port_api: string | null;
+  server_id: string;
+  is_vip: boolean;
+  enable: boolean;
+  domain_server_name: string | null;
+  user_count: number;
+}
+
+export async function getRandomEnabledServer(): Promise<ServerRow | null> {
+  const { rows } = await getPool().query<ServerRow>(
+    "SELECT * FROM servers WHERE enable = TRUE ORDER BY RANDOM() LIMIT 1",
+  );
+  return rows[0] ?? null;
+}
+
+export async function getAllEnabledServers(): Promise<ServerRow[]> {
+  const { rows } = await getPool().query<ServerRow>(
+    "SELECT * FROM servers WHERE enable = TRUE",
+  );
+  return rows;
+}
+
+export async function incrementServerUserCount(
+  serverId: string,
+): Promise<void> {
+  await getPool().query(
+    "UPDATE servers SET user_count = user_count + 1 WHERE server_id = $1",
+    [serverId],
+  );
+}
