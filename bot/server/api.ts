@@ -16,7 +16,7 @@ import {
 } from "../shared/texts";
 import { type PaymentMetadata, PRICING } from "../shared/plans";
 import { getConfig, saveConfig } from "./config-store";
-import { provisionVpnClient } from "./vpn";
+import { extendVpnClient, provisionVpnClient } from "./vpn";
 import {
   getPendingPayment,
   markPaymentCanceled,
@@ -462,6 +462,12 @@ export function createApiServer(api: Api, botToken: string) {
         if (existingUser?.vpn_config) {
           config = existingUser.vpn_config;
           provisionOk = true;
+          const clientName = pending.username || `tg_${userId}`;
+          try {
+            await extendVpnClient(clientName, pending.durationCode);
+          } catch (err) {
+            console.error("VPN extend (renewal) failed:", err);
+          }
         }
       } catch (err) {
         console.error("DB config lookup for renewal failed:", err);
@@ -501,7 +507,7 @@ export function createApiServer(api: Api, botToken: string) {
         : "без @ника";
 
     try {
-      await api.sendMessage(userId, PAYMENT_SUCCESS_USER(planLabel, amountStr), {
+      await api.sendMessage(userId, PAYMENT_SUCCESS_USER(planLabel, amountStr, pending.isRenewal), {
         parse_mode: "HTML",
       });
     } catch { /* user notification best-effort */ }
@@ -644,6 +650,12 @@ export function createApiServer(api: Api, botToken: string) {
         if (existingUser?.vpn_config) {
           config = existingUser.vpn_config;
           provisionOk = true;
+          const clientName = username || `tg_${userId}`;
+          try {
+            await extendVpnClient(clientName, durationCode);
+          } catch (err) {
+            console.error("VPN extend (webhook renewal) failed:", err);
+          }
         }
       } catch (err) {
         console.error("DB config lookup (webhook) failed:", err);
@@ -678,7 +690,7 @@ export function createApiServer(api: Api, botToken: string) {
     const userTag = username && username !== `tg_${userId}` ? `@${username}` : "без @ника";
 
     try {
-      await api.sendMessage(userId, PAYMENT_SUCCESS_USER(planLabel, amountStr), {
+      await api.sendMessage(userId, PAYMENT_SUCCESS_USER(planLabel, amountStr, isRenewal), {
         parse_mode: "HTML",
       });
     } catch { /* best-effort */ }

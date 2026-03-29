@@ -53,7 +53,7 @@ function buildConfig(server: Server, client: Client): string {
   ].join("\n");
 }
 
-async function findExistingClient(name: string): Promise<string | null> {
+async function findExistingClient(name: string): Promise<{ id: string; config: string } | null> {
   const resp = await fetch(`${VPN_BASE}/api/servers`, {
     headers: { Authorization: authHeader },
   });
@@ -66,7 +66,7 @@ async function findExistingClient(name: string): Promise<string | null> {
   const client = server.clients.find((c) => c.name === name);
   if (!client) return null;
 
-  return buildConfig(server, client);
+  return { id: client.id, config: buildConfig(server, client) };
 }
 
 /**
@@ -78,7 +78,7 @@ export async function provisionVpnClient(
   durationCode: string,
 ): Promise<string> {
   const existing = await findExistingClient(clientName);
-  if (existing) return existing;
+  if (existing) return existing.config;
 
   const resp = await fetch(`${VPN_BASE}/api/servers/${SERVER_ID}/clients`, {
     method: "POST",
@@ -96,4 +96,36 @@ export async function provisionVpnClient(
 
   const json = await resp.json();
   return json.config as string;
+}
+
+/**
+ * Extend an existing VPN client's duration on the server.
+ * Finds the client by name, then calls the extend endpoint.
+ * Throws if the client is not found or the API call fails.
+ */
+export async function extendVpnClient(
+  clientName: string,
+  durationCode: string,
+): Promise<void> {
+  const existing = await findExistingClient(clientName);
+  if (!existing) {
+    throw new Error(`VPN client not found: ${clientName}`);
+  }
+
+  const resp = await fetch(
+    `${VPN_BASE}/api/servers/${SERVER_ID}/clients/${existing.id}/extend`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: authHeader,
+      },
+      body: JSON.stringify({ duration: durationCode }),
+    },
+  );
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "unknown");
+    throw new Error(`VPN extend API ${resp.status}: ${text}`);
+  }
 }

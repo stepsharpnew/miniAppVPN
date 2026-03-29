@@ -60,7 +60,7 @@ export default function App() {
         }}
       >
         <div style={activeTab === "purchase" ? visibleStyle : hiddenStyle}>
-          <PurchasePage active={activeTab === "purchase"} />
+          <PurchasePage active={activeTab === "purchase"} onGoToProfile={() => setActiveTab("profile")} />
         </div>
         <div style={activeTab === "profile" ? visibleStyle : hiddenStyle}>
           <ProfilePage />

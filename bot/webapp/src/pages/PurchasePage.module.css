@@ -2,89 +2,51 @@
   padding: 0 16px 80px;
 }
 
-.sectionTitle {
-  font-size: 13px;
-  font-weight: 600;
-  color: #7777AA;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 12px;
-}
-
-.sectionTitleSpaced {
-  composes: sectionTitle;
-  margin-top: 24px;
-}
-
-.pollingContainer {
+.redirectCard {
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 32px 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 48px 16px;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid rgba(124, 58, 237, 0.2);
-  border-top-color: #7C3AED;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-.pollingTitle {
-  color: #FFFFFF;
-  font-size: 16px;
-  font-weight: 600;
   text-align: center;
+  gap: 10px;
 }
 
-.pollingHint {
-  color: #AAAACC;
+.redirectIcon {
+  font-size: 40px;
+  margin-bottom: 4px;
+}
+
+.redirectTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+.redirectHint {
   font-size: 13px;
-  text-align: center;
+  color: var(--text-secondary);
   line-height: 1.5;
+  max-width: 260px;
 }
 
-.errorText {
-  color: #AAAACC;
-  font-size: 14px;
-  text-align: center;
-  margin-top: 16px;
-}
-
-/* Fixed buy button above BottomNav */
-.buyButtonWrap {
-  position: fixed;
-  bottom: calc(60px + env(safe-area-inset-bottom, 0px) + 12px);
-  left: 16px;
-  right: 16px;
-  z-index: 99;
-}
-
-.buyButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.redirectBtn {
+  margin-top: 8px;
   width: 100%;
-  padding: 16px;
-  border-radius: 14px;
+  padding: 14px;
+  border-radius: var(--border-radius-sm);
   background: var(--btn-gradient);
-  color: #FFFFFF;
-  font-size: 16px;
+  color: white;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.5px;
   transition: opacity 0.15s, transform 0.1s;
   box-shadow: 0 4px 20px rgba(77, 139, 255, 0.35);
 }
 
-.buyButton:active {
+.redirectBtn:active {
   opacity: 0.85;
   transform: scale(0.98);
-}
-
-.buyButton.disabled {
-  opacity: 0.55;
-  pointer-events: none;
 }

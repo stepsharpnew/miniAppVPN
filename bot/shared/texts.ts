@@ -89,11 +89,16 @@ export const PURCHASE_ADMIN_TEXT = (
 export const PAYMENT_SUCCESS_USER = (
   planLabel: string,
   amount: string,
+  isRenewal = false,
 ): string =>
-  `✅ <b>Оплата прошла успешно!</b>\n\n` +
-  `📦 Тариф: <b>${escapeHtml(planLabel)}</b>\n` +
-  `💰 Сумма: <b>${amount}</b>\n\n` +
-  `⏳ Подготавливаем ваш VPN-конфиг…`;
+  isRenewal
+    ? `✅ <b>Подписка успешно продлена!</b>\n\n` +
+      `📦 Тариф: <b>${escapeHtml(planLabel)}</b>\n` +
+      `💰 Сумма: <b>${amount}</b>`
+    : `✅ <b>Оплата прошла успешно!</b>\n\n` +
+      `📦 Тариф: <b>${escapeHtml(planLabel)}</b>\n` +
+      `💰 Сумма: <b>${amount}</b>\n\n` +
+      `⏳ Подготавливаем ваш VPN-конфиг…`;
 
 export const PAYMENT_CONFIG_SENT = `🔑 <b>Ваш конфиг готов!</b>\n\nСкопируйте текст ниже или отсканируйте QR‑код в приложении Amnezia VPN.`;
 
@@ -129,7 +134,7 @@ export const FAQ_ITEMS = [
   {
     question: "Как продлить подписку?",
     answer:
-      "Просто оформите новую подписку в разделе «Покупка». Срок действия будет добавлен к текущему.",
+      "Перейдите в раздел «Профиль» и выберите тариф. Срок действия будет добавлен к текущему.",
     icon: "🔄",
   },
   {
