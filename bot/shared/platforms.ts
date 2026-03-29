@@ -117,6 +117,11 @@ export const PLATFORMS: PlatformInfo[] = [
   },
 ];
 
+/** Выбор устройства при покупке: без macOS/Linux (они остаются в разделе «Инструкции»). */
+export const PURCHASE_PLATFORMS: PlatformInfo[] = PLATFORMS.filter(
+  (p) => p.id !== 'macos' && p.id !== 'linux',
+);
+
 export const PLATFORM_DOWNLOAD_LINKS: Record<PlatformId, string> = Object.fromEntries(
   PLATFORMS.map((p) => [p.id, p.downloadUrl])
 ) as Record<PlatformId, string>;

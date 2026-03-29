@@ -2,7 +2,10 @@ import WebApp from "@twa-dev/sdk";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PRICING, type PricingOption } from "../../../shared/plans";
-import { PLATFORMS, type PlatformInfo } from "../../../shared/platforms";
+import {
+  PURCHASE_PLATFORMS,
+  type PlatformInfo,
+} from "../../../shared/platforms";
 import { Header } from "../components/Header";
 import { PlatformSelect } from "../components/PlatformSelect";
 import { PriceList } from "../components/PriceList";
@@ -28,12 +31,12 @@ interface PurchasePageProps {
 function getSavedPlatform(): PlatformInfo {
   try {
     const id = localStorage.getItem(PLATFORM_KEY);
-    const found = PLATFORMS.find((p) => p.id === id);
+    const found = PURCHASE_PLATFORMS.find((p) => p.id === id);
     if (found) return found;
   } catch {
     /* ok */
   }
-  return PLATFORMS[0];
+  return PURCHASE_PLATFORMS[0];
 }
 
 export function PurchasePage({ active }: PurchasePageProps) {
@@ -224,7 +227,7 @@ export function PurchasePage({ active }: PurchasePageProps) {
           <>
             <h3 className={styles.sectionTitle}>Ваше устройство</h3>
             <PlatformSelect
-              platforms={PLATFORMS}
+              platforms={PURCHASE_PLATFORMS}
               selectedId={selectedPlatform.id}
               onSelect={handlePlatformSelect}
             />
@@ -244,6 +247,17 @@ export function PurchasePage({ active }: PurchasePageProps) {
                 if (opt) setSelected(opt);
               }}
             />
+
+            {active && (
+              <div className={styles.buyButtonWrap}>
+                <button
+                  className={`${styles.buyButton} ${isDisabled ? styles.disabled : ""}`}
+                  onClick={isDisabled ? undefined : handleClick}
+                >
+                  {buttonText}
+                </button>
+              </div>
+            )}
           </>
         )}
 
@@ -264,17 +278,6 @@ export function PurchasePage({ active }: PurchasePageProps) {
           </p>
         )}
       </section>
-
-      {active && status !== "polling" && (
-        <div className={styles.buyButtonWrap}>
-          <button
-            className={`${styles.buyButton} ${isDisabled ? styles.disabled : ""}`}
-            onClick={isDisabled ? undefined : handleClick}
-          >
-            {buttonText}
-          </button>
-        </div>
-      )}
 
       {qrDataUrl && (
         <QrModal

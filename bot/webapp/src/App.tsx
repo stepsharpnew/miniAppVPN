@@ -55,8 +55,12 @@ export default function App() {
         style={{
           position: "relative",
           flex: 1,
+          minHeight: 0,
           overflowY: "auto",
-          paddingBottom: 70,
+          overscrollBehaviorY: "contain",
+          WebkitOverflowScrolling: "touch",
+          paddingBottom:
+            "calc(60px + env(safe-area-inset-bottom, 0px) + 12px)",
         }}
       >
         <div style={activeTab === "purchase" ? visibleStyle : hiddenStyle}>

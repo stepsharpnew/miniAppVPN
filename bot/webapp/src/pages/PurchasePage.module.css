@@ -1,5 +1,5 @@
 .section {
-  padding: 0 16px 80px;
+  padding: 0 16px;
 }
 
 .sectionTitle {
@@ -68,13 +68,8 @@
   margin-top: 16px;
 }
 
-/* Fixed buy button above BottomNav */
 .buyButtonWrap {
-  position: fixed;
-  bottom: calc(60px + env(safe-area-inset-bottom, 0px) + 12px);
-  left: 16px;
-  right: 16px;
-  z-index: 99;
+  margin-top: 28px;
 }
 
 .buyButton {
