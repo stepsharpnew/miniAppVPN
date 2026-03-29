@@ -10,6 +10,7 @@ export interface PendingPayment {
   amount: number;
   status: "pending" | "succeeded" | "canceled";
   config?: string;
+  isRenewal: boolean;
   createdAt: number;
 }
 

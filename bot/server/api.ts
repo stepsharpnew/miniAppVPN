@@ -364,19 +364,31 @@ export function createApiServer(api: Api, botToken: string) {
     const idempotenceKey = crypto.randomUUID();
     const botUsername = await getBotUsername();
 
+    let isRenewal = false;
+    try {
+      const existing = await getUserSubscription(user.id);
+      if (existing?.expired_at) {
+        isRenewal = new Date(existing.expired_at).getTime() > Date.now();
+      }
+    } catch { /* treat as new purchase */ }
+
     const metadata: PaymentMetadata = {
       telegram_user_id: String(user.id),
       username: user.username ?? "",
       first_name: user.first_name,
       months: String(plan.months),
       duration_code: plan.durationCode,
+      is_renewal: isRenewal ? "1" : "0",
     };
 
-    // Build return URL: static page on same domain with bot deep-link params
     const baseUrl = webappUrl ? new URL(webappUrl).origin : "";
     const returnUrl = baseUrl
       ? `${baseUrl}/payment-return.html?bot=${encodeURIComponent(botUsername)}`
       : "https://t.me/" + botUsername;
+
+    const description = isRenewal
+      ? `${BRAND_NAME} — Продление: ${plan.label}`
+      : `${BRAND_NAME} — ${plan.label}`;
 
     const body = JSON.stringify({
       amount: { value: plan.price.toFixed(2), currency: "RUB" },
@@ -385,7 +397,7 @@ export function createApiServer(api: Api, botToken: string) {
         return_url: returnUrl,
       },
       capture: true,
-      description: `${BRAND_NAME} — ${plan.label}`,
+      description,
       metadata,
     });
 
@@ -424,6 +436,7 @@ export function createApiServer(api: Api, botToken: string) {
         durationCode: plan.durationCode,
         amount: plan.price,
         status: "pending",
+        isRenewal,
       });
 
       res.json({ confirmationUrl, paymentId: payment.id });
@@ -442,6 +455,18 @@ export function createApiServer(api: Api, botToken: string) {
     const userId = pending.userId;
     let config = pending.config ?? getConfig(userId) ?? undefined;
     let provisionOk = !!config;
+
+    if (!config) {
+      try {
+        const existingUser = await getUserSubscription(userId);
+        if (existingUser?.vpn_config) {
+          config = existingUser.vpn_config;
+          provisionOk = true;
+        }
+      } catch (err) {
+        console.error("DB config lookup for renewal failed:", err);
+      }
+    }
 
     if (!config) {
       try {
@@ -487,7 +512,7 @@ export function createApiServer(api: Api, botToken: string) {
       try {
         await api.sendMessage(
           admin.chatId,
-          PAYMENT_ADMIN_NOTIFY(pending.firstName, userTag, userId, planLabel, amountStr, provisionOk),
+          PAYMENT_ADMIN_NOTIFY(pending.firstName, userTag, userId, planLabel, amountStr, provisionOk, pending.isRenewal),
           {
             parse_mode: "HTML",
             ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
@@ -607,10 +632,23 @@ export function createApiServer(api: Api, botToken: string) {
     const firstName = meta?.first_name ?? "Аноним";
     const months = meta ? Number(meta.months) : 0;
     const durationCode = meta?.duration_code ?? "1m";
+    const isRenewal = meta?.is_renewal === "1";
     const amount = paymentObj.amount ? Number(paymentObj.amount.value) : 0;
 
     let config = getConfig(userId) ?? undefined;
     let provisionOk = !!config;
+
+    if (!config) {
+      try {
+        const existingUser = await getUserSubscription(userId);
+        if (existingUser?.vpn_config) {
+          config = existingUser.vpn_config;
+          provisionOk = true;
+        }
+      } catch (err) {
+        console.error("DB config lookup (webhook) failed:", err);
+      }
+    }
 
     if (!config) {
       try {
@@ -651,7 +689,7 @@ export function createApiServer(api: Api, botToken: string) {
       try {
         await api.sendMessage(
           admin.chatId,
-          PAYMENT_ADMIN_NOTIFY(firstName, userTag, userId, planLabel, amountStr, provisionOk),
+          PAYMENT_ADMIN_NOTIFY(firstName, userTag, userId, planLabel, amountStr, provisionOk, isRenewal),
           {
             parse_mode: "HTML",
             ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),

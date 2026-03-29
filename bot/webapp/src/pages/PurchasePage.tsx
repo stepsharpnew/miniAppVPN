@@ -37,6 +37,18 @@ export function PurchasePage({ active }: PurchasePageProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const { save: saveConfig } = useVpnConfig();
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [hasActiveSub, setHasActiveSub] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/subscription", {
+      headers: { "X-Telegram-Init-Data": WebApp.initData },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.active) setHasActiveSub(true);
+      })
+      .catch(() => {});
+  }, []);
 
   const handlePlatformSelect = useCallback((platform: PlatformInfo) => {
     setSelectedPlatform(platform);
@@ -153,7 +165,9 @@ export function PurchasePage({ active }: PurchasePageProps) {
   const buttonText =
     status === "loading"
       ? "ЗАГРУЗКА..."
-      : `КУПИТЬ ЗА ${selected.price}₽`;
+      : hasActiveSub
+        ? `ПРОДЛИТЬ ЗА ${selected.price}₽`
+        : `КУПИТЬ ЗА ${selected.price}₽`;
 
   return (
     <>

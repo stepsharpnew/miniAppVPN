@@ -108,8 +108,9 @@ export const PAYMENT_ADMIN_NOTIFY = (
   planLabel: string,
   amount: string,
   provisionOk: boolean,
+  isRenewal = false,
 ): string =>
-  `💳 <b>Успешная оплата</b>\n\n` +
+  `💳 <b>${isRenewal ? "Продление подписки" : "Успешная оплата"}</b>\n\n` +
   `👤 <b>${escapeHtml(userName)}</b> · ${escapeHtml(userTag)}\n` +
   `🆔 <code>${userId}</code>\n\n` +
   `📦 Тариф: <b>${escapeHtml(planLabel)}</b>\n` +

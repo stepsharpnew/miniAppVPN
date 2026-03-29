@@ -41,6 +41,7 @@ export interface PaymentMetadata {
   first_name: string;
   months: string;
   duration_code: string;
+  is_renewal: string;
 }
 
 export interface ChatMessage {

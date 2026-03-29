@@ -48,7 +48,7 @@ export function InstructionsPage() {
                 rel="noopener noreferrer"
                 className={styles.instructionPdfLink}
               >
-                📄 Скачать инструкцию (PDF)
+                Инструкция
               </a>
             )}
           </Accordion>
