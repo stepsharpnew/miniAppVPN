@@ -18,8 +18,7 @@ export const SUPPORT_TICKET_ADMIN = (
   `🆕 <b>Новое обращение</b>\n\n` +
   `👤 <b>${escapeHtml(userName)}</b> · ${escapeHtml(userTag)}\n` +
   `🆔 <code>${userId}</code>\n\n` +
-  `<blockquote>${escapeHtml(message)}</blockquote>\n` +
-  `<i>↩️ Ответьте на это сообщение</i>`;
+  `<i>${escapeHtml(message)}</i>\n`;
 
 // ── Admin-facing: user text in active dialog ──
 
@@ -56,8 +55,7 @@ export const SUPPORT_MEDIA_HEADER_ADMIN = (
 
 // ── User-facing: admin reply notification via bot ──
 
-export const SUPPORT_NEW_REPLY_NOTIFICATION =
-  `📨 <b>Новое сообщение от поддержки</b>\n\nОткройте чат, чтобы прочитать ответ.`;
+export const SUPPORT_NEW_REPLY_NOTIFICATION = `📨 <b>Новое сообщение от поддержки</b>\n\nОткройте чат, чтобы прочитать ответ.`;
 
 // ── User-facing: ticket sent confirmation ──
 
@@ -66,8 +64,7 @@ export const SUPPORT_TICKET_SENT_USER =
   `Менеджер получил ваше сообщение и скоро ответит прямо в этот чат.\n\n` +
   `📎 Вы можете отправлять <b>текст, фото и файлы</b> — всё дойдёт до менеджера.`;
 
-export const SUPPORT_REPLY_FAILED =
-  `⚠️ Не удалось отправить ответ — возможно, пользователь заблокировал бота.`;
+export const SUPPORT_REPLY_FAILED = `⚠️ Не удалось отправить ответ — возможно, пользователь заблокировал бота.`;
 
 // ── Purchase admin notification ──
 
@@ -89,7 +86,10 @@ export const PURCHASE_ADMIN_TEXT = (
 
 // ── Payment notifications ──
 
-export const PAYMENT_SUCCESS_USER = (planLabel: string, amount: string): string =>
+export const PAYMENT_SUCCESS_USER = (
+  planLabel: string,
+  amount: string,
+): string =>
   `✅ <b>Оплата прошла успешно!</b>\n\n` +
   `📦 Тариф: <b>${escapeHtml(planLabel)}</b>\n` +
   `💰 Сумма: <b>${amount}</b>\n\n` +
@@ -130,5 +130,11 @@ export const FAQ_ITEMS = [
     answer:
       "Просто оформите новую подписку в разделе «Покупка». Срок действия будет добавлен к текущему.",
     icon: "🔄",
+  },
+  {
+    question: "Включил VPN, но ничего не работает",
+    answer:
+      "После первого включения VPN полностью закройте Telegram (смахните из списка недавних приложений) и откройте снова",
+    icon: "📱",
   },
 ] as const;

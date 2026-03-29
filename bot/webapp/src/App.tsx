@@ -1,6 +1,13 @@
 import WebApp from "@twa-dev/sdk";
 import { useEffect, useState } from "react";
 import { BottomNav, type TabId } from "./components/BottomNav";
+
+function initialTabFromLocation(): TabId {
+  if (typeof window === "undefined") return "purchase";
+  const raw = window.location.hash.replace(/^#/, "").split(/[?&]/)[0];
+  const valid: TabId[] = ["purchase", "profile", "instructions", "support"];
+  return valid.includes(raw as TabId) ? (raw as TabId) : "purchase";
+}
 import { Preloader } from "./components/Preloader";
 import { InstructionsPage } from "./pages/InstructionsPage";
 import { ProfilePage } from "./pages/ProfilePage";
@@ -28,7 +35,7 @@ const visibleStyle: React.CSSProperties = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabId>("purchase");
+  const [activeTab, setActiveTab] = useState<TabId>(initialTabFromLocation);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

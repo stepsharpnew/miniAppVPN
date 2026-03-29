@@ -65,10 +65,17 @@ const bot = new Bot<MemeContext>(botToken);
 const initialSession = (): SessionData => ({});
 bot.use(session({ initial: initialSession }));
 
-function webAppKeyboard(buttonText: string) {
+function webAppKeyboard(buttonText: string, opts?: { hash?: string }) {
   const url = resolvedMiniAppUrl();
   if (!url) return undefined;
-  return new InlineKeyboard().webApp(buttonText, url);
+  let openUrl = url;
+  if (opts?.hash) {
+    const u = new URL(url);
+    const h = opts.hash.startsWith("#") ? opts.hash.slice(1) : opts.hash;
+    u.hash = h;
+    openUrl = u.toString();
+  }
+  return new InlineKeyboard().webApp(buttonText, openUrl);
 }
 
 // ────────────────── /start ──────────────────
@@ -247,7 +254,7 @@ if (adminChats.length > 0) {
 
     // Send notification to user via bot message
     try {
-      const keyboard = webAppKeyboard("💬 Открыть чат");
+      const keyboard = webAppKeyboard("💬 Открыть чат", { hash: "support" });
       await ctx.api.sendMessage(replyUserChatId, SUPPORT_NEW_REPLY_NOTIFICATION, {
         parse_mode: "HTML",
         ...(keyboard ? { reply_markup: keyboard } : {}),

@@ -157,6 +157,48 @@
   margin-top: 1px;
 }
 
+.headerFaqBtn {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(77, 139, 255, 0.12);
+  border: none;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.headerFaqBtn:active {
+  opacity: 0.85;
+}
+
+.headerBackBtn {
+  flex-shrink: 0;
+  padding: 8px 10px 8px 4px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.headerBackBtn:active {
+  opacity: 0.8;
+}
+
+.chatHeaderFaqTitle {
+  font-weight: 700;
+  font-size: 15px;
+  flex: 1;
+  min-width: 0;
+}
+
+.faqInChat {
+  padding-top: 4px;
+}
+
 /* ── Messages area ── */
 
 .chatMessages {

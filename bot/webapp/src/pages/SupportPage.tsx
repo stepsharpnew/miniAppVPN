@@ -39,6 +39,7 @@ export function SupportPage({ active = false }: SupportPageProps) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [chatStarted, setChatStarted] = useState(false);
+  const [faqOpen, setFaqOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [sending, setSending] = useState(false);
 
@@ -120,9 +121,28 @@ export function SupportPage({ active = false }: SupportPageProps) {
     if (messages.length > 0) scrollToBottom();
   }, [messages.length, scrollToBottom]);
 
+  useEffect(() => {
+    if (!active) setFaqOpen(false);
+  }, [active]);
+
   // ── Handlers ──
 
   const handleStartChat = () => setChatStarted(true);
+
+  const faqList = (
+    <div className={styles.faqList}>
+      {FAQ_ITEMS.map((item, idx) => (
+        <Accordion
+          key={idx}
+          icon={item.icon}
+          title={item.question}
+          iconColor="rgba(77,139,255,0.15)"
+        >
+          <p className={styles.answer}>{item.answer}</p>
+        </Accordion>
+      ))}
+    </div>
+  );
 
   const handleSend = async () => {
     const text = input.trim();
@@ -209,18 +229,7 @@ export function SupportPage({ active = false }: SupportPageProps) {
 
         <div className={styles.faqSection}>
           <div className={styles.faqTitle}>Часто задаваемые вопросы</div>
-          <div className={styles.faqList}>
-            {FAQ_ITEMS.map((item, idx) => (
-              <Accordion
-                key={idx}
-                icon={item.icon}
-                title={item.question}
-                iconColor="rgba(77,139,255,0.15)"
-              >
-                <p className={styles.answer}>{item.answer}</p>
-              </Accordion>
-            ))}
-          </div>
+          {faqList}
         </div>
       </div>
     );
@@ -233,67 +242,98 @@ export function SupportPage({ active = false }: SupportPageProps) {
   const chatTree = (
     <div className={styles.chatContainer}>
       <div className={styles.chatHeader}>
-        <div className={styles.chatAvatar}>🛡️</div>
-        <div className={styles.chatHeaderInfo}>
-          <div className={styles.chatHeaderTitle}>Поддержка {BRAND_NAME}</div>
-          <div className={styles.chatHeaderStatus}>
-            обычно отвечает в течение часа
-          </div>
-        </div>
-      </div>
-
-      <div className={styles.chatMessages} ref={messagesContainerRef}>
-        {messages.length === 0 && (
-          <div className={styles.chatEmpty}>
-            <span className={styles.chatEmptyIcon}>💬</span>
-            <span>Напишите сообщение или прикрепите файл</span>
-          </div>
+        {faqOpen ? (
+          <>
+            <button
+              type="button"
+              className={styles.headerBackBtn}
+              onClick={() => setFaqOpen(false)}
+            >
+              ← К чату
+            </button>
+            <div className={styles.chatHeaderFaqTitle}>Частые вопросы</div>
+          </>
+        ) : (
+          <>
+            <div className={styles.chatAvatar}>🛡️</div>
+            <div className={styles.chatHeaderInfo}>
+              <div className={styles.chatHeaderTitle}>Поддержка {BRAND_NAME}</div>
+              <div className={styles.chatHeaderStatus}>
+                обычно отвечает в течение часа
+              </div>
+            </div>
+            <button
+              type="button"
+              className={styles.headerFaqBtn}
+              onClick={() => setFaqOpen(true)}
+            >
+              Вопросы
+            </button>
+          </>
         )}
-
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} />
-        ))}
-
-        <div ref={messagesEndRef} />
       </div>
 
-      <div className={styles.chatInputBar}>
-        <button
-          className={styles.attachBtn}
-          onClick={() => fileInputRef.current?.click()}
-          disabled={sending}
-        >
-          📎
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          className={styles.fileInput}
-          onChange={handleFileSelect}
-          accept="image/*,.pdf,.doc,.docx,.txt,.zip,.rar,.xlsx,.csv"
-        />
-        <input
-          type="text"
-          className={styles.textInput}
-          placeholder="Сообщение..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={sending}
-        />
-        <button
-          className={styles.sendBtn}
-          onClick={handleSend}
-          disabled={!input.trim() || sending}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"
-              fill="currentColor"
+      {faqOpen ? (
+        <div className={`${styles.chatMessages} ${styles.faqInChat}`}>
+          <div className={styles.faqTitle}>Часто задаваемые вопросы</div>
+          {faqList}
+        </div>
+      ) : (
+        <>
+          <div className={styles.chatMessages} ref={messagesContainerRef}>
+            {messages.length === 0 && (
+              <div className={styles.chatEmpty}>
+                <span className={styles.chatEmptyIcon}>💬</span>
+                <span>Напишите сообщение или прикрепите файл</span>
+              </div>
+            )}
+
+            {messages.map((msg) => (
+              <MessageBubble key={msg.id} msg={msg} />
+            ))}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div className={styles.chatInputBar}>
+            <button
+              className={styles.attachBtn}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={sending}
+            >
+              📎
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className={styles.fileInput}
+              onChange={handleFileSelect}
+              accept="image/*,.pdf,.doc,.docx,.txt,.zip,.rar,.xlsx,.csv"
             />
-          </svg>
-        </button>
-      </div>
+            <input
+              type="text"
+              className={styles.textInput}
+              placeholder="Сообщение..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={sending}
+            />
+            <button
+              className={styles.sendBtn}
+              onClick={handleSend}
+              disabled={!input.trim() || sending}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"
+                  fill="currentColor"
+                />
+              </svg>
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 
