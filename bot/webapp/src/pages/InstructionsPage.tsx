@@ -1,7 +1,8 @@
-import { Accordion } from '../components/Accordion';
-import { PLATFORMS } from '../../../shared/platforms';
-import { PlatformLogo } from '../components/PlatformLogo';
-import styles from './InstructionsPage.module.css';
+import { Accordion } from "../components/Accordion";
+import { PLATFORMS } from "../../../shared/platforms";
+import { PlatformLogo } from "../components/PlatformLogo";
+import { PLATFORM_INSTRUCTION_PDF } from "./instructionPdfs";
+import styles from "./InstructionsPage.module.css";
 
 export function InstructionsPage() {
   return (
@@ -39,14 +40,15 @@ export function InstructionsPage() {
               📥 Скачать AmneziaWG
             </a>
 
-            {platform.videoGuideUrl && (
+            {PLATFORM_INSTRUCTION_PDF[platform.id] && (
               <a
-                href={platform.videoGuideUrl}
+                href={PLATFORM_INSTRUCTION_PDF[platform.id]!.url}
+                download={PLATFORM_INSTRUCTION_PDF[platform.id]!.fileName}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={styles.videoLink}
+                className={styles.instructionPdfLink}
               >
-                🎬 Видео-гайд
+                📄 Скачать инструкцию (PDF)
               </a>
             )}
           </Accordion>

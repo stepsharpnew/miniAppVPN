@@ -5,7 +5,6 @@ export interface PlatformInfo {
   name: string;
   icon: string;
   downloadUrl: string;
-  videoGuideUrl: string;
   steps: string[];
   botText: string;
 }
@@ -16,7 +15,6 @@ export const PLATFORMS: PlatformInfo[] = [
     name: 'Android',
     icon: '🤖',
     downloadUrl: 'https://play.google.com/store/apps/details?id=org.amnezia.awg',
-    videoGuideUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
     steps: [
       'Скачайте AmneziaWG из Google Play по кнопке ниже',
       'Откройте AmneziaWG и выберите «Сканировать QR»',
@@ -38,7 +36,6 @@ export const PLATFORMS: PlatformInfo[] = [
     name: 'iPhone / iPad',
     icon: '🍎',
     downloadUrl: 'https://apps.apple.com/us/app/amneziawg/id6478942365',
-    videoGuideUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
     steps: [
       'Скачайте AmneziaWG из App Store по кнопке ниже',
       'Откройте AmneziaWG и нажмите «Сканировать QR»',
@@ -59,10 +56,9 @@ export const PLATFORMS: PlatformInfo[] = [
     id: 'windows',
     name: 'Windows',
     icon: '🪟',
-    downloadUrl: 'https://github.com/amnezia-vpn/amneziawg-windows-client/releases',
-    videoGuideUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    downloadUrl: 'https://t.me/MemeVPNbest/14',
     steps: [
-      'Скачайте AmneziaWG с официального релиза по кнопке ниже',
+      'Скачайте установщик AmneziaWG из нашего канала по кнопке ниже',
       'Откройте программу и выберите «Импорт конфигурации»',
       'Вставьте или загрузите выданный конфиг из раздела «Профиль»',
       'Сохраните профиль и нажмите «Connect»',
@@ -70,7 +66,7 @@ export const PLATFORMS: PlatformInfo[] = [
     botText: `🪟 Windows | Нормальный человеческий путь
 
 ⚡ Что делаем:
-• Скачиваем AmneziaWG с официального релиза.
+• Скачиваем AmneziaWG из канала (пост с установщиком).
 • Открываем программу и выбираем «Импорт конфигурации».
 • Вставляем/загружаем выданный конфиг (без QR).
 • Сохраняем профиль и жмем «Connect».
@@ -81,20 +77,19 @@ export const PLATFORMS: PlatformInfo[] = [
     id: 'macos',
     name: 'macOS',
     icon: '🍏',
-    downloadUrl: 'https://github.com/amnezia-vpn/amnezia-client/releases',
-    videoGuideUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    downloadUrl: 'https://apps.apple.com/us/app/amneziawg/id6478942365',
     steps: [
-      'Скачайте AmneziaWG из релизов по кнопке ниже',
-      'Откройте раздел «Сканировать QR»',
-      'Сканируйте QR-код с настройками из раздела «Профиль»',
+      'Скачайте AmneziaWG из App Store по кнопке ниже',
+      'Откройте AmneziaWG и нажмите «Сканировать QR»',
+      'Наведите камеру на QR-конфиг из раздела «Профиль»',
       'Подтвердите импорт и включите VPN',
     ],
-    botText: `🍏 macOS | Премиум-инструкция
+    botText: `🍏 macOS | Как на iPhone
 
 ⚡ Что делаем:
-• Скачиваем AmneziaWG из релизов.
-• Заходим в раздел «Сканировать QR».
-• Сканируем QR-код с настройками.
+• Скачиваем AmneziaWG из App Store.
+• Открываем AmneziaWG и жмем «Сканировать QR».
+• Наводим камеру на QR-конфиг.
 • Подтверждаем импорт и включаем VPN.
 
 ✅ Готово: соединение чистое, дзен достигнут.`,
@@ -104,7 +99,6 @@ export const PLATFORMS: PlatformInfo[] = [
     name: 'Linux',
     icon: '🐧',
     downloadUrl: 'https://github.com/amnezia-vpn/amnezia-client/releases',
-    videoGuideUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
     steps: [
       'Скачайте AmneziaWG под свой дистрибутив по кнопке ниже',
       'Запустите клиент и откройте «Сканировать QR»',
@@ -125,10 +119,6 @@ export const PLATFORMS: PlatformInfo[] = [
 
 export const PLATFORM_DOWNLOAD_LINKS: Record<PlatformId, string> = Object.fromEntries(
   PLATFORMS.map((p) => [p.id, p.downloadUrl])
-) as Record<PlatformId, string>;
-
-export const PLATFORM_VIDEO_GUIDE_LINKS: Record<PlatformId, string> = Object.fromEntries(
-  PLATFORMS.map((p) => [p.id, p.videoGuideUrl])
 ) as Record<PlatformId, string>;
 
 export const PLATFORM_BOT_TEXTS: Record<PlatformId, string> = Object.fromEntries(
