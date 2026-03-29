@@ -9,8 +9,8 @@ interface Tab {
 }
 
 const tabs: Tab[] = [
-  { id: 'purchase', label: 'Покупка', icon: '🛒' },
   { id: 'profile', label: 'Профиль', icon: '👤' },
+  { id: 'purchase', label: 'Покупка', icon: '🛒' },
   { id: 'instructions', label: 'Инструкции', icon: '📖' },
   { id: 'support', label: 'Поддержка', icon: '💬' },
 ];

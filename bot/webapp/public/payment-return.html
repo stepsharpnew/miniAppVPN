@@ -36,6 +36,7 @@
       transition: opacity 0.2s;
     }
     .btn:active { opacity: 0.8; }
+    .countdown { color: #7777AA; font-size: 12px; margin-top: 16px; }
   </style>
 </head>
 <body>
@@ -43,17 +44,45 @@
     <div class="icon">✅</div>
     <h1>Оплата обрабатывается</h1>
     <p>Вернитесь в Telegram — VPN-конфиг появится автоматически в приложении.</p>
-    <a id="bot-link" class="btn" href="#">Вернуться в Telegram</a>
+    <a id="bot-link" class="btn" href="https://t.me">Вернуться в Telegram</a>
+    <div id="auto-redirect" class="countdown"></div>
   </div>
   <script>
-    var params = new URLSearchParams(location.search);
-    var bot = params.get('bot');
-    var link = document.getElementById('bot-link');
-    if (bot) {
-      link.href = 'https://t.me/' + encodeURIComponent(bot);
-    } else {
-      link.href = 'https://t.me';
-    }
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var bot = params.get('bot');
+      var link = document.getElementById('bot-link');
+      var botUrl = bot ? 'https://t.me/' + encodeURIComponent(bot) : 'https://t.me';
+
+      link.href = botUrl;
+
+      // Prevent back-button returning to YooKassa payment page
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', location.href);
+      }
+
+      // Auto-redirect after 3 seconds
+      var seconds = 3;
+      var countdown = document.getElementById('auto-redirect');
+      countdown.textContent = 'Автоматический переход через ' + seconds + ' сек...';
+
+      var timer = setInterval(function () {
+        seconds--;
+        if (seconds <= 0) {
+          clearInterval(timer);
+          countdown.textContent = 'Переходим...';
+          window.location.href = botUrl;
+        } else {
+          countdown.textContent = 'Автоматический переход через ' + seconds + ' сек...';
+        }
+      }, 1000);
+
+      // Stop auto-redirect if user interacts
+      link.addEventListener('click', function () {
+        clearInterval(timer);
+        countdown.textContent = '';
+      });
+    })();
   </script>
 </body>
 </html>

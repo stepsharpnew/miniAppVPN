@@ -452,6 +452,10 @@ export function createApiServer(api: Api, botToken: string) {
     const pending = getPendingPayment(paymentId);
     if (!pending || pending.status === "succeeded") return;
 
+    // Atomically lock before any async work to prevent double processing
+    // (webhook + polling can race into this function concurrently)
+    pending.status = "succeeded";
+
     const userId = pending.userId;
     let config = pending.config ?? getConfig(userId) ?? undefined;
     let provisionOk = !!config;

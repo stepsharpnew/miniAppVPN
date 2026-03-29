@@ -3,10 +3,10 @@ import { useEffect, useState } from "react";
 import { BottomNav, type TabId } from "./components/BottomNav";
 
 function initialTabFromLocation(): TabId {
-  if (typeof window === "undefined") return "purchase";
+  if (typeof window === "undefined") return "profile";
   const raw = window.location.hash.replace(/^#/, "").split(/[?&]/)[0];
   const valid: TabId[] = ["purchase", "profile", "instructions", "support"];
-  return valid.includes(raw as TabId) ? (raw as TabId) : "purchase";
+  return valid.includes(raw as TabId) ? (raw as TabId) : "profile";
 }
 import { Preloader } from "./components/Preloader";
 import { InstructionsPage } from "./pages/InstructionsPage";
@@ -60,7 +60,7 @@ export default function App() {
         }}
       >
         <div style={activeTab === "purchase" ? visibleStyle : hiddenStyle}>
-          <PurchasePage active={activeTab === "purchase"} onGoToProfile={() => setActiveTab("profile")} />
+          <PurchasePage active={activeTab === "purchase"} />
         </div>
         <div style={activeTab === "profile" ? visibleStyle : hiddenStyle}>
           <ProfilePage />

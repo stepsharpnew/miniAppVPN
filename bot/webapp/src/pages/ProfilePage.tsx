@@ -1,9 +1,7 @@
 import WebApp from "@twa-dev/sdk";
 import QRCode from "qrcode";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { PRICING, type PricingOption } from "../../../shared/plans";
+import { useCallback, useEffect, useState } from "react";
 import { BRAND_NAME } from "../../../shared/texts";
-import { PriceList } from "../components/PriceList";
 import { StatusBadge } from "../components/StatusBadge";
 import { useTelegramUser } from "../hooks/useTelegramUser";
 import { useVpnConfig } from "../hooks/useVpnConfig";
@@ -16,8 +14,6 @@ interface SubscriptionInfo {
   is_vip?: boolean;
   config?: string | null;
 }
-
-type RenewalStatus = "idle" | "loading" | "polling" | "success" | "error";
 
 function formatExpiry(iso: string): string {
   const d = new Date(iso);
@@ -44,34 +40,28 @@ export function ProfilePage() {
   const [sub, setSub] = useState<SubscriptionInfo | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  const [selectedPlan, setSelectedPlan] = useState<PricingOption>(PRICING[0]);
-  const [renewalStatus, setRenewalStatus] = useState<RenewalStatus>("idle");
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const fetchSubscription = useCallback(async () => {
-    try {
-      const r = await fetch("/api/subscription", {
-        headers: { "X-Telegram-Init-Data": WebApp.initData },
-      });
-      if (!r.ok) return null;
-      return await r.json();
-    } catch {
-      return null;
-    }
-  }, []);
-
   useEffect(() => {
     let alive = true;
-    fetchSubscription().then((data) => {
-      if (!alive) return;
-      if (data) {
-        setSub(data);
-        if (data.config) saveLocalConfig(data.config);
-      } else {
-        setSub({ active: false, expired_at: null, config: null });
-      }
-      setLoaded(true);
-    });
+    fetch("/api/subscription", {
+      headers: { "X-Telegram-Init-Data": WebApp.initData },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!alive) return;
+        if (data) {
+          setSub(data);
+          if (data.config) saveLocalConfig(data.config);
+        } else {
+          setSub({ active: false, expired_at: null, config: null });
+        }
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (alive) {
+          setSub({ active: false, expired_at: null, config: null });
+          setLoaded(true);
+        }
+      });
     return () => { alive = false; };
   }, []);
 
@@ -119,93 +109,6 @@ export function ProfilePage() {
       setSending(false);
     }
   }, [sending, activeConfig]);
-
-  const stopPolling = useCallback(() => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => () => stopPolling(), [stopPolling]);
-
-  const handleRenew = useCallback(async () => {
-    if (renewalStatus === "loading" || renewalStatus === "polling") return;
-    setRenewalStatus("loading");
-
-    try {
-      const res = await fetch("/api/payments/create-payment", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Telegram-Init-Data": WebApp.initData,
-        },
-        body: JSON.stringify({ months: selectedPlan.months }),
-      });
-
-      if (!res.ok) throw new Error(`Ошибка сервера: ${res.status}`);
-
-      const { confirmationUrl, paymentId } = await res.json();
-      WebApp.openLink(confirmationUrl, { try_instant_view: false });
-
-      setRenewalStatus("polling");
-      let attempts = 0;
-      const MAX_ATTEMPTS = 90;
-
-      pollingRef.current = setInterval(async () => {
-        attempts++;
-        try {
-          const statusRes = await fetch(`/api/payments/status/${paymentId}`, {
-            headers: { "X-Telegram-Init-Data": WebApp.initData },
-          });
-          if (!statusRes.ok) return;
-          const data = await statusRes.json();
-
-          if (data.status === "succeeded") {
-            stopPolling();
-            setRenewalStatus("success");
-            const updated = await fetchSubscription();
-            if (updated) {
-              setSub(updated);
-              if (updated.config) saveLocalConfig(updated.config);
-            }
-            setTimeout(() => setRenewalStatus("idle"), 5000);
-            return;
-          }
-
-          if (data.status === "canceled") {
-            stopPolling();
-            setRenewalStatus("idle");
-            return;
-          }
-        } catch { /* retry */ }
-
-        if (attempts >= MAX_ATTEMPTS) {
-          stopPolling();
-          setRenewalStatus("error");
-          WebApp.showAlert(
-            "Оплата обработана. Подписка обновится в ближайшее время.",
-          );
-          setTimeout(() => setRenewalStatus("idle"), 4000);
-        }
-      }, 2000);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Неизвестная ошибка";
-      WebApp.showAlert(`Ошибка: ${message}`);
-      setRenewalStatus("idle");
-    }
-  }, [renewalStatus, selectedPlan, stopPolling, fetchSubscription, saveLocalConfig]);
-
-  const renewalTitle = sub?.active
-    ? "Продление подписки"
-    : "Оформить подписку";
-
-  const renewalButtonText =
-    renewalStatus === "loading"
-      ? "ЗАГРУЗКА..."
-      : sub?.active
-        ? `ПРОДЛИТЬ ЗА ${selectedPlan.price}₽`
-        : `КУПИТЬ ЗА ${selectedPlan.price}₽`;
 
   return (
     <div className={styles.page}>
@@ -273,59 +176,6 @@ export function ProfilePage() {
             </div>
           )}
         </div>
-
-        {loaded && (
-          <>
-            <div className={styles.divider} />
-
-            <div className={styles.renewalBlock}>
-              <div className={styles.sectionHeader}>{renewalTitle}</div>
-
-              {renewalStatus === "polling" ? (
-                <div className={styles.pollingContainer}>
-                  <div className={styles.spinner} />
-                  <p className={styles.pollingText}>Ожидаем оплату...</p>
-                  <p className={styles.pollingHint}>
-                    Оплатите в открывшемся браузере и вернитесь сюда.
-                  </p>
-                </div>
-              ) : renewalStatus === "success" ? (
-                <div className={styles.successMessage}>
-                  Подписка успешно продлена!
-                </div>
-              ) : renewalStatus === "error" ? (
-                <div className={styles.errorMessage}>
-                  Оплата обработана. Подписка обновится в ближайшее время.
-                </div>
-              ) : (
-                <>
-                  {sub?.active && sub.expired_at && (
-                    <p className={styles.renewalHint}>
-                      Срок будет добавлен к текущей подписке
-                      (до {new Date(sub.expired_at).toLocaleDateString("ru-RU")})
-                    </p>
-                  )}
-
-                  <PriceList
-                    options={PRICING}
-                    selectedMonths={selectedPlan.months}
-                    onSelect={(m) => {
-                      const opt = PRICING.find((p) => p.months === m);
-                      if (opt) setSelectedPlan(opt);
-                    }}
-                  />
-
-                  <button
-                    className={`${styles.renewBtn} ${renewalStatus === "loading" ? styles.renewBtnDisabled : ""}`}
-                    onClick={renewalStatus === "loading" ? undefined : handleRenew}
-                  >
-                    {renewalButtonText}
-                  </button>
-                </>
-              )}
-            </div>
-          </>
-        )}
       </div>
     </div>
   );
