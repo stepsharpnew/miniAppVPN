@@ -1,18 +1,42 @@
-version: "3.8"
-
-# Dev overlay: no local Postgres — bot connects to production DB via SSH tunnel
-# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-
 services:
-  postgres:
-    profiles: ["production-only"]
-
-  db-migrator:
-    profiles: ["production-only"]
+  # Dev: only bot + nginx. No local Postgres.
+  # Bot connects to production DB via SSH tunnel on host port 5432.
 
   bot:
-    depends_on: {}
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    container_name: meme-bot
+    restart: unless-stopped
+    env_file:
+      - .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-meme}:${POSTGRES_PASSWORD:-meme_secret}@host.docker.internal:5432/${POSTGRES_DB:-meme_db}"
+    expose:
+      - "3001"
+    networks:
+      - meme-net
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    image: miniappvpn-edge-nginx:latest
+    container_name: edge-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - bot
+    networks:
+      - meme-net
+
+networks:
+  meme-net:
+    driver: bridge

@@ -158,9 +158,9 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
             set -euo pipefail
             cd ~/meme_bot
-            docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache bot nginx
-            docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --remove-orphans
-            docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
+            docker compose -f docker-compose.dev.yml build --no-cache bot nginx
+            docker compose -f docker-compose.dev.yml up -d --remove-orphans
+            docker compose -f docker-compose.dev.yml ps
           ENDSSH
 
       - name: "Health check (dev)"
@@ -170,11 +170,11 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
             cd ~/meme_bot
             echo "=== Container status ==="
-            docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
+            docker compose -f docker-compose.dev.yml ps
             echo ""
             echo "=== DB tunnel check ==="
             pgrep -fa "127.0.0.1:5432:localhost:5432" || echo "WARNING: DB tunnel not running"
             echo ""
             echo "=== Bot logs (last 15 lines) ==="
-            docker compose -f docker-compose.yml -f docker-compose.dev.yml logs --tail=15 bot
+            docker compose -f docker-compose.dev.yml logs --tail=15 bot
           ENDSSH

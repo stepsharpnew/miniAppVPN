@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # ── DB migrator (idempotent schema init) ─────────────────────
   db-migrator:
