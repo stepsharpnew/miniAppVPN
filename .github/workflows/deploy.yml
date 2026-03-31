@@ -77,6 +77,27 @@ jobs:
             fi
           ENDSSH
 
+      - name: Ensure SSL certs on dev server
+        if: github.ref == 'refs/heads/dev'
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
+            set -euo pipefail
+            DOMAIN="167-17-184-16.nip.io"
+            CERT_PATH="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+            if [ -f "$CERT_PATH" ]; then
+              echo "SSL cert for ${DOMAIN} already exists"
+            else
+              echo "Obtaining SSL cert for ${DOMAIN}..."
+              apt-get update -qq && apt-get install -y -qq certbot >/dev/null 2>&1 || true
+              # Stop anything on port 80 so certbot standalone can bind
+              docker stop edge-nginx 2>/dev/null || true
+              certbot certonly --standalone --non-interactive --agree-tos \
+                --register-unsafely-without-email \
+                -d "${DOMAIN}"
+              echo "SSL cert obtained for ${DOMAIN}"
+            fi
+          ENDSSH
+
       - name: Ensure Docker on server
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
