@@ -109,7 +109,9 @@ jobs:
           printf '%s\n' "$DOTENV_CONTENT" | ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
             "tee ~/meme_bot/.env ~/meme_bot/bot/.env > /dev/null"
 
-      - name: Build and restart services
+      # ── PRODUCTION: full stack with local Postgres ──
+      - name: "Build and restart services (production)"
+        if: github.ref == 'refs/heads/main'
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
             set -euo pipefail
@@ -133,7 +135,8 @@ jobs:
             docker compose ps
           ENDSSH
 
-      - name: Health check
+      - name: "Health check (production)"
+        if: github.ref == 'refs/heads/main'
         run: |
           sleep 15
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
@@ -146,4 +149,32 @@ jobs:
             echo ""
             echo "=== Bot logs (last 10 lines) ==="
             docker compose logs --tail=10 bot
+          ENDSSH
+
+      # ── DEVELOPMENT: no local Postgres, DB via SSH tunnel to production ──
+      - name: "Build and restart services (dev)"
+        if: github.ref == 'refs/heads/dev'
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
+            set -euo pipefail
+            cd ~/meme_bot
+            docker compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache bot nginx
+            docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --remove-orphans
+            docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
+          ENDSSH
+
+      - name: "Health check (dev)"
+        if: github.ref == 'refs/heads/dev'
+        run: |
+          sleep 10
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
+            cd ~/meme_bot
+            echo "=== Container status ==="
+            docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
+            echo ""
+            echo "=== DB tunnel check ==="
+            pgrep -fa "127.0.0.1:5432:localhost:5432" || echo "WARNING: DB tunnel not running"
+            echo ""
+            echo "=== Bot logs (last 15 lines) ==="
+            docker compose -f docker-compose.yml -f docker-compose.dev.yml logs --tail=15 bot
           ENDSSH
