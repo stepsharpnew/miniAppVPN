@@ -59,18 +59,21 @@ jobs:
               echo "Tunnel key /root/shalos_bot.txt not found"
               exit 1
             fi
-            if pgrep -f "127.0.0.1:5432:localhost:5432" >/dev/null 2>&1; then
+            if pgrep -f "0.0.0.0:5432:localhost:5432" >/dev/null 2>&1; then
               echo "DB tunnel already running, skip start"
             else
+              # Kill any old tunnel on 127.0.0.1 variant
+              pkill -f "127.0.0.1:5432:localhost:5432" 2>/dev/null || true
               nohup ssh -fN \
-                -L 127.0.0.1:5432:localhost:5432 \
+                -L 0.0.0.0:5432:localhost:5432 \
                 -o ExitOnForwardFailure=yes \
                 -o ServerAliveInterval=60 \
                 -o ServerAliveCountMax=3 \
                 -o StrictHostKeyChecking=no \
                 -i /root/shalos_bot.txt \
                 root@103.31.76.160 >/tmp/dev-db-tunnel.log 2>&1
-              echo "Tunnel started: 127.0.0.1:5432 -> 103.31.76.160:5432"
+              sleep 2
+              echo "Tunnel started: 0.0.0.0:5432 -> 103.31.76.160:5432"
             fi
           ENDSSH
 
@@ -173,7 +176,7 @@ jobs:
             docker compose -f docker-compose.dev.yml ps
             echo ""
             echo "=== DB tunnel check ==="
-            pgrep -fa "127.0.0.1:5432:localhost:5432" || echo "WARNING: DB tunnel not running"
+            pgrep -fa "0.0.0.0:5432:localhost:5432" || echo "WARNING: DB tunnel not running"
             echo ""
             echo "=== Bot logs (last 15 lines) ==="
             docker compose -f docker-compose.dev.yml logs --tail=15 bot
