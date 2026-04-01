@@ -24,11 +24,15 @@ import {
   savePendingPayment,
 } from "./payment-store";
 import {
+  ensureLegacyConfigMigrated,
+  getEnabledServersByIds,
   type ServerRow,
   getAllEnabledServers,
+  getUserConfigurations,
   getRandomEnabledServer,
   getUserSubscription,
   incrementServerUserCount,
+  upsertUserConfiguration,
   upsertUserSubscription,
 } from "./db";
 
@@ -36,6 +40,34 @@ function getServerBaseUrl(server: ServerRow): string {
   const raw = server.domain_server_name;
   if (!raw) throw new Error(`Server ${server.server_id} has no domain_server_name (base URL)`);
   return raw.replace(/\/+$/, "");
+}
+
+async function getPrimaryConfig(userId: number): Promise<string | null> {
+  await ensureLegacyConfigMigrated(userId);
+  const configs = await getUserConfigurations(userId);
+  const first = configs.find((c) => c.config_number === 1);
+  return first?.vpn_config ?? null;
+}
+
+async function pickServerForSecondConfig(userId: number): Promise<ServerRow | null> {
+  const enabled = await getAllEnabledServers();
+  if (enabled.length === 0) return null;
+
+  await ensureLegacyConfigMigrated(userId);
+  const currentConfigs = await getUserConfigurations(userId);
+  const usedServerIds = currentConfigs
+    .map((c) => c.server_id)
+    .filter((id): id is string => !!id);
+
+  if (usedServerIds.length === 0) {
+    return enabled[Math.floor(Math.random() * enabled.length)];
+  }
+
+  const usedServers = await getEnabledServersByIds(usedServerIds);
+  const used = new Set(usedServers.map((s) => s.server_id));
+  const candidates = enabled.filter((s) => !used.has(s.server_id));
+  const pool = candidates.length > 0 ? candidates : enabled;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 interface TelegramUser {
@@ -277,9 +309,9 @@ export function createApiServer(api: Api, botToken: string) {
       return;
     }
     try {
-      const row = await getUserSubscription(user.id);
-      if (row?.vpn_config) {
-        res.json({ config: row.vpn_config });
+      const primaryConfig = await getPrimaryConfig(user.id);
+      if (primaryConfig) {
+        res.json({ config: primaryConfig });
         return;
       }
     } catch (err) {
@@ -296,9 +328,12 @@ export function createApiServer(api: Api, botToken: string) {
     // fallback to server-side temporary store (right after payment).
     const bodyConfig =
       typeof req.body?.config === "string" ? req.body.config : null;
-    const config = (bodyConfig && bodyConfig.trim().length > 0)
+    let config = (bodyConfig && bodyConfig.trim().length > 0)
       ? bodyConfig
       : getConfig(user.id);
+    if (!config) {
+      config = await getPrimaryConfig(user.id);
+    }
     if (!config) {
       res.status(404).json({ error: "Config not ready" });
       return;
@@ -338,6 +373,72 @@ export function createApiServer(api: Api, botToken: string) {
       });
     } catch (err) {
       console.error("Subscription check error:", err);
+      res.status(500).json({ error: "Internal error" });
+    }
+  });
+
+  // ── User configurations ──
+
+  app.get("/api/configurations", auth, async (req, res) => {
+    const user = getUser(req);
+    try {
+      await ensureLegacyConfigMigrated(user.id);
+      const configs = await getUserConfigurations(user.id);
+      res.json({
+        configs: configs.map((c) => ({
+          id: c.id,
+          number: c.config_number,
+          has_config: !!c.vpn_config,
+          config: c.vpn_config,
+          server_id: c.server_id,
+          created_at: c.created_at,
+        })),
+      });
+    } catch (err) {
+      console.error("Configurations list error:", err);
+      res.status(500).json({ error: "Internal error" });
+    }
+  });
+
+  app.post("/api/configurations/create", auth, async (req, res) => {
+    const user = getUser(req);
+    try {
+      const sub = await getUserSubscription(user.id);
+      const expiredAt = sub?.expired_at ? new Date(sub.expired_at) : null;
+      const isActive = expiredAt ? expiredAt.getTime() > Date.now() : false;
+      if (!isActive) {
+        res.status(403).json({ error: "Subscription is not active" });
+        return;
+      }
+
+      await ensureLegacyConfigMigrated(user.id);
+      const current = await getUserConfigurations(user.id);
+      if (current.some((c) => c.config_number === 2)) {
+        res.status(409).json({ error: "Configuration #2 already exists" });
+        return;
+      }
+
+      const server = await pickServerForSecondConfig(user.id);
+      if (!server?.server_id) {
+        res.status(503).json({ error: "No enabled VPN servers in DB" });
+        return;
+      }
+
+      const baseUrl = getServerBaseUrl(server);
+      const clientName = user.username || `tg_${user.id}_cfg2`;
+      const config = await provisionVpnClient(clientName, "1y", server.server_id, baseUrl);
+      await upsertUserConfiguration(user.id, 2, config, server.server_id);
+      await incrementServerUserCount(server.server_id).catch(() => {});
+
+      res.json({
+        config: {
+          number: 2,
+          config,
+          server_id: server.server_id,
+        },
+      });
+    } catch (err) {
+      console.error("Configuration create error:", err);
       res.status(500).json({ error: "Internal error" });
     }
   });
@@ -475,9 +576,8 @@ export function createApiServer(api: Api, botToken: string) {
 
     if (!config) {
       try {
-        const existingUser = await getUserSubscription(userId);
-        if (existingUser?.vpn_config) {
-          config = existingUser.vpn_config;
+        config = await getPrimaryConfig(userId) ?? undefined;
+        if (config) {
           provisionOk = true;
           const clientName = pending.username || `tg_${userId}`;
           try {
@@ -509,6 +609,7 @@ export function createApiServer(api: Api, botToken: string) {
         config = await provisionVpnClient(clientName, pending.durationCode, server.server_id, baseUrl);
         provisionOk = true;
         saveConfig(userId, config);
+        await upsertUserConfiguration(userId, 1, config, server.server_id);
         await incrementServerUserCount(server.server_id).catch(() => {});
       } catch (err) {
         console.error("VPN provisioning (status poll) failed:", err);
@@ -676,9 +777,8 @@ export function createApiServer(api: Api, botToken: string) {
 
     if (!config) {
       try {
-        const existingUser = await getUserSubscription(userId);
-        if (existingUser?.vpn_config) {
-          config = existingUser.vpn_config;
+        config = await getPrimaryConfig(userId) ?? undefined;
+        if (config) {
           provisionOk = true;
           const clientName = username || `tg_${userId}`;
           try {
@@ -710,6 +810,7 @@ export function createApiServer(api: Api, botToken: string) {
         config = await provisionVpnClient(clientName, durationCode, server.server_id, baseUrl);
         provisionOk = true;
         saveConfig(userId, config);
+        await upsertUserConfiguration(userId, 1, config, server.server_id);
         await incrementServerUserCount(server.server_id).catch(() => {});
       } catch (err) {
         console.error("VPN provisioning after webhook failed:", err);

@@ -26,3 +26,16 @@ CREATE TABLE IF NOT EXISTS servers (
     domain_server_name  VARCHAR(255),
     user_count          INTEGER         DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS user_configurations (
+    id                  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_telegram_id    BIGINT          NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+    config_number       INTEGER         NOT NULL CHECK (config_number IN (1, 2)),
+    server_id           VARCHAR(255),
+    vpn_config          TEXT            NOT NULL,
+    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (user_telegram_id, config_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_configurations_user_id
+ON user_configurations(user_telegram_id);

@@ -2,6 +2,7 @@ import WebApp from "@twa-dev/sdk";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useState } from "react";
 import { BRAND_NAME } from "../../../shared/texts";
+import { QrModal } from "../components/QrModal";
 import { StatusBadge } from "../components/StatusBadge";
 import { useTelegramUser } from "../hooks/useTelegramUser";
 import { useVpnConfig } from "../hooks/useVpnConfig";
@@ -13,6 +14,24 @@ interface SubscriptionInfo {
   is_blocked?: boolean;
   is_vip?: boolean;
   config?: string | null;
+}
+
+interface UserConfig {
+  id: string;
+  number: number;
+  config: string;
+  server_id: string | null;
+}
+
+interface ConfigApiItem {
+  id?: string;
+  number?: number;
+  config?: string;
+  server_id?: string | null;
+}
+
+interface ConfigurationsResponse {
+  configs?: ConfigApiItem[];
 }
 
 function formatExpiry(iso: string): string {
@@ -38,7 +57,34 @@ export function ProfilePage() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [sub, setSub] = useState<SubscriptionInfo | null>(null);
+  const [configs, setConfigs] = useState<UserConfig[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [creatingSecond, setCreatingSecond] = useState(false);
+  const [selectedConfig, setSelectedConfig] = useState<UserConfig | null>(null);
+
+  const loadConfigurations = useCallback(async () => {
+    try {
+      const res = await fetch("/api/configurations", {
+        headers: { "X-Telegram-Init-Data": WebApp.initData },
+      });
+      if (!res.ok) return [];
+      const data = (await res.json()) as ConfigurationsResponse;
+      const items: UserConfig[] = Array.isArray(data?.configs)
+        ? data.configs
+            .filter((c) => typeof c?.number === "number" && typeof c?.config === "string")
+            .map((c) => ({
+              id: String(c.id ?? `${c.number}`),
+              number: c.number as number,
+              config: c.config as string,
+              server_id: c.server_id ?? null,
+            }))
+        : [];
+      setConfigs(items);
+      return items;
+    } catch {
+      return [];
+    }
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -46,7 +92,7 @@ export function ProfilePage() {
       headers: { "X-Telegram-Init-Data": WebApp.initData },
     })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+      .then(async (data) => {
         if (!alive) return;
         if (data) {
           setSub(data);
@@ -54,6 +100,7 @@ export function ProfilePage() {
         } else {
           setSub({ active: false, expired_at: null, config: null });
         }
+        await loadConfigurations();
         setLoaded(true);
       })
       .catch(() => {
@@ -69,11 +116,11 @@ export function ProfilePage() {
 
   useEffect(() => {
     let alive = true;
-    if (!activeConfig) {
+    if (!selectedConfig?.config) {
       setQrDataUrl(null);
       return;
     }
-    QRCode.toDataURL(activeConfig, {
+    QRCode.toDataURL(selectedConfig.config, {
       width: 260,
       margin: 2,
       color: { dark: "#000000", light: "#FFFFFF" },
@@ -87,10 +134,11 @@ export function ProfilePage() {
     return () => {
       alive = false;
     };
-  }, [activeConfig]);
+  }, [selectedConfig]);
 
   const handleSendFile = useCallback(async () => {
-    if (sending || !activeConfig) return;
+    const targetConfig = selectedConfig?.config ?? activeConfig;
+    if (sending || !targetConfig) return;
     setSending(true);
     try {
       const res = await fetch("/api/payments/config/send-file", {
@@ -99,7 +147,7 @@ export function ProfilePage() {
           "Content-Type": "application/json",
           "X-Telegram-Init-Data": WebApp.initData,
         },
-        body: JSON.stringify({ config: activeConfig }),
+        body: JSON.stringify({ config: targetConfig }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
       setSent(true);
@@ -108,7 +156,41 @@ export function ProfilePage() {
     } finally {
       setSending(false);
     }
-  }, [sending, activeConfig]);
+  }, [sending, selectedConfig, activeConfig]);
+
+  const handleCreateSecond = useCallback(async () => {
+    if (creatingSecond) return;
+    setCreatingSecond(true);
+    try {
+      const res = await fetch("/api/configurations/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": WebApp.initData,
+        },
+      });
+      if (!res.ok) {
+        if (res.status === 403) {
+          WebApp.showAlert("Создание доступно только при активной подписке.");
+          return;
+        }
+        if (res.status === 409) {
+          WebApp.showAlert("Конфигурация №2 уже создана.");
+          return;
+        }
+        throw new Error(`${res.status}`);
+      }
+      await loadConfigurations();
+      WebApp.showAlert("Конфигурация №2 создана.");
+    } catch {
+      WebApp.showAlert("Не удалось создать конфигурацию. Попробуйте позже.");
+    } finally {
+      setCreatingSecond(false);
+    }
+  }, [creatingSecond, loadConfigurations]);
+
+  const sortedConfigs = [...configs].sort((a, b) => a.number - b.number);
+  const hasSecondConfig = sortedConfigs.some((c) => c.number === 2);
 
   return (
     <div className={styles.page}>
@@ -147,29 +229,33 @@ export function ProfilePage() {
         <div className={styles.divider} />
 
         <div className={styles.configBlock}>
-          <div className={styles.sectionHeader}>VPN конфиг</div>
+          <div className={styles.sectionHeader}>Мои конфигурации</div>
 
           {!loaded ? (
             <div className={styles.noConfig}>Загрузка...</div>
-          ) : sub?.active && activeConfig && qrDataUrl ? (
-            <>
-              <img
-                src={qrDataUrl}
-                alt="QR код конфигурации"
-                className={styles.qr}
-              />
-
-              <button
-                className={`${styles.sendBtn} ${sent ? styles.sent : ""}`}
-                onClick={sent ? undefined : handleSendFile}
-              >
-                {sending
-                  ? "Отправляем..."
-                  : sent
-                    ? "✓ Файл отправлен в чат"
-                    : "📄 Получить .conf файлом"}
-              </button>
-            </>
+          ) : sub?.active && (sortedConfigs.length > 0 || activeConfig) ? (
+            <div className={styles.configList}>
+              {sortedConfigs.map((cfg) => (
+                <button
+                  key={cfg.id}
+                  className={styles.configItem}
+                  onClick={() => {
+                    setSelectedConfig(cfg);
+                    setSent(false);
+                  }}
+                >
+                  Конфигурация №{cfg.number}
+                </button>
+              ))}
+              {!hasSecondConfig && (
+                <button
+                  className={styles.createBtn}
+                  onClick={handleCreateSecond}
+                >
+                  {creatingSecond ? "Создаем..." : "Создать"}
+                </button>
+              )}
+            </div>
           ) : (
             <div className={styles.noConfig}>
               После оплаты конфиг появится здесь и в чате с ботом {BRAND_NAME}.
@@ -177,6 +263,25 @@ export function ProfilePage() {
           )}
         </div>
       </div>
+      {selectedConfig && qrDataUrl && (
+        <QrModal
+          qrDataUrl={qrDataUrl}
+          title={`QR код подписки — Конфигурация №${selectedConfig.number}`}
+          onClose={() => setSelectedConfig(null)}
+          footerContent={(
+            <button
+              className={`${styles.sendBtn} ${sent ? styles.sent : ""}`}
+              onClick={sent ? undefined : handleSendFile}
+            >
+              {sending
+                ? "Отправляем..."
+                : sent
+                  ? "✓ Файл отправлен в чат"
+                  : "📄 Получить .conf файлом"}
+            </button>
+          )}
+        />
+      )}
     </div>
   );
 }

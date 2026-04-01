@@ -1,5 +1,5 @@
 import WebApp from "@twa-dev/sdk";
-import { useCallback, useState } from "react";
+import { type ReactNode, useCallback, useState } from "react";
 import type { PlatformInfo } from "../../../shared/platforms";
 import { PlatformLogo } from "./PlatformLogo";
 import styles from "./QrModal.module.css";
@@ -7,10 +7,12 @@ import styles from "./QrModal.module.css";
 interface QrModalProps {
   qrDataUrl: string;
   platform?: PlatformInfo | null;
+  title?: string;
+  footerContent?: ReactNode;
   onClose: () => void;
 }
 
-export function QrModal({ qrDataUrl, platform, onClose }: QrModalProps) {
+export function QrModal({ qrDataUrl, platform, title, footerContent, onClose }: QrModalProps) {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 
@@ -41,7 +43,7 @@ export function QrModal({ qrDataUrl, platform, onClose }: QrModalProps) {
           ✕
         </button>
 
-        <h2 className={styles.title}>VPN конфиг готов!</h2>
+        <h2 className={styles.title}>{title ?? "VPN конфиг готов!"}</h2>
         <p className={styles.subtitle}>
           Отсканируйте QR-код в приложении AmneziaWG
         </p>
@@ -87,16 +89,18 @@ export function QrModal({ qrDataUrl, platform, onClose }: QrModalProps) {
           </div>
         )}
 
-        <button
-          className={`${styles.downloadBtn} ${sent ? styles.sent : ""}`}
-          onClick={sent ? undefined : handleSendFile}
-        >
-          {sending
-            ? "Отправляем..."
-            : sent
-              ? "✓ Файл отправлен в чат"
-              : "📄 Получить .conf файлом"}
-        </button>
+        {footerContent ?? (
+          <button
+            className={`${styles.downloadBtn} ${sent ? styles.sent : ""}`}
+            onClick={sent ? undefined : handleSendFile}
+          >
+            {sending
+              ? "Отправляем..."
+              : sent
+                ? "✓ Файл отправлен в чат"
+                : "📄 Получить .conf файлом"}
+          </button>
+        )}
       </div>
     </div>
   );
