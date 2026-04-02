@@ -10,6 +10,8 @@ import {
   BRAND_NAME,
   PAYMENT_ADMIN_NOTIFY,
   PAYMENT_SUCCESS_USER,
+  SUBSCRIPTION_REMINDER_D1,
+  SUBSCRIPTION_REMINDER_D3,
   SUPPORT_MEDIA_CAPTION_ADMIN,
   SUPPORT_TICKET_ADMIN,
   SUPPORT_USER_TEXT_ADMIN,
@@ -26,6 +28,10 @@ import {
 import {
   ensureLegacyConfigMigrated,
   getEnabledServersByIds,
+  getUsersForReminder,
+  markUserNotificated,
+  unmarkUserNotificated,
+  type ReminderType,
   type ServerRow,
   getAllEnabledServers,
   getUserConfigurations,
@@ -443,12 +449,94 @@ export function createApiServer(api: Api, botToken: string) {
     }
   });
 
+  // ── External cron jobs (subscription reminders) ──
+
+  app.post("/api/jobs/subscription-reminders", async (req, res) => {
+    if (!remindersCronToken) {
+      res.status(503).json({ error: "Reminders cron token is not configured" });
+      return;
+    }
+    const authHeader = req.headers.authorization;
+    if (authHeader !== `Bearer ${remindersCronToken}`) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const bodyType = req.body?.type;
+    if (bodyType !== "d3" && bodyType !== "d1") {
+      res.status(400).json({ error: "Invalid reminder type. Use d3 or d1." });
+      return;
+    }
+
+    try {
+      const result = await runReminderJob(bodyType);
+      res.json({
+        ok: true,
+        type: bodyType,
+        timezone: remindersTimezone,
+        ...result,
+      });
+    } catch (err) {
+      console.error("Subscription reminder job failed:", err);
+      res.status(500).json({ error: "Reminder job failed" });
+    }
+  });
+
   // ── YooKassa: create payment (redirect flow) ──
 
   const shopId = (process.env.MERCHANT_SHOP_ID ?? "").trim();
   const secretKey = (process.env.MERCHANT_KEY ?? "").trim();
   const yookassaAuth = Buffer.from(`${shopId}:${secretKey}`).toString("base64");
   const webappUrl = (process.env.WEBAPP_URL ?? "").trim();
+  const remindersCronToken = (process.env.REMINDERS_CRON_TOKEN ?? "").trim();
+  const remindersTimezone = (process.env.REMINDERS_TIMEZONE ?? "Europe/Moscow").trim();
+
+  function getRenewalUrl(): string | null {
+    if (!webappUrl) return null;
+    try {
+      const u = new URL(webappUrl);
+      u.hash = "purchase";
+      return u.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  function reminderMessageByType(type: ReminderType): string {
+    return type === "d3" ? SUBSCRIPTION_REMINDER_D3 : SUBSCRIPTION_REMINDER_D1;
+  }
+
+  async function runReminderJob(type: ReminderType): Promise<{ processed: number; sent: number; failed: number; }> {
+    const users = await getUsersForReminder(type, remindersTimezone);
+    let sent = 0;
+    let failed = 0;
+    const renewalUrl = getRenewalUrl();
+    for (const user of users) {
+      try {
+        await api.sendMessage(
+          user.telegram_id,
+          reminderMessageByType(type),
+          {
+            parse_mode: "HTML",
+            ...(renewalUrl
+              ? {
+                  reply_markup: {
+                    inline_keyboard: [[{ text: "Продлить подписку", web_app: { url: renewalUrl } }]],
+                  },
+                }
+              : {}),
+          },
+        );
+        await markUserNotificated(user.telegram_id, type);
+        sent++;
+      } catch (error) {
+        failed++;
+        await unmarkUserNotificated(user.telegram_id, type).catch(() => {});
+        console.error(`Reminder ${type} send failed for user ${user.telegram_id}:`, error);
+      }
+    }
+    return { processed: users.length, sent, failed };
+  }
 
   let cachedBotUsername: string | null = null;
   async function getBotUsername(): Promise<string> {

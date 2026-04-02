@@ -122,6 +122,16 @@ export const PAYMENT_ADMIN_NOTIFY = (
   `💰 Сумма: <b>${amount}</b>\n` +
   `🔧 Авто‑выдача: ${provisionOk ? "✅ выдан" : "❌ ошибка — требуется ручная выдача"}`;
 
+export const SUBSCRIPTION_REMINDER_D3 =
+  `🔔 <b>Напоминание: подписка скоро закончится</b>\n\n` +
+  `До окончания осталось 3 дня.\n` +
+  `Продлите подписку заранее, чтобы VPN работал без перерыва.`;
+
+export const SUBSCRIPTION_REMINDER_D1 =
+  `⏰ <b>Подписка заканчивается завтра</b>\n\n` +
+  `Остался 1 день до отключения.\n` +
+  `Продлите подписку сейчас, чтобы не потерять доступ к VPN.`;
+
 // ── FAQ (used by Mini App) ──
 
 export const FAQ_ITEMS = [

@@ -30,6 +30,12 @@ export async function initDb(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_user_configurations_user_id
       ON user_configurations(user_telegram_id)
     `);
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_d3 BOOLEAN NOT NULL DEFAULT FALSE
+    `);
+    await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_d1 BOOLEAN NOT NULL DEFAULT FALSE
+    `);
     console.log("PostgreSQL connected");
   } finally {
     client.release();
@@ -46,6 +52,8 @@ export interface UserRow {
   telegram_nickname: string | null;
   expired_at: string | null;
   vpn_config: string | null;
+  is_notificated_d3: boolean;
+  is_notificated_d1: boolean;
   created_at: string;
 }
 
@@ -80,11 +88,58 @@ export async function upsertUserSubscription(
            ELSE NOW() + make_interval(months => $2)
        END,
        vpn_config = COALESCE($3, users.vpn_config),
-       telegram_nickname = COALESCE($4, users.telegram_nickname)
+       telegram_nickname = COALESCE($4, users.telegram_nickname),
+       is_notificated_d3 = FALSE,
+       is_notificated_d1 = FALSE
      RETURNING *`,
     [telegramId, months, vpnConfig ?? null, telegramNickname ?? null],
   );
   return rows[0];
+}
+
+export type ReminderType = "d3" | "d1";
+
+export async function getUsersForReminder(
+  type: ReminderType,
+  timezone: string,
+): Promise<UserRow[]> {
+  const targetShiftDays = type === "d3" ? 3 : 1;
+  const notifiedColumn = type === "d3" ? "is_notificated_d3" : "is_notificated_d1";
+  const { rows } = await getPool().query<UserRow>(
+    `SELECT *
+     FROM users
+     WHERE expired_at IS NOT NULL
+       AND ${notifiedColumn} = FALSE
+       AND ((expired_at AT TIME ZONE $1)::date = ((NOW() AT TIME ZONE $1)::date + $2))`,
+    [timezone, targetShiftDays],
+  );
+  return rows;
+}
+
+export async function markUserNotificated(
+  telegramId: number,
+  type: ReminderType,
+): Promise<void> {
+  const column = type === "d3" ? "is_notificated_d3" : "is_notificated_d1";
+  await getPool().query(
+    `UPDATE users
+     SET ${column} = TRUE
+     WHERE telegram_id = $1`,
+    [telegramId],
+  );
+}
+
+export async function unmarkUserNotificated(
+  telegramId: number,
+  type: ReminderType,
+): Promise<void> {
+  const column = type === "d3" ? "is_notificated_d3" : "is_notificated_d1";
+  await getPool().query(
+    `UPDATE users
+     SET ${column} = FALSE
+     WHERE telegram_id = $1`,
+    [telegramId],
+  );
 }
 
 export async function getUserSubscription(
