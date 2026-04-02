@@ -15,6 +15,10 @@ services:
       - sh
       - -c
       - >
+        until psql -h postgres -U ${POSTGRES_USER:-meme} -d ${POSTGRES_DB:-meme_db} -c "SELECT 1" >/dev/null 2>&1; do
+          echo "db-migrator: waiting for postgres DNS/connection...";
+          sleep 2;
+        done;
         psql -h postgres -U ${POSTGRES_USER:-meme} -d ${POSTGRES_DB:-meme_db}
         -v ON_ERROR_STOP=1 -f /migrations/create_tables.sql
     networks:
