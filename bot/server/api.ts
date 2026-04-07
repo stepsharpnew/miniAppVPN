@@ -3,6 +3,7 @@ import https from "https";
 import express from "express";
 import cors from "cors";
 import multer from "multer";
+import cron from "node-cron";
 import { type Api, InputFile } from "grammy";
 import { addMessage, getMessages, hasMessages } from "./chat-store";
 import { resolveAdminChat, saveForwardedMessage, setActiveDialog } from "./store";
@@ -944,6 +945,22 @@ export function createApiServer(api: Api, botToken: string) {
 
     res.json({ ok: true });
   });
+
+  // ── Internal cron: subscription reminders at 11:00 ──
+
+  const cronTimezone = remindersTimezone || "Europe/Moscow";
+  cron.schedule("0 11 * * *", async () => {
+    console.log(`[cron] Reminder job started (tz: ${cronTimezone})`);
+    for (const type of ["d3", "d1"] as const) {
+      try {
+        const result = await runReminderJob(type);
+        console.log(`[cron] Reminder ${type}: processed=${result.processed}, sent=${result.sent}, failed=${result.failed}`);
+      } catch (err) {
+        console.error(`[cron] Reminder ${type} failed:`, err);
+      }
+    }
+  }, { timezone: cronTimezone });
+  console.log(`Subscription reminder cron scheduled at 11:00 ${cronTimezone}`);
 
   return app;
 }

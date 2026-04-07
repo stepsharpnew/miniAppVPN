@@ -110,7 +110,7 @@ export async function getUsersForReminder(
      FROM users
      WHERE expired_at IS NOT NULL
        AND ${notifiedColumn} = FALSE
-       AND ((expired_at AT TIME ZONE $1)::date = ((NOW() AT TIME ZONE $1)::date + $2))`,
+       AND ((expired_at AT TIME ZONE $1)::date = ((NOW() AT TIME ZONE $1)::date + $2::integer))`,
     [timezone, targetShiftDays],
   );
   return rows;
