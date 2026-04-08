@@ -54,6 +54,20 @@ function normalizeTelegramNickname(username?: string): string | null {
   return trimmed;
 }
 
+/** @MemeVPNbest — подписка на канал; пусто = не требовать (удобно для локальной разработки). */
+function requiredChannelUsername(): string {
+  return (process.env.REQUIRED_CHANNEL_USERNAME ?? "").trim();
+}
+
+function isChannelMemberStatus(status: string): boolean {
+  return (
+    status === "creator" ||
+    status === "administrator" ||
+    status === "member" ||
+    status === "restricted"
+  );
+}
+
 function verifyInitData(
   initData: string,
   botToken: string,
@@ -121,9 +135,60 @@ export function createApiServer(api: Api, botToken: string) {
     return (req as any).tgUser;
   }
 
+  const requireChannelSubscription: express.RequestHandler = async (
+    req,
+    res,
+    next,
+  ) => {
+    const ch = requiredChannelUsername();
+    if (!ch) {
+      next();
+      return;
+    }
+    const user = getUser(req);
+    const chatId = ch.startsWith("@") ? ch : `@${ch}`;
+    try {
+      const member = await api.getChatMember(chatId, user.id);
+      if (!isChannelMemberStatus(member.status)) {
+        res.status(403).json({
+          error: "channel_subscription_required",
+          subscribed: false,
+        });
+        return;
+      }
+      next();
+    } catch (err) {
+      console.error("getChatMember (API guard):", err);
+      res.status(503).json({ error: "channel_check_failed" });
+    }
+  };
+
+  // ── Channel membership (Mini App gate; бот должен быть админом канала) ──
+
+  app.get("/api/channel-subscription", auth, async (req, res) => {
+    const ch = requiredChannelUsername();
+    if (!ch) {
+      res.json({ subscribed: true, channelUrl: null as string | null });
+      return;
+    }
+    const user = getUser(req);
+    const chatId = ch.startsWith("@") ? ch : `@${ch}`;
+    const channelUrl = `https://t.me/${ch.replace(/^@/, "")}`;
+    try {
+      const member = await api.getChatMember(chatId, user.id);
+      res.json({
+        subscribed: isChannelMemberStatus(member.status),
+        channelUrl,
+      });
+    } catch (err) {
+      console.error("getChatMember (/api/channel-subscription):", err);
+      res.json({ subscribed: false, channelUrl });
+    }
+  });
+
   // ── Messages history ──
 
-  app.get("/api/support/messages", auth, (req, res) => {
+  app.get("/api/support/messages", auth, requireChannelSubscription, (req, res) => {
     const user = getUser(req);
     const after = req.query.after ? Number(req.query.after) : undefined;
     res.json({ messages: getMessages(user.id, after) });
@@ -131,7 +196,7 @@ export function createApiServer(api: Api, botToken: string) {
 
   // ── Send text ──
 
-  app.post("/api/support/send", auth, async (req, res) => {
+  app.post("/api/support/send", auth, requireChannelSubscription, async (req, res) => {
     const user = getUser(req);
     const { text } = req.body;
     if (!text?.trim()) {
@@ -181,6 +246,7 @@ export function createApiServer(api: Api, botToken: string) {
   app.post(
     "/api/support/upload",
     auth,
+    requireChannelSubscription,
     upload.single("file"),
     async (req, res) => {
       const user = getUser(req);
@@ -241,7 +307,7 @@ export function createApiServer(api: Api, botToken: string) {
 
   // ── Proxy Telegram files (for admin-sent photos/docs) ──
 
-  app.get("/api/support/file/:fileId", auth, async (req, res) => {
+  app.get("/api/support/file/:fileId", auth, requireChannelSubscription, async (req, res) => {
     try {
       const raw = req.params.fileId;
       const fileId = typeof raw === "string" ? raw : raw?.[0];
@@ -269,7 +335,7 @@ export function createApiServer(api: Api, botToken: string) {
 
   // ── Get VPN config after payment ──
 
-  app.get("/api/payments/config", auth, async (req, res) => {
+  app.get("/api/payments/config", auth, requireChannelSubscription, async (req, res) => {
     const user = getUser(req);
     const memConfig = getConfig(user.id);
     if (memConfig) {
@@ -290,7 +356,7 @@ export function createApiServer(api: Api, botToken: string) {
 
   // ── Send config as .conf file directly to user's Telegram chat ──
 
-  app.post("/api/payments/config/send-file", auth, async (req, res) => {
+  app.post("/api/payments/config/send-file", auth, requireChannelSubscription, async (req, res) => {
     const user = getUser(req);
     // Prefer explicit config from client (e.g. when user opens Profile later),
     // fallback to server-side temporary store (right after payment).
@@ -318,7 +384,7 @@ export function createApiServer(api: Api, botToken: string) {
 
   // ── Subscription status ──
 
-  app.get("/api/subscription", auth, async (req, res) => {
+  app.get("/api/subscription", auth, requireChannelSubscription, async (req, res) => {
     const user = getUser(req);
     try {
       const row = await getUserSubscription(user.id);
@@ -360,7 +426,7 @@ export function createApiServer(api: Api, botToken: string) {
     return cachedBotUsername;
   }
 
-  app.post("/api/payments/create-payment", auth, async (req, res) => {
+  app.post("/api/payments/create-payment", auth, requireChannelSubscription, async (req, res) => {
     if (!shopId || !secretKey) {
       res.status(503).json({ error: "Payments not configured" });
       return;
@@ -558,7 +624,7 @@ export function createApiServer(api: Api, botToken: string) {
     }
   }
 
-  app.get("/api/payments/status/:paymentId", auth, async (req, res) => {
+  app.get("/api/payments/status/:paymentId", auth, requireChannelSubscription, async (req, res) => {
     const raw = req.params.paymentId;
     const paymentId = typeof raw === "string" ? raw : raw?.[0];
     if (!paymentId) {

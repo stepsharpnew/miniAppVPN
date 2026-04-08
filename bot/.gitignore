@@ -2,5 +2,6 @@ node_modules
 dist
 webapp/dist
 .env
+.dev.env
 .vercel
 *.log
