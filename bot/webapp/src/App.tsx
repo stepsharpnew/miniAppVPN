@@ -1,4 +1,5 @@
 import WebApp from "@twa-dev/sdk";
+import * as React from "react";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { BottomNav, type TabId } from "./components/BottomNav";
 import { ChannelSubscribeGate } from "./components/ChannelSubscribeGate";
@@ -68,7 +69,7 @@ export default function App() {
   const [gateChannelUrl, setGateChannelUrl] = useState(DEFAULT_CHANNEL_URL);
   const [splash, setSplash] = useState(true);
 
-  const runChannelCheck = useCallback(async () => {
+  const runChannelCheck = useCallback(async (): Promise<void> => {
     try {
       const { subscribed, channelUrl } = await fetchChannelSubscription();
       setGateChannelUrl(channelUrl);
@@ -100,7 +101,7 @@ export default function App() {
   const showPreloader = boot === "loading" || (boot === "app" && splash);
 
   return (
-    <>
+    <React.Fragment>
       <Preloader visible={showPreloader} />
       {boot === "gate" ? (
         <ChannelSubscribeGate
@@ -109,7 +110,7 @@ export default function App() {
         />
       ) : null}
       {boot === "app" ? (
-        <>
+        <React.Fragment>
           <div
             style={{
               position: "relative",
@@ -141,8 +142,8 @@ export default function App() {
           {!splash ? (
             <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
           ) : null}
-        </>
+        </React.Fragment>
       ) : null}
-    </>
+    </React.Fragment>
   );
 }
