@@ -7,6 +7,7 @@ import { InstructionsPage } from "./pages/InstructionsPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { PurchasePage } from "./pages/PurchasePage";
 import { SupportPage } from "./pages/SupportPage";
+import { waitForTelegramInitData } from "./utils/telegramInitData";
 
 function initialTabFromLocation(): TabId {
   if (typeof window === "undefined") return "profile";
@@ -21,8 +22,12 @@ async function fetchChannelSubscription(): Promise<{
   subscribed: boolean;
   channelUrl: string;
 }> {
+  const initData = await waitForTelegramInitData();
+  if (!initData) {
+    return { subscribed: false, channelUrl: DEFAULT_CHANNEL_URL };
+  }
   const r = await fetch("/api/channel-subscription", {
-    headers: { "X-Telegram-Init-Data": WebApp.initData },
+    headers: { "X-Telegram-Init-Data": initData },
   });
   if (!r.ok) {
     return { subscribed: false, channelUrl: DEFAULT_CHANNEL_URL };

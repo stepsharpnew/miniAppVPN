@@ -4,6 +4,12 @@ import WebApp from '@twa-dev/sdk';
 import App from './App';
 import './styles/global.css';
 
+try {
+  WebApp.ready();
+} catch {
+  /* вне Telegram WebView */
+}
+
 function dismissTelegramLoader() {
   try {
     WebApp.ready();
