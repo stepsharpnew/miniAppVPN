@@ -26,13 +26,19 @@ export async function closeDb(): Promise<void> {
 }
 
 export interface UserRow {
-  telegram_id: number;
+  id: string;
+  telegram_id: number | null;
+  email: string | null;
+  password_hash: string | null;
+  auth_source: string;
   is_blocked: boolean;
   telegram_nickname: string | null;
   expired_at: string | null;
   vpn_config: string | null;
   created_at: string;
 }
+
+// ── Telegram-flow (существующий функционал бота) ──
 
 /**
  * Create user if missing, then extend subscription by `months`.
@@ -47,8 +53,8 @@ export async function upsertUserSubscription(
   telegramNickname?: string | null,
 ): Promise<UserRow> {
   const { rows } = await getPool().query<UserRow>(
-    `INSERT INTO users (telegram_id, expired_at, vpn_config, telegram_nickname)
-     VALUES ($1, NOW() + make_interval(months => $2), $3, $4)
+    `INSERT INTO users (telegram_id, expired_at, vpn_config, telegram_nickname, auth_source)
+     VALUES ($1, NOW() + make_interval(months => $2), $3, $4, 'telegram')
      ON CONFLICT (telegram_id) DO UPDATE
        SET expired_at = CASE
          WHEN users.expired_at IS NOT NULL AND users.expired_at > NOW()
@@ -71,6 +77,81 @@ export async function getUserSubscription(
     [telegramId],
   );
   return rows[0] ?? null;
+}
+
+// ── Web-flow (для сайта — работа по UUID id / email) ──
+
+export async function getUserById(
+  id: string,
+): Promise<UserRow | null> {
+  const { rows } = await getPool().query<UserRow>(
+    "SELECT * FROM users WHERE id = $1",
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
+export async function getUserByEmail(
+  email: string,
+): Promise<UserRow | null> {
+  const { rows } = await getPool().query<UserRow>(
+    "SELECT * FROM users WHERE email = $1",
+    [email],
+  );
+  return rows[0] ?? null;
+}
+
+export async function createWebUser(
+  email: string,
+  passwordHash: string,
+): Promise<UserRow> {
+  const { rows } = await getPool().query<UserRow>(
+    `INSERT INTO users (email, password_hash, auth_source)
+     VALUES ($1, $2, 'web')
+     RETURNING *`,
+    [email, passwordHash],
+  );
+  return rows[0];
+}
+
+/**
+ * Extend subscription for any user by their UUID id.
+ * Works the same as upsertUserSubscription but uses the UUID PK.
+ */
+export async function extendSubscriptionById(
+  userId: string,
+  months: number,
+  vpnConfig?: string,
+): Promise<UserRow> {
+  const { rows } = await getPool().query<UserRow>(
+    `UPDATE users
+     SET expired_at = CASE
+       WHEN expired_at IS NOT NULL AND expired_at > NOW()
+         THEN expired_at + make_interval(months => $2)
+         ELSE NOW() + make_interval(months => $2)
+       END,
+       vpn_config = COALESCE($3, vpn_config)
+     WHERE id = $1
+     RETURNING *`,
+    [userId, months, vpnConfig ?? null],
+  );
+  return rows[0];
+}
+
+export async function linkTelegramToUser(
+  userId: string,
+  telegramId: number,
+  telegramNickname?: string | null,
+): Promise<UserRow> {
+  const { rows } = await getPool().query<UserRow>(
+    `UPDATE users
+     SET telegram_id = $2,
+         telegram_nickname = COALESCE($3, telegram_nickname)
+     WHERE id = $1
+     RETURNING *`,
+    [userId, telegramId, telegramNickname ?? null],
+  );
+  return rows[0];
 }
 
 // ── Servers ──
