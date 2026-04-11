@@ -31,6 +31,7 @@ import {
   incrementServerUserCount,
   upsertUserSubscription,
 } from "./db";
+import { mountWebAuthRoutes } from "./web-auth";
 
 function getServerBaseUrl(server: ServerRow): string {
   const raw = server.domain_server_name;
@@ -821,6 +822,9 @@ export function createApiServer(api: Api, botToken: string) {
 
     res.json({ ok: true });
   });
+
+  // ── Web auth routes (email/password, JWT) ──
+  mountWebAuthRoutes(app);
 
   return app;
 }

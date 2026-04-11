@@ -2,7 +2,7 @@ import { useState } from "react";
 import { BRAND_NAME } from "../data/plans";
 import styles from "./Navbar.module.css";
 
-export type TabId = "profile" | "pricing" | "instructions" | "faq";
+export type TabId = "profile" | "pricing" | "instructions" | "support" | "faq";
 
 interface NavItem {
   id: TabId;
@@ -13,6 +13,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "profile", label: "Профиль" },
   { id: "pricing", label: "Тарифы" },
   { id: "instructions", label: "Инструкции" },
+  { id: "support", label: "Поддержка" },
   { id: "faq", label: "FAQ" },
 ];
 

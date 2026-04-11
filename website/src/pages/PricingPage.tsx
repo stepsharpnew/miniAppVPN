@@ -1,17 +1,24 @@
 import { useState } from "react";
 import { PRICING, type PricingOption } from "../data/plans";
 import { PURCHASE_PLATFORMS, type PlatformInfo } from "../data/platforms";
+import { type WebUser } from "../hooks/useAuth";
 import { PlatformSelect } from "../components/PlatformSelect";
 import { PriceList } from "../components/PriceList";
 import styles from "./PricingPage.module.css";
 
-export function PricingPage() {
+interface PricingPageProps {
+  user: WebUser | null;
+}
+
+export function PricingPage({ user }: PricingPageProps) {
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformInfo>(
     PURCHASE_PLATFORMS[0],
   );
   const [selected, setSelected] = useState<PricingOption>(PRICING[0]);
 
-  const buttonText = `КУПИТЬ ЗА ${selected.price}₽`;
+  const buttonText = user
+    ? `КУПИТЬ ЗА ${selected.price}₽`
+    : `КУПИТЬ ЗА ${selected.price}₽`;
 
   return (
     <div className={styles.page}>
@@ -48,9 +55,9 @@ export function PricingPage() {
             {buttonText}
           </button>
           <p className={styles.buyHint}>
-            Оплата через сайт — скоро!
-            <br />
-            Пока доступна через Telegram-бот
+            {user
+              ? "Онлайн-оплата через сайт — скоро!"
+              : "Войдите в аккаунт или оплатите через Telegram-бот"}
           </p>
         </div>
       </section>

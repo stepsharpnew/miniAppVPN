@@ -1,0 +1,123 @@
+.page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - var(--navbar-height) - 96px);
+}
+
+.card {
+  width: 100%;
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  padding: 32px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.logoIcon {
+  font-size: 40px;
+  margin-bottom: 8px;
+}
+
+.brand {
+  font-weight: 800;
+  font-size: 24px;
+  background: linear-gradient(
+    90deg,
+    #4D8BFF 0%,
+    #7B5FFF 40%,
+    #4D8BFF 80%,
+    #7B5FFF 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer 3s linear infinite;
+}
+
+.subtitle {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-top: 6px;
+}
+
+.form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.input {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input:focus {
+  border-color: var(--accent-blue);
+}
+
+.input::placeholder {
+  color: var(--text-secondary);
+}
+
+.error {
+  font-size: 13px;
+  color: #ff6b6b;
+  text-align: center;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(255, 107, 107, 0.08);
+}
+
+.submitBtn {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--btn-gradient);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  transition: opacity 0.2s, transform 0.1s;
+  box-shadow: 0 4px 20px rgba(77, 139, 255, 0.3);
+}
+
+.submitBtn:hover {
+  transform: translateY(-1px);
+}
+
+.submitBtn:active {
+  opacity: 0.85;
+  transform: scale(0.98);
+}
+
+.submitBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.switchBtn {
+  margin-top: 16px;
+  color: var(--accent-blue);
+  font-size: 13px;
+  font-weight: 600;
+  transition: opacity 0.2s;
+}
+
+.switchBtn:hover {
+  opacity: 0.8;
+}

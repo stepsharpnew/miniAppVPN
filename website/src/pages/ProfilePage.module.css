@@ -4,8 +4,6 @@
   gap: 16px;
 }
 
-/* ── Profile card ── */
-
 .profileCard {
   background: var(--bg-card);
   border-radius: var(--border-radius);
@@ -40,7 +38,8 @@
 
 .userName {
   font-weight: 700;
-  font-size: 18px;
+  font-size: 16px;
+  word-break: break-all;
 }
 
 .userId {
@@ -62,6 +61,12 @@
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 1px;
+}
+
+.expiryInfo {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
 }
 
 .divider {
@@ -93,98 +98,63 @@
   padding: 6px 4px 2px;
 }
 
-/* ── Auth card ── */
-
-.authCard {
-  background: var(--bg-card);
-  border-radius: var(--border-radius);
-  padding: 24px 20px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
+.qr {
+  width: 260px;
+  height: 260px;
+  border-radius: 12px;
+  margin: 2px 0 14px;
 }
 
-.authIcon {
-  font-size: 32px;
-  margin-bottom: 12px;
-}
-
-.authTitle {
-  font-weight: 700;
-  font-size: 17px;
-}
-
-.authText {
-  color: var(--text-secondary);
-  font-size: 13px;
-  margin-top: 8px;
-  line-height: 1.6;
-}
-
-.authButtons {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-  margin-top: 20px;
-}
-
-.authBtnPrimary {
+.copyBtn {
   width: 100%;
   padding: 14px;
-  border-radius: 12px;
+  border-radius: var(--border-radius-sm);
   background: var(--btn-gradient);
-  color: #fff;
-  font-size: 15px;
+  color: white;
+  font-size: 14px;
   font-weight: 700;
-  transition: opacity 0.2s;
+  transition: opacity 0.15s;
 }
 
-.authBtnPrimary:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.authBtnSecondary {
-  width: 100%;
-  padding: 14px;
-  border-radius: 12px;
-  background: rgba(77, 139, 255, 0.1);
-  color: var(--accent-blue);
-  font-size: 15px;
-  font-weight: 700;
-  transition: opacity 0.2s;
-}
-
-.authBtnSecondary:hover {
+.copyBtn:active {
   opacity: 0.85;
 }
 
-/* ── Stats ── */
-
-.statsRow {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+.buyBtn {
+  width: 100%;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--btn-gradient);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: 0 4px 20px rgba(77, 139, 255, 0.35);
+  transition: opacity 0.15s, transform 0.1s;
 }
 
-.statCard {
-  background: var(--bg-card);
-  border-radius: var(--border-radius);
-  padding: 18px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  text-align: center;
+.buyBtn:hover {
+  transform: translateY(-1px);
 }
 
-.statValue {
-  font-size: 24px;
+.buyBtn:active {
+  opacity: 0.85;
+  transform: scale(0.98);
 }
 
-.statLabel {
-  font-size: 11px;
+.logoutBtn {
+  width: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--text-secondary);
-  margin-top: 8px;
+  font-size: 14px;
   font-weight: 600;
+  transition: all 0.2s;
+}
+
+.logoutBtn:hover {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.2);
+  background: rgba(255, 107, 107, 0.06);
 }

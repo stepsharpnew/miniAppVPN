@@ -1,6 +1,6 @@
 import { type ChatMessage } from "../shared/plans";
 
-const chats = new Map<number, ChatMessage[]>();
+const chats = new Map<number | string, ChatMessage[]>();
 let counter = 0;
 
 function nextId(): string {
@@ -8,7 +8,7 @@ function nextId(): string {
 }
 
 export function addMessage(
-  userId: number,
+  userId: number | string,
   msg: Omit<ChatMessage, "id" | "timestamp">,
 ): ChatMessage {
   const message: ChatMessage = { ...msg, id: nextId(), timestamp: Date.now() };
@@ -18,7 +18,7 @@ export function addMessage(
 }
 
 export function getMessages(
-  userId: number,
+  userId: number | string,
   afterTimestamp?: number,
 ): ChatMessage[] {
   const all = chats.get(userId) ?? [];
@@ -26,6 +26,6 @@ export function getMessages(
   return [...all];
 }
 
-export function hasMessages(userId: number): boolean {
+export function hasMessages(userId: number | string): boolean {
   return (chats.get(userId)?.length ?? 0) > 0;
 }
