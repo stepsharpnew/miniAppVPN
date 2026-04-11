@@ -105,6 +105,13 @@
   margin: 2px 0 14px;
 }
 
+.configActions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
 .copyBtn {
   width: 100%;
   padding: 14px;
@@ -117,6 +124,27 @@
 }
 
 .copyBtn:active {
+  opacity: 0.85;
+}
+
+.downloadBtn {
+  width: 100%;
+  padding: 14px;
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  transition: all 0.15s;
+}
+
+.downloadBtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--accent-blue);
+}
+
+.downloadBtn:active {
   opacity: 0.85;
 }
 

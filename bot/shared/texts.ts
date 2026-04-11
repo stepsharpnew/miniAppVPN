@@ -109,7 +109,7 @@ export const PAYMENT_PROVISION_FAILED_USER =
 export const PAYMENT_ADMIN_NOTIFY = (
   userName: string,
   userTag: string,
-  userId: number,
+  userId: number | string,
   planLabel: string,
   amount: string,
   provisionOk: boolean,

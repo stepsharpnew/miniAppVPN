@@ -2,7 +2,7 @@
 
 export interface PendingPayment {
   paymentId: string;
-  userId: number;
+  userId: number | string;
   username: string;
   firstName: string;
   months: number;
@@ -11,6 +11,7 @@ export interface PendingPayment {
   status: "pending" | "succeeded" | "canceled";
   config?: string;
   isRenewal: boolean;
+  source: "telegram" | "web";
   createdAt: number;
 }
 

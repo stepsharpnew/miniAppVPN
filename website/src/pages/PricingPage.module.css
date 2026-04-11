@@ -85,10 +85,100 @@
   transform: scale(0.98);
 }
 
+.buyButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
 .buyHint {
   text-align: center;
   font-size: 12px;
   color: var(--text-secondary);
   margin-top: 14px;
   line-height: 1.6;
+}
+
+.errorText {
+  text-align: center;
+  font-size: 13px;
+  color: #ff6b6b;
+  margin-top: 10px;
+}
+
+.successBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 16px;
+  background: rgba(77, 255, 139, 0.06);
+  border-radius: 14px;
+  border: 1px solid rgba(77, 255, 139, 0.15);
+}
+
+.successIcon {
+  font-size: 36px;
+}
+
+.successText {
+  text-align: center;
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.successHint {
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.cancelBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.cancelText {
+  text-align: center;
+  font-size: 14px;
+  color: #ff6b6b;
+  font-weight: 600;
+}
+
+.pollingBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 24px;
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--accent-blue);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.pollingText {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.pollingHint {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-secondary);
 }

@@ -517,6 +517,7 @@ export function createApiServer(api: Api, botToken: string) {
         amount: plan.price,
         status: "pending",
         isRenewal,
+        source: "telegram",
       });
 
       res.json({ confirmationUrl, paymentId: payment.id });
@@ -536,7 +537,7 @@ export function createApiServer(api: Api, botToken: string) {
     // (webhook + polling can race into this function concurrently)
     pending.status = "succeeded";
 
-    const userId = pending.userId;
+    const userId = pending.userId as number;
     let config = pending.config ?? getConfig(userId) ?? undefined;
     let provisionOk = !!config;
 
@@ -718,7 +719,12 @@ export function createApiServer(api: Api, botToken: string) {
     // If payment is in local store, use shared processing path
     const pending = getPendingPayment(paymentId);
     if (pending && pending.status !== "succeeded") {
-      await processSucceededPayment(paymentId);
+      if (pending.source === "web") {
+        const { processWebPaymentFromWebhook } = await import("./web-auth");
+        await processWebPaymentFromWebhook(paymentId);
+      } else {
+        await processSucceededPayment(paymentId);
+      }
       res.json({ ok: true });
       return;
     }

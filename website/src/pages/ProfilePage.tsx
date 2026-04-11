@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { type WebUser } from "../hooks/useAuth";
-import { apiFetch } from "../utils/api";
+import { apiFetch, getAccessToken } from "../utils/api";
 import { BRAND_NAME } from "../data/plans";
 import { StatusBadge } from "../components/StatusBadge";
 import styles from "./ProfilePage.module.css";
@@ -39,6 +39,7 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   const [sub, setSub] = useState<SubData | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -68,9 +69,36 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
 
   const handleCopyConfig = useCallback(() => {
     if (sub?.config) {
-      navigator.clipboard.writeText(sub.config).catch(() => {});
+      navigator.clipboard.writeText(sub.config).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }).catch(() => {});
     }
   }, [sub?.config]);
+
+  const handleDownloadConf = useCallback(() => {
+    const token = getAccessToken();
+    if (!token) return;
+    const API_BASE = import.meta.env.VITE_API_URL || "";
+    const url = `${API_BASE}/api/web/config/download`;
+    fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Не удалось скачать");
+        return res.blob();
+      })
+      .then((blob) => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "meme-vpn.conf";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+      })
+      .catch(() => {});
+  }, []);
 
   if (!user) return null;
 
@@ -110,15 +138,20 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
                 alt="QR код конфигурации"
                 className={styles.qr}
               />
-              <button className={styles.copyBtn} onClick={handleCopyConfig}>
-                📋 Скопировать конфиг
-              </button>
+              <div className={styles.configActions}>
+                <button className={styles.copyBtn} onClick={handleCopyConfig}>
+                  {copied ? "✅ Скопировано!" : "📋 Скопировать конфиг"}
+                </button>
+                <button className={styles.downloadBtn} onClick={handleDownloadConf}>
+                  📥 Скачать .conf
+                </button>
+              </div>
             </>
           ) : (
             <div className={styles.noConfig}>
               {sub?.active
                 ? "Конфиг генерируется..."
-                : `После оплаты конфиг появится здесь. ${BRAND_NAME}`}
+                : `Купите подписку — конфиг появится здесь. ${BRAND_NAME}`}
             </div>
           )}
         </div>
