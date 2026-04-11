@@ -46,15 +46,21 @@ END $$;
 -- Уникальное ограничение на telegram_id (если отсутствует)
 DO $$
 BEGIN
-  ALTER TABLE users ADD CONSTRAINT users_telegram_id_unique UNIQUE (telegram_id);
-EXCEPTION WHEN duplicate_object THEN NULL;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'users_telegram_id_unique'
+  ) THEN
+    ALTER TABLE users ADD CONSTRAINT users_telegram_id_unique UNIQUE (telegram_id);
+  END IF;
 END $$;
 
 -- Уникальное ограничение на email (если отсутствует)
 DO $$
 BEGIN
-  ALTER TABLE users ADD CONSTRAINT users_email_unique UNIQUE (email);
-EXCEPTION WHEN duplicate_object THEN NULL;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'users_email_unique'
+  ) THEN
+    ALTER TABLE users ADD CONSTRAINT users_email_unique UNIQUE (email);
+  END IF;
 END $$;
 
 -- auth_source NOT NULL для всех строк
