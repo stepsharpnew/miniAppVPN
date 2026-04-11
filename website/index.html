@@ -1,105 +1,13 @@
 <!DOCTYPE html>
 <html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MEME VPN</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    body {
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #0a0a0f;
-      color: #e4e4e7;
-      overflow: hidden;
-    }
-
-    .bg-glow {
-      position: fixed;
-      width: 500px;
-      height: 500px;
-      border-radius: 50%;
-      filter: blur(120px);
-      opacity: .25;
-      pointer-events: none;
-    }
-    .bg-glow--purple { top: -10%; left: -5%; background: #7c3aed; }
-    .bg-glow--blue   { bottom: -15%; right: -8%; background: #2563eb; }
-
-    .card {
-      position: relative;
-      text-align: center;
-      padding: 3rem 2.5rem;
-      border-radius: 1.25rem;
-      background: rgba(255,255,255,.04);
-      border: 1px solid rgba(255,255,255,.08);
-      backdrop-filter: blur(24px);
-      max-width: 420px;
-      width: 90%;
-    }
-
-    .card h1 {
-      font-size: 1.75rem;
-      font-weight: 700;
-      margin-bottom: .5rem;
-      background: linear-gradient(135deg, #a78bfa, #60a5fa);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .card p {
-      color: #a1a1aa;
-      margin-bottom: 2rem;
-      line-height: 1.5;
-    }
-
-    .btn {
-      display: inline-block;
-      padding: .875rem 2.5rem;
-      font-size: 1rem;
-      font-weight: 600;
-      color: #fff;
-      background: linear-gradient(135deg, #7c3aed, #2563eb);
-      border: none;
-      border-radius: .75rem;
-      cursor: pointer;
-      transition: transform .15s, box-shadow .15s;
-      text-decoration: none;
-    }
-    .btn:hover  { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(124,58,237,.35); }
-    .btn:active { transform: translateY(0); }
-
-    .status {
-      margin-top: 1.5rem;
-      font-size: .875rem;
-      color: #a78bfa;
-      min-height: 1.25rem;
-    }
-  </style>
-</head>
-<body>
-  <div class="bg-glow bg-glow--purple"></div>
-  <div class="bg-glow bg-glow--blue"></div>
-
-  <div class="card">
-    <h1>MEME VPN</h1>
-    <p>Быстрый и безопасный VPN-сервис.<br>Сайт работает!</p>
-    <button class="btn" id="actionBtn">Подключить VPN</button>
-    <div class="status" id="status"></div>
-  </div>
-
-  <script>
-    const btn = document.getElementById('actionBtn');
-    const status = document.getElementById('status');
-    btn.addEventListener('click', () => {
-      status.textContent = 'Сайт работает! Скоро здесь будет регистрация.';
-      btn.style.background = 'linear-gradient(135deg, #059669, #2563eb)';
-      btn.textContent = 'Готово';
-    });
-  </script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0A0A1A" />
+    <title>MEME VPN</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

@@ -1,0 +1,56 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 6px;
+  border-radius: 14px;
+  background: var(--bg-card);
+  border: 1.5px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.2s ease;
+}
+
+.card.selected {
+  border-color: var(--accent-blue);
+  background: rgba(77, 139, 255, 0.08);
+}
+
+.card:active {
+  transform: scale(0.96);
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.logo {
+  color: rgba(255, 255, 255, 0.88);
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: block;
+}
+
+.card.selected .logo {
+  color: var(--accent-blue);
+}
+
+.name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.card.selected .name {
+  color: var(--accent-blue);
+}
