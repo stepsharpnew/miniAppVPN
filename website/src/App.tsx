@@ -1,18 +1,18 @@
 import { useState, type CSSProperties } from "react";
-import { BottomNav, type TabId } from "./components/BottomNav";
-import { HomePage } from "./pages/HomePage";
+import { Navbar, type TabId } from "./components/Navbar";
+import { ProfilePage } from "./pages/ProfilePage";
 import { PricingPage } from "./pages/PricingPage";
 import { InstructionsPage } from "./pages/InstructionsPage";
 import { FaqPage } from "./pages/FaqPage";
 
 const pageStyle: CSSProperties = {
-  transition: "opacity 0.2s ease, transform 0.2s ease",
+  transition: "opacity 0.25s ease, transform 0.25s ease",
 };
 
 const hiddenStyle: CSSProperties = {
   ...pageStyle,
   opacity: 0,
-  transform: "translateY(8px)",
+  transform: "translateY(6px)",
   pointerEvents: "none",
   position: "absolute",
   top: 0,
@@ -26,23 +26,23 @@ const visibleStyle: CSSProperties = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabId>("home");
+  const [activeTab, setActiveTab] = useState<TabId>("profile");
 
   return (
     <>
-      <div
+      <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
+      <main
         style={{
           position: "relative",
           flex: 1,
-          minHeight: 0,
-          overflowY: "auto",
-          overscrollBehaviorY: "contain",
-          WebkitOverflowScrolling: "touch",
-          paddingBottom: "calc(60px + env(safe-area-inset-bottom, 0px) + 12px)",
+          width: "100%",
+          maxWidth: "var(--content-max-width)",
+          margin: "0 auto",
+          padding: "24px 16px 48px",
         }}
       >
-        <div style={activeTab === "home" ? visibleStyle : hiddenStyle}>
-          <HomePage onNavigate={setActiveTab as (tab: "pricing") => void} />
+        <div style={activeTab === "profile" ? visibleStyle : hiddenStyle}>
+          <ProfilePage onNavigate={setActiveTab as (tab: "pricing") => void} />
         </div>
         <div style={activeTab === "pricing" ? visibleStyle : hiddenStyle}>
           <PricingPage />
@@ -53,8 +53,7 @@ export default function App() {
         <div style={activeTab === "faq" ? visibleStyle : hiddenStyle}>
           <FaqPage />
         </div>
-      </div>
-      <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
+      </main>
     </>
   );
 }
