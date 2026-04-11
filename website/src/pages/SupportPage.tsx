@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { type WebUser } from "../hooks/useAuth";
 import { apiFetch } from "../utils/api";
-import { Accordion } from "../components/Accordion";
-import { FAQ_ITEMS, BRAND_NAME } from "../data/plans";
+import {
+  BRAND_NAME,
+  TELEGRAM_BOT_URL,
+  TELEGRAM_CHANNEL_URL,
+} from "../data/plans";
+import logoImg from "../photo_2026-04-11_16-38-41.jpg";
 import styles from "./SupportPage.module.css";
 
 interface ChatMessage {
@@ -16,6 +20,31 @@ interface ChatMessage {
 
 interface SupportPageProps {
   user: WebUser | null;
+}
+
+function ChannelLinks({ compact }: { compact?: boolean }) {
+  return (
+    <div className={compact ? styles.channelRowCompact : styles.contactLinks}>
+      <a
+        href={TELEGRAM_CHANNEL_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={compact ? styles.channelLinkInline : styles.contactBtn}
+      >
+        {!compact && <span className={styles.contactBtnIcon}>📢</span>}
+        Telegram-канал
+      </a>
+      <a
+        href={TELEGRAM_BOT_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={compact ? styles.channelLinkInline : styles.contactBtnSecondary}
+      >
+        {!compact && <span className={styles.contactBtnIcon}>🤖</span>}
+        Бот {BRAND_NAME}
+      </a>
+    </div>
+  );
 }
 
 export function SupportPage({ user }: SupportPageProps) {
@@ -101,36 +130,23 @@ export function SupportPage({ user }: SupportPageProps) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      void handleSend();
     }
   };
-
-  const faqList = (
-    <div className={styles.faqList}>
-      {FAQ_ITEMS.map((item, idx) => (
-        <Accordion
-          key={idx}
-          icon={item.icon}
-          title={item.question}
-          iconColor="rgba(77,139,255,0.15)"
-        >
-          <p className={styles.answer}>{item.answer}</p>
-        </Accordion>
-      ))}
-    </div>
-  );
 
   if (!chatStarted) {
     return (
       <div className={styles.page}>
         <div className={styles.mainCard}>
-          <div className={styles.iconWrap}>💬</div>
+          <div className={styles.iconWrap}>
+            <img src={logoImg} alt="" className={styles.cardLogo} width={48} height={48} />
+          </div>
           <div className={styles.title}>Служба поддержки</div>
           <div className={styles.subtitle}>
             Опишите проблему — менеджер ответит прямо здесь
           </div>
           {user ? (
-            <button className={styles.startBtn} onClick={() => setChatStarted(true)}>
+            <button type="button" className={styles.startBtn} onClick={() => setChatStarted(true)}>
               Начать диалог
             </button>
           ) : (
@@ -139,9 +155,9 @@ export function SupportPage({ user }: SupportPageProps) {
             </div>
           )}
         </div>
-        <div className={styles.faqSection}>
-          <div className={styles.faqTitle}>Часто задаваемые вопросы</div>
-          {faqList}
+        <div className={styles.contactCard}>
+          <div className={styles.contactTitle}>Наш Telegram</div>
+          <ChannelLinks />
         </div>
       </div>
     );
@@ -151,7 +167,7 @@ export function SupportPage({ user }: SupportPageProps) {
     <div className={styles.page}>
       <div className={styles.chatCard}>
         <div className={styles.chatHeader}>
-          <div className={styles.chatAvatar}>🛡️</div>
+          <img src={logoImg} alt="" className={styles.chatAvatarImg} width={40} height={40} />
           <div className={styles.chatHeaderInfo}>
             <div className={styles.chatHeaderTitle}>Поддержка {BRAND_NAME}</div>
             <div className={styles.chatHeaderStatus}>
@@ -173,25 +189,29 @@ export function SupportPage({ user }: SupportPageProps) {
           <div ref={messagesEndRef} />
         </div>
 
-        <div className={styles.chatInputBar}>
-          <input
-            type="text"
-            className={styles.textInput}
-            placeholder="Сообщение..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={sending}
-          />
-          <button
-            className={styles.sendBtn}
-            onClick={handleSend}
-            disabled={!input.trim() || sending}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" fill="currentColor" />
-            </svg>
-          </button>
+        <div className={styles.chatFooter}>
+          <ChannelLinks compact />
+          <div className={styles.chatInputBar}>
+            <input
+              type="text"
+              className={styles.textInput}
+              placeholder="Сообщение..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={sending}
+            />
+            <button
+              type="button"
+              className={styles.sendBtn}
+              onClick={() => void handleSend()}
+              disabled={!input.trim() || sending}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" fill="currentColor" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>

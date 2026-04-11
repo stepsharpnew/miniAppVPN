@@ -14,23 +14,5 @@ export const PRICING: PricingOption[] = [
 
 export const BRAND_NAME = "MEME VPN";
 
-export const FAQ_ITEMS = [
-  {
-    question: "Как получить конфиг?",
-    answer:
-      "После оплаты вы автоматически получите конфигурацию. Она также будет доступна в личном кабинете.",
-    icon: "❓",
-  },
-  {
-    question: "Как продлить подписку?",
-    answer:
-      "Перейдите в раздел «Тарифы» и выберите план. Срок действия будет добавлен к текущему.",
-    icon: "🔄",
-  },
-  {
-    question: "Включил VPN, но ничего не работает",
-    answer:
-      "После первого включения VPN полностью закройте браузер и откройте снова. Если проблема остаётся — обратитесь в поддержку.",
-    icon: "📱",
-  },
-] as const;
+export const TELEGRAM_CHANNEL_URL = "https://t.me/MemeVPNbest";
+export const TELEGRAM_BOT_URL = "https://t.me/MemeVPNbest";

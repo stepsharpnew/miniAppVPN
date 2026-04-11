@@ -3,7 +3,6 @@ import { Navbar, type TabId } from "./components/Navbar";
 import { ProfilePage } from "./pages/ProfilePage";
 import { PricingPage } from "./pages/PricingPage";
 import { InstructionsPage } from "./pages/InstructionsPage";
-import { FaqPage } from "./pages/FaqPage";
 import { SupportPage } from "./pages/SupportPage";
 import { AuthPage } from "./pages/AuthPage";
 import { useAuth } from "./hooks/useAuth";
@@ -33,7 +32,6 @@ export default function App() {
         {activeTab === "pricing" && <PricingPage user={auth.user} />}
         {activeTab === "instructions" && <InstructionsPage />}
         {activeTab === "support" && <SupportPage user={auth.user} />}
-        {activeTab === "faq" && <FaqPage />}
       </main>
     </>
   );

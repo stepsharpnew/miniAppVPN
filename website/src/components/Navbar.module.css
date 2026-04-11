@@ -1,7 +1,7 @@
 .navbar {
   position: sticky;
   top: 0;
-  z-index: 100;
+  z-index: 200;
   background: rgba(10, 10, 26, 0.85);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -16,6 +16,8 @@
   justify-content: space-between;
   height: var(--navbar-height);
   padding: 0 20px;
+  position: relative;
+  z-index: 202;
 }
 
 /* ── Logo ── */
@@ -27,8 +29,13 @@
   cursor: pointer;
 }
 
-.logoIcon {
-  font-size: 24px;
+.logoImg {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .logoText {
@@ -87,6 +94,8 @@
   padding: 6px;
   border-radius: 8px;
   cursor: pointer;
+  position: relative;
+  z-index: 203;
 }
 
 .burger span {
@@ -111,15 +120,63 @@
   transform: translateY(-7px) rotate(-45deg);
 }
 
-/* ── Mobile menu ── */
+/* ── Mobile overlay + menu (fixed, поверх контента) ── */
+
+.mobileBackdrop {
+  display: none;
+}
 
 .mobileMenu {
   display: none;
-  flex-direction: column;
-  padding: 8px 20px 16px;
-  gap: 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
-  animation: slideDown 0.2s ease-out;
+}
+
+@media (max-width: 640px) {
+  .desktopLinks {
+    display: none;
+  }
+
+  .burger {
+    display: flex;
+  }
+
+  .mobileBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    top: var(--navbar-height);
+    z-index: 200;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: rgba(0, 0, 0, 0.55);
+    cursor: pointer;
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  .mobileMenu {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: var(--navbar-height);
+    max-height: min(70vh, calc(100dvh - var(--navbar-height)));
+    overflow-y: auto;
+    z-index: 201;
+    padding: 12px 20px 20px;
+    gap: 4px;
+    background: rgba(14, 14, 32, 0.98);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    animation: slideDown 0.2s ease-out;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes slideDown {
@@ -150,20 +207,4 @@
 .mobileLink.active {
   color: var(--accent-blue);
   background: rgba(77, 139, 255, 0.08);
-}
-
-/* ── Responsive ── */
-
-@media (max-width: 640px) {
-  .desktopLinks {
-    display: none;
-  }
-
-  .burger {
-    display: flex;
-  }
-
-  .mobileMenu {
-    display: flex;
-  }
 }

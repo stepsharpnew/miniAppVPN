@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { BRAND_NAME } from "../data/plans";
+import logoImg from "../photo_2026-04-11_16-38-41.jpg";
 import { saveTokens } from "../utils/api";
 import styles from "./AuthPage.module.css";
 
@@ -51,7 +52,7 @@ export function AuthPage({ onSuccess }: AuthPageProps) {
   return (
     <div className={styles.page}>
       <div className={styles.card}>
-        <div className={styles.logoIcon}>🛡️</div>
+        <img src={logoImg} alt="" className={styles.logoImg} width={64} height={64} />
         <div className={styles.brand}>{BRAND_NAME}</div>
         <div className={styles.subtitle}>
           {mode === "login" ? "Войдите в аккаунт" : "Создайте аккаунт"}

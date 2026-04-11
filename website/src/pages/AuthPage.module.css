@@ -17,9 +17,13 @@
   text-align: center;
 }
 
-.logoIcon {
-  font-size: 40px;
+.logoImg {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
   margin-bottom: 8px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
 }
 
 .brand {
