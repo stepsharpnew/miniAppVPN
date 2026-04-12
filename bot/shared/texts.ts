@@ -66,6 +66,39 @@ export const SUPPORT_TICKET_SENT_USER =
 
 export const SUPPORT_REPLY_FAILED = `⚠️ Не удалось отправить ответ — возможно, пользователь заблокировал бота.`;
 
+// ── Подписка: напоминания перед окончанием (cron) ──
+
+export function SUBSCRIPTION_EXPIRING_D3_USER(expiresMsk: string): string {
+  return (
+    `⏳ <b>Подписка скоро закончится</b>\n\n` +
+    `До окончания текущего периода осталось <b>3 дня</b> ` +
+    `(окончание: <b>${escapeHtml(expiresMsk)}</b>).\n\n` +
+    `Продлите подписку в приложении, чтобы не потерять доступ.`
+  );
+}
+
+export function SUBSCRIPTION_EXPIRING_D1_USER(expiresMsk: string): string {
+  return (
+    `⚠️ <b>Подписка заканчивается завтра</b>\n\n` +
+    `Окончание: <b>${escapeHtml(expiresMsk)}</b>.\n\n` +
+    `Оформите новую подписку заранее — так вы не останетесь без VPN.`
+  );
+}
+
+export function SUBSCRIPTION_REMINDER_SEND_FAIL_ADMIN(
+  telegramId: number,
+  nickname: string | null,
+  detail: string,
+): string {
+  const nick =
+    nickname && nickname.length > 0 ? escapeHtml(`@${nickname}`) : "без @ника";
+  return (
+    `📭 <b>Не удалось отправить напоминание о подписке</b>\n\n` +
+    `🆔 <code>${telegramId}</code> · ${nick}\n` +
+    `${escapeHtml(detail)}`
+  );
+}
+
 // ── Purchase admin notification ──
 
 export const PURCHASE_ADMIN_TEXT = (

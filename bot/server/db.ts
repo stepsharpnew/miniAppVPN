@@ -36,6 +36,15 @@ export interface UserRow {
   expired_at: string | null;
   vpn_config: string | null;
   created_at: string;
+  is_notificated_d3?: boolean;
+  is_notificated_d1?: boolean;
+}
+
+export interface SubscriptionReminderRow {
+  id: string;
+  telegram_id: number;
+  expired_at: string;
+  telegram_nickname: string | null;
 }
 
 // ── Telegram-flow (существующий функционал бота) ──
@@ -62,7 +71,9 @@ export async function upsertUserSubscription(
            ELSE NOW() + make_interval(months => $2)
        END,
        vpn_config = COALESCE($3, users.vpn_config),
-       telegram_nickname = COALESCE($4, users.telegram_nickname)
+       telegram_nickname = COALESCE($4, users.telegram_nickname),
+       is_notificated_d3 = FALSE,
+       is_notificated_d1 = FALSE
      RETURNING *`,
     [telegramId, months, vpnConfig ?? null, telegramNickname ?? null],
   );
@@ -77,6 +88,55 @@ export async function getUserSubscription(
     [telegramId],
   );
   return rows[0] ?? null;
+}
+
+/** Окно «за 3 дня»: от 1 до 3 суток до конца (не пересекается с напоминанием «за 1 день»). */
+export async function fetchUsersForExpiryReminderD3(): Promise<
+  SubscriptionReminderRow[]
+> {
+  const { rows } = await getPool().query<SubscriptionReminderRow>(
+    `SELECT id, telegram_id, expired_at, telegram_nickname
+     FROM users
+     WHERE telegram_id IS NOT NULL
+       AND is_blocked = FALSE
+       AND expired_at IS NOT NULL
+       AND expired_at > NOW()
+       AND expired_at <= NOW() + INTERVAL '3 days'
+       AND expired_at > NOW() + INTERVAL '1 day'
+       AND is_notificated_d3 = FALSE`,
+  );
+  return rows;
+}
+
+/** Окно «за 1 день»: меньше суток до конца, подписка ещё активна. */
+export async function fetchUsersForExpiryReminderD1(): Promise<
+  SubscriptionReminderRow[]
+> {
+  const { rows } = await getPool().query<SubscriptionReminderRow>(
+    `SELECT id, telegram_id, expired_at, telegram_nickname
+     FROM users
+     WHERE telegram_id IS NOT NULL
+       AND is_blocked = FALSE
+       AND expired_at IS NOT NULL
+       AND expired_at > NOW()
+       AND expired_at <= NOW() + INTERVAL '1 day'
+       AND is_notificated_d1 = FALSE`,
+  );
+  return rows;
+}
+
+export async function markExpiryReminderD3Sent(userId: string): Promise<void> {
+  await getPool().query(
+    "UPDATE users SET is_notificated_d3 = TRUE WHERE id = $1",
+    [userId],
+  );
+}
+
+export async function markExpiryReminderD1Sent(userId: string): Promise<void> {
+  await getPool().query(
+    "UPDATE users SET is_notificated_d1 = TRUE WHERE id = $1",
+    [userId],
+  );
 }
 
 // ── Web-flow (для сайта — работа по UUID id / email) ──
@@ -130,7 +190,9 @@ export async function extendSubscriptionById(
          THEN expired_at + make_interval(months => $2)
          ELSE NOW() + make_interval(months => $2)
        END,
-       vpn_config = COALESCE($3, vpn_config)
+       vpn_config = COALESCE($3, vpn_config),
+       is_notificated_d3 = FALSE,
+       is_notificated_d1 = FALSE
      WHERE id = $1
      RETURNING *`,
     [userId, months, vpnConfig ?? null],

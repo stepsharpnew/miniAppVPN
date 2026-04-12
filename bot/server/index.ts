@@ -25,6 +25,7 @@ import { addMessage } from "./chat-store";
 import { createApiServer } from "./api";
 import { type MemeContext, type SessionData } from "./types";
 import { closeDb, initDb } from "./db";
+import { scheduleSubscriptionExpiryReminders } from "./subscription-reminders";
 
 const botToken = (process.env.BOT_TOKEN ?? "").trim();
 if (!botToken) throw new Error("BOT_TOKEN is not set");
@@ -419,7 +420,13 @@ void (async () => {
     console.warn("Не удалось установить команды бота:", e);
   }
 
+  const subscriptionReminderTask = scheduleSubscriptionExpiryReminders(
+    bot.api,
+    () => webAppKeyboard("🛒 Продлить подписку", { hash: "purchase" }),
+  );
+
   const shutdown = async () => {
+    subscriptionReminderTask.stop();
     await bot.stop();
     await closeDb();
     process.exit(0);

@@ -72,6 +72,10 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
+-- ── Напоминания об окончании подписки (cron в боте, 11:00 Europe/Moscow) ──
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_d3 BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_d1 BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- ── Таблица серверов ──
 CREATE TABLE IF NOT EXISTS servers (
     id                  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
