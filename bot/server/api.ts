@@ -721,7 +721,7 @@ export function createApiServer(api: Api, botToken: string) {
     if (pending && pending.status !== "succeeded") {
       if (pending.source === "web") {
         const { processWebPaymentFromWebhook } = await import("./web-auth");
-        await processWebPaymentFromWebhook(paymentId);
+        await processWebPaymentFromWebhook(paymentId, api);
       } else {
         await processSucceededPayment(paymentId);
       }
@@ -830,7 +830,7 @@ export function createApiServer(api: Api, botToken: string) {
   });
 
   // ── Web auth routes (email/password, JWT) ──
-  mountWebAuthRoutes(app);
+  mountWebAuthRoutes(app, api);
 
   return app;
 }

@@ -2,6 +2,7 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import express from "express";
+import { type Api } from "grammy";
 import {
   getUserByEmail,
   getUserById,
@@ -24,7 +25,8 @@ import {
   savePendingPayment,
 } from "./payment-store";
 import { PRICING, type PaymentMetadata } from "../shared/plans";
-import { BRAND_NAME } from "../shared/texts";
+import { BRAND_NAME, PAYMENT_ADMIN_NOTIFY } from "../shared/texts";
+import { resolveAdminChat } from "./store";
 
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "30d";
@@ -104,7 +106,7 @@ function getServerBaseUrl(server: ServerRow): string {
 
 // ── Web payment processing (shared between polling and webhook) ──
 
-export async function processWebPaymentFromWebhook(paymentId: string): Promise<void> {
+export async function processWebPaymentFromWebhook(paymentId: string, api?: Api): Promise<void> {
   const pending = getPendingPayment(paymentId);
   if (!pending || pending.status === "succeeded") return;
 
@@ -157,11 +159,41 @@ export async function processWebPaymentFromWebhook(paymentId: string): Promise<v
   } catch (err) {
     console.error("DB upsert after web payment failed:", err);
   }
+
+  const plan = PRICING.find((p) => p.months === pending.months);
+  const planLabel = plan?.label ?? `${pending.months} мес.`;
+  const amountStr = `${pending.amount.toFixed(0)}₽`;
+  const userName = user?.email ?? pending.firstName ?? "Веб-пользователь";
+  const userTag = user?.email ? `email:${user.email}` : "без email";
+  const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
+  if (api && rawBuyChat) {
+    const admin = resolveAdminChat(rawBuyChat);
+    try {
+      await api.sendMessage(
+        admin.chatId,
+        PAYMENT_ADMIN_NOTIFY(
+          userName,
+          userTag,
+          userId,
+          planLabel,
+          amountStr,
+          provisionOk,
+          pending.isRenewal,
+        ),
+        {
+          parse_mode: "HTML",
+          ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
+        },
+      );
+    } catch {
+      /* admin notification best-effort */
+    }
+  }
 }
 
 // ── Mount all web routes ──
 
-export function mountWebAuthRoutes(app: express.Express) {
+export function mountWebAuthRoutes(app: express.Express, api?: Api) {
   // ════════════════════════════════════════════════════════════
   //  Auth: register, login, refresh, me, change-password
   // ════════════════════════════════════════════════════════════
@@ -455,7 +487,7 @@ export function mountWebAuthRoutes(app: express.Express) {
         if (ykRes.ok) {
           const ykPayment = await ykRes.json();
           if (ykPayment.status === "succeeded") {
-            await processWebPaymentFromWebhook(paymentId);
+            await processWebPaymentFromWebhook(paymentId, api);
           } else if (ykPayment.status === "canceled") {
             markPaymentCanceled(paymentId);
           }
