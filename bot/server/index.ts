@@ -32,6 +32,7 @@ import {
   upsertUserSubscription,
   redeemPromoCode,
 } from "./db";
+import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 import { scheduleSubscriptionExpiryReminders } from "./subscription-reminders";
 
 const botToken = (process.env.BOT_TOKEN ?? "").trim();
@@ -184,6 +185,20 @@ bot.command("redeem", async (ctx) => {
         await ctx.reply("❌ Промокод недействителен или уже использован.");
       }
       return;
+    }
+
+    user = await getUserSubscription(telegramId);
+    if (!user) {
+      throw new Error(`User not found after promo redemption: ${telegramId}`);
+    }
+    await syncVpnForPromoRedemption(
+      user,
+      result.months!,
+      getTelegramClientName(telegramId, ctx.from?.username),
+    );
+    user = await getUserSubscription(telegramId);
+    if (!user) {
+      throw new Error(`User not found after VPN promo sync: ${telegramId}`);
     }
 
     const newDate = new Date(result.newExpiredAt!).toLocaleDateString("ru-RU", {

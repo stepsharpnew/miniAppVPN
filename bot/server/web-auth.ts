@@ -28,6 +28,7 @@ import {
 import { PRICING, type PaymentMetadata } from "../shared/plans";
 import { BRAND_NAME, escapeHtml, PAYMENT_ADMIN_NOTIFY } from "../shared/texts";
 import { resolveAdminChat } from "./store";
+import { getWebClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "30d";
@@ -384,6 +385,16 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
         res.status(400).json({ error: "Промокод недействителен или уже использован" });
         return;
       }
+
+      const redeemedUser = await getUserById(user.id);
+      if (!redeemedUser) {
+        throw new Error(`Web user not found after promo redemption: ${user.id}`);
+      }
+      await syncVpnForPromoRedemption(
+        redeemedUser,
+        result.months!,
+        getWebClientName(redeemedUser),
+      );
 
       const updatedUser = await getUserById(user.id);
       const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;

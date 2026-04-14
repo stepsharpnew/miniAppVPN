@@ -217,6 +217,20 @@ export async function linkTelegramToUser(
   return rows[0];
 }
 
+export async function updateUserVpnConfig(
+  userId: string,
+  vpnConfig: string,
+): Promise<UserRow> {
+  const { rows } = await getPool().query<UserRow>(
+    `UPDATE users
+     SET vpn_config = $2
+     WHERE id = $1
+     RETURNING *`,
+    [userId, vpnConfig],
+  );
+  return rows[0];
+}
+
 // ── Servers ──
 
 export interface ServerRow {

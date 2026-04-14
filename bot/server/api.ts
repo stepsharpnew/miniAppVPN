@@ -33,6 +33,7 @@ import {
   redeemPromoCode,
   upsertUserSubscription,
 } from "./db";
+import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 import { mountWebAuthRoutes } from "./web-auth";
 
 function getServerBaseUrl(server: ServerRow): string {
@@ -445,6 +446,16 @@ export function createApiServer(api: Api, botToken: string) {
         res.status(400).json({ error: "Промокод недействителен или уже использован" });
         return;
       }
+
+      dbUser = await getUserSubscription(tgUser.id);
+      if (!dbUser) {
+        throw new Error(`Telegram user not found after promo redemption: ${tgUser.id}`);
+      }
+      await syncVpnForPromoRedemption(
+        dbUser,
+        result.months!,
+        getTelegramClientName(tgUser.id, tgUser.username),
+      );
 
       const updated = await getUserSubscription(tgUser.id);
       const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
