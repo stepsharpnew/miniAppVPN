@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { Pool } from "pg";
 
 let pool: Pool;
@@ -252,4 +253,151 @@ export async function incrementServerUserCount(
     "UPDATE servers SET user_count = user_count + 1 WHERE server_id = $1",
     [serverId],
   );
+}
+
+// ── Promo codes ──
+
+const PROMO_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const PROMO_LENGTH = 8;
+const PROMO_RATE_LIMIT = 5;
+const PROMO_WINDOW_INTERVAL = "1 hour";
+
+function generateCode(): string {
+  const bytes = crypto.randomBytes(PROMO_LENGTH);
+  return Array.from(bytes)
+    .map((b) => PROMO_ALPHABET[b % PROMO_ALPHABET.length])
+    .join("");
+}
+
+export async function generatePromoCodes(
+  count: number,
+  months: 1 | 3 | 6,
+): Promise<string[]> {
+  const codes: string[] = [];
+  const pool = getPool();
+  for (let i = 0; i < count; i++) {
+    let code: string;
+    let inserted = false;
+    while (!inserted) {
+      code = generateCode();
+      const { rowCount } = await pool.query(
+        `INSERT INTO promo_codes (code, months) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [code, months],
+      );
+      if ((rowCount ?? 0) > 0) {
+        codes.push(code!);
+        inserted = true;
+      }
+    }
+  }
+  return codes;
+}
+
+export type PromoRedeemError = "not_found" | "already_used" | "rate_limited";
+
+export interface PromoRedeemResult {
+  ok: boolean;
+  error?: PromoRedeemError;
+  months?: number;
+  oldExpiredAt?: string | null;
+  newExpiredAt?: string;
+}
+
+/**
+ * Atomically redeem a promo code for a user.
+ * Rate-limit: 5 failed attempts per hour per user_id.
+ */
+export async function redeemPromoCode(
+  userId: string,
+  rawCode: string,
+): Promise<PromoRedeemResult> {
+  const code = rawCode.trim().toUpperCase();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: limitRows } = await client.query<{ cnt: string }>(
+      `SELECT COUNT(*)::text AS cnt
+       FROM promo_attempts
+       WHERE user_id = $1
+         AND success = FALSE
+         AND attempted_at > NOW() - INTERVAL '${PROMO_WINDOW_INTERVAL}'`,
+      [userId],
+    );
+    if (parseInt(limitRows[0].cnt, 10) >= PROMO_RATE_LIMIT) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: "rate_limited" };
+    }
+
+    const { rows: codeRows } = await client.query<{
+      id: string;
+      months: number;
+      used_at: string | null;
+    }>(
+      `SELECT id, months, used_at FROM promo_codes WHERE code = $1 FOR UPDATE`,
+      [code],
+    );
+
+    if (codeRows.length === 0) {
+      await client.query(
+        `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, FALSE)`,
+        [userId, code],
+      );
+      await client.query("COMMIT");
+      return { ok: false, error: "not_found" };
+    }
+
+    const promo = codeRows[0];
+    if (promo.used_at !== null) {
+      await client.query(
+        `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, FALSE)`,
+        [userId, code],
+      );
+      await client.query("COMMIT");
+      return { ok: false, error: "already_used" };
+    }
+
+    await client.query(
+      `UPDATE promo_codes SET used_at = NOW(), used_by = $1 WHERE id = $2`,
+      [userId, promo.id],
+    );
+
+    const { rows: userRows } = await client.query<{ expired_at: string | null }>(
+      `SELECT expired_at FROM users WHERE id = $1`,
+      [userId],
+    );
+    const oldExpiredAt = userRows[0]?.expired_at ?? null;
+
+    const { rows: updatedRows } = await client.query<{ expired_at: string }>(
+      `UPDATE users
+       SET expired_at = CASE
+         WHEN expired_at IS NOT NULL AND expired_at > NOW()
+           THEN expired_at + make_interval(months => $2)
+           ELSE NOW() + make_interval(months => $2)
+       END,
+       is_notificated_d3 = FALSE,
+       is_notificated_d1 = FALSE
+       WHERE id = $1
+       RETURNING expired_at`,
+      [userId, promo.months],
+    );
+
+    await client.query(
+      `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, TRUE)`,
+      [userId, code],
+    );
+
+    await client.query("COMMIT");
+    return {
+      ok: true,
+      months: promo.months,
+      oldExpiredAt,
+      newExpiredAt: updatedRows[0].expired_at,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
