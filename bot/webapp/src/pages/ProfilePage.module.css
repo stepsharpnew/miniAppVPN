@@ -185,3 +185,45 @@
   opacity: 0.8;
   background: rgba(77, 139, 255, 0.2);
 }
+
+.syncActionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.syncInfoWrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.syncInfoBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(77, 139, 255, 0.35);
+  background: rgba(77, 139, 255, 0.12);
+  color: var(--accent-blue);
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.syncTooltip {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: min(280px, calc(100vw - 56px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(77, 139, 255, 0.28);
+  background: #1a1a33;
+  color: #d7e6ff;
+  font-size: 12px;
+  line-height: 1.45;
+  z-index: 5;
+  text-align: left;
+}

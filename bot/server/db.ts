@@ -276,12 +276,33 @@ export async function mergeAccounts(
 
     if (!tgUser || !webUser) throw new Error("User not found during merge");
 
+    if (telegramUserId === webUserId) {
+      const { rows: [sameUser] } = await client.query<UserRow>(
+        `UPDATE users
+         SET auth_source = 'both',
+             telegram_nickname = COALESCE($2, telegram_nickname)
+         WHERE id = $1
+         RETURNING *`,
+        [webUserId, telegramNickname],
+      );
+      await client.query("COMMIT");
+      return sameUser;
+    }
+
     const tgExpiry = tgUser.expired_at ? new Date(tgUser.expired_at).getTime() : 0;
     const webExpiry = webUser.expired_at ? new Date(webUser.expired_at).getTime() : 0;
     const bestExpiry = tgExpiry > webExpiry ? tgUser.expired_at : webUser.expired_at;
     const bestConfig = tgExpiry > webExpiry
       ? (tgUser.vpn_config ?? webUser.vpn_config)
       : (webUser.vpn_config ?? tgUser.vpn_config);
+
+    // Detach telegram_id from old Telegram-only row first to avoid unique-constraint race.
+    await client.query(
+      `UPDATE users
+       SET telegram_id = NULL
+       WHERE id = $1`,
+      [telegramUserId],
+    );
 
     const { rows: [merged] } = await client.query<UserRow>(
       `UPDATE users

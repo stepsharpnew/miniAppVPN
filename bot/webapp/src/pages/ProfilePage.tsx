@@ -45,6 +45,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const [loaded, setLoaded] = useState(false);
   const [promoCode, setPromoCode] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
+  const [showSyncInfo, setShowSyncInfo] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -244,9 +245,28 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
         {onOpenSync && (
           <>
             <div className={styles.divider} />
-            <button className={styles.syncBtn} onClick={onOpenSync}>
-              🔗 Привязать веб-аккаунт
-            </button>
+            <div className={styles.syncActionRow}>
+              <button className={styles.syncBtn} onClick={onOpenSync}>
+                🔗 Привязать веб-аккаунт
+              </button>
+              <div className={styles.syncInfoWrap}>
+                <button
+                  className={styles.syncInfoBtn}
+                  onClick={() => setShowSyncInfo((prev) => !prev)}
+                  aria-label="Зачем нужна привязка аккаунта"
+                >
+                  i
+                </button>
+                {showSyncInfo && (
+                  <div className={styles.syncTooltip}>
+                    Привязка нужна, чтобы при потере доступа к Telegram вы не
+                    потеряли доступ к своим серверам. Также это позволит войти
+                    в веб-аккаунт и оплатить подписку, если VPN-конфиг
+                    отключили.
+                  </div>
+                )}
+              </div>
+            </div>
           </>
         )}
       </div>
