@@ -217,6 +217,21 @@ export async function linkTelegramToUser(
   return rows[0];
 }
 
+export async function createTelegramUserIfMissing(
+  telegramId: number,
+  telegramNickname?: string | null,
+): Promise<UserRow> {
+  const { rows } = await getPool().query<UserRow>(
+    `INSERT INTO users (telegram_id, telegram_nickname, auth_source)
+     VALUES ($1, $2, 'telegram')
+     ON CONFLICT (telegram_id) DO UPDATE
+       SET telegram_nickname = COALESCE(users.telegram_nickname, EXCLUDED.telegram_nickname)
+     RETURNING *`,
+    [telegramId, telegramNickname ?? null],
+  );
+  return rows[0];
+}
+
 // ── Sync: link email to existing telegram user (new registration) ──
 
 export async function linkEmailToTelegramUser(

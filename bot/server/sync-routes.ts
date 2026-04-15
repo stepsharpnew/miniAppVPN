@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import express from "express";
 import {
+  createTelegramUserIfMissing,
   getUserByEmail,
   getUserByTelegramId,
   linkEmailToTelegramUser,
@@ -160,6 +161,8 @@ export function mountSyncRoutes(
         return;
       }
 
+      await createTelegramUserIfMissing(tg.id, tg.username ?? null);
+
       const hash = await bcrypt.hash(password, SALT_ROUNDS);
       const user = await linkEmailToTelegramUser(tg.id, normalizedEmail, hash);
 
@@ -220,10 +223,7 @@ export function mountSyncRoutes(
       }
 
       const tgUser = await getUserByTelegramId(tg.id);
-      if (!tgUser) {
-        res.status(404).json({ error: "Telegram-аккаунт не найден" });
-        return;
-      }
+      const ensuredTgUser = tgUser ?? await createTelegramUserIfMissing(tg.id, tg.username ?? null);
 
       if (!consumeVerifyToken(normalizedEmail, "sync", verifyToken)) {
         res.status(403).json({ error: "Токен недействителен. Пройдите верификацию заново" });
@@ -231,7 +231,7 @@ export function mountSyncRoutes(
       }
 
       const merged = await mergeAccounts(
-        tgUser.id,
+        ensuredTgUser.id,
         webUser.id,
         tg.id,
         tg.username ?? null,
