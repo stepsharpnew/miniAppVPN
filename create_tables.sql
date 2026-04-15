@@ -76,6 +76,12 @@ END $$;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_d3 BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_d1 BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- ── Идемпотентность платежей (защита от дублей webhook) ──
+CREATE TABLE IF NOT EXISTS processed_payments (
+    payment_id  TEXT                        PRIMARY KEY,
+    processed_at TIMESTAMP WITH TIME ZONE   NOT NULL DEFAULT NOW()
+);
+
 -- ── Таблица серверов ──
 CREATE TABLE IF NOT EXISTS servers (
     id                  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),

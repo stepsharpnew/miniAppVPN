@@ -31,7 +31,11 @@ function formatExpiry(iso: string): string {
   return `${hours} ч.`;
 }
 
-export function ProfilePage() {
+interface ProfilePageProps {
+  onOpenSync?: () => void;
+}
+
+export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const user = useTelegramUser();
   const { config: localConfig, save: saveLocalConfig } = useVpnConfig();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -176,6 +180,15 @@ export function ProfilePage() {
             </div>
           )}
         </div>
+
+        {onOpenSync && (
+          <>
+            <div className={styles.divider} />
+            <button className={styles.syncBtn} onClick={onOpenSync}>
+              🔗 Привязать веб-аккаунт
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

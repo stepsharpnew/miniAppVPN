@@ -29,9 +29,12 @@ import {
   getRandomEnabledServer,
   getUserSubscription,
   incrementServerUserCount,
+  isPaymentProcessed,
+  markPaymentProcessed,
   upsertUserSubscription,
 } from "./db";
 import { mountWebAuthRoutes } from "./web-auth";
+import { mountSyncRoutes } from "./sync-routes";
 
 function getServerBaseUrl(server: ServerRow): string {
   const raw = server.domain_server_name;
@@ -533,8 +536,12 @@ export function createApiServer(api: Api, botToken: string) {
     const pending = getPendingPayment(paymentId);
     if (!pending || pending.status === "succeeded") return;
 
-    // Atomically lock before any async work to prevent double processing
-    // (webhook + polling can race into this function concurrently)
+    if (await isPaymentProcessed(paymentId)) {
+      pending.status = "succeeded";
+      return;
+    }
+    await markPaymentProcessed(paymentId);
+
     pending.status = "succeeded";
 
     const userId = pending.userId as number;
@@ -730,12 +737,19 @@ export function createApiServer(api: Api, botToken: string) {
     }
 
     // Fallback: payment not in local store (e.g. server restarted) — use webhook metadata
+    if (await isPaymentProcessed(paymentId)) {
+      res.json({ ok: true });
+      return;
+    }
+
     const userId = meta ? Number(meta.telegram_user_id) : 0;
     if (!userId) {
       console.error("Webhook: cannot resolve userId for payment", paymentId);
       res.json({ ok: true });
       return;
     }
+
+    await markPaymentProcessed(paymentId);
 
     const username = meta?.username ?? "";
     const firstName = meta?.first_name ?? "Аноним";
@@ -831,6 +845,9 @@ export function createApiServer(api: Api, botToken: string) {
 
   // ── Web auth routes (email/password, JWT) ──
   mountWebAuthRoutes(app, api);
+
+  // ── Sync routes (Telegram ↔ Web, email verification) ──
+  mountSyncRoutes(app, auth);
 
   return app;
 }

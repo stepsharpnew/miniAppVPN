@@ -8,6 +8,7 @@ import { InstructionsPage } from "./pages/InstructionsPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { PurchasePage } from "./pages/PurchasePage";
 import { SupportPage } from "./pages/SupportPage";
+import { SyncPage } from "./pages/SyncPage";
 import { waitForTelegramInitData } from "./utils/telegramInitData";
 
 function initialTabFromLocation(): TabId {
@@ -68,6 +69,7 @@ export default function App() {
   const [boot, setBoot] = useState<"loading" | "gate" | "app">("loading");
   const [gateChannelUrl, setGateChannelUrl] = useState(DEFAULT_CHANNEL_URL);
   const [splash, setSplash] = useState(true);
+  const [showSync, setShowSync] = useState(false);
 
   const runChannelCheck = useCallback(async (): Promise<void> => {
     try {
@@ -128,7 +130,11 @@ export default function App() {
               <PurchasePage active={activeTab === "purchase"} />
             </div>
             <div style={activeTab === "profile" ? visibleStyle : hiddenStyle}>
-              <ProfilePage />
+              {showSync ? (
+                <SyncPage onBack={() => setShowSync(false)} />
+              ) : (
+                <ProfilePage onOpenSync={() => setShowSync(true)} />
+              )}
             </div>
             <div
               style={activeTab === "instructions" ? visibleStyle : hiddenStyle}

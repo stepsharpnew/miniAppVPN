@@ -216,6 +216,126 @@ export async function linkTelegramToUser(
   return rows[0];
 }
 
+// ── Sync: link email to existing telegram user (new registration) ──
+
+export async function linkEmailToTelegramUser(
+  telegramId: number,
+  email: string,
+  passwordHash: string,
+): Promise<UserRow> {
+  const { rows } = await getPool().query<UserRow>(
+    `UPDATE users
+     SET email = $2,
+         password_hash = $3,
+         auth_source = 'both'
+     WHERE telegram_id = $1
+     RETURNING *`,
+    [telegramId, email, passwordHash],
+  );
+  return rows[0];
+}
+
+/**
+ * Merge a telegram-only user into an existing web-only user.
+ * Transfers telegram_id, nickname, and the best subscription to the web user row,
+ * then deletes the orphaned telegram-only row.
+ */
+export async function mergeAccounts(
+  telegramUserId: string,
+  webUserId: string,
+  telegramId: number,
+  telegramNickname: string | null,
+): Promise<UserRow> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: [tgUser] } = await client.query<UserRow>(
+      "SELECT * FROM users WHERE id = $1 FOR UPDATE",
+      [telegramUserId],
+    );
+    const { rows: [webUser] } = await client.query<UserRow>(
+      "SELECT * FROM users WHERE id = $1 FOR UPDATE",
+      [webUserId],
+    );
+
+    if (!tgUser || !webUser) throw new Error("User not found during merge");
+
+    const tgExpiry = tgUser.expired_at ? new Date(tgUser.expired_at).getTime() : 0;
+    const webExpiry = webUser.expired_at ? new Date(webUser.expired_at).getTime() : 0;
+    const bestExpiry = tgExpiry > webExpiry ? tgUser.expired_at : webUser.expired_at;
+    const bestConfig = tgExpiry > webExpiry
+      ? (tgUser.vpn_config ?? webUser.vpn_config)
+      : (webUser.vpn_config ?? tgUser.vpn_config);
+
+    const { rows: [merged] } = await client.query<UserRow>(
+      `UPDATE users
+       SET telegram_id = $2,
+           telegram_nickname = COALESCE($3, telegram_nickname),
+           auth_source = 'both',
+           expired_at = COALESCE($4, expired_at),
+           vpn_config = COALESCE($5, vpn_config),
+           is_notificated_d3 = FALSE,
+           is_notificated_d1 = FALSE
+       WHERE id = $1
+       RETURNING *`,
+      [webUserId, telegramId, telegramNickname, bestExpiry, bestConfig],
+    );
+
+    await client.query("DELETE FROM users WHERE id = $1", [telegramUserId]);
+
+    await client.query("COMMIT");
+    return merged;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getUserByTelegramId(
+  telegramId: number,
+): Promise<UserRow | null> {
+  const { rows } = await getPool().query<UserRow>(
+    "SELECT * FROM users WHERE telegram_id = $1",
+    [telegramId],
+  );
+  return rows[0] ?? null;
+}
+
+export async function updatePasswordHash(
+  userId: string,
+  passwordHash: string,
+): Promise<void> {
+  await getPool().query(
+    "UPDATE users SET password_hash = $1 WHERE id = $2",
+    [passwordHash, userId],
+  );
+}
+
+// ── Payment idempotency ──
+
+export async function isPaymentProcessed(paymentId: string): Promise<boolean> {
+  const { rows } = await getPool().query(
+    "SELECT 1 FROM processed_payments WHERE payment_id = $1",
+    [paymentId],
+  );
+  return rows.length > 0;
+}
+
+export async function markPaymentProcessed(paymentId: string): Promise<boolean> {
+  try {
+    await getPool().query(
+      "INSERT INTO processed_payments (payment_id) VALUES ($1) ON CONFLICT DO NOTHING",
+      [paymentId],
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ── Servers ──
 
 export interface ServerRow {

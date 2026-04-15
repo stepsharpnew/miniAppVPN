@@ -12,6 +12,8 @@ import {
   getRandomEnabledServer,
   getAllEnabledServers,
   incrementServerUserCount,
+  isPaymentProcessed,
+  markPaymentProcessed,
   type UserRow,
   type ServerRow,
 } from "./db";
@@ -27,6 +29,9 @@ import {
 import { PRICING, type PaymentMetadata } from "../shared/plans";
 import { BRAND_NAME, PAYMENT_ADMIN_NOTIFY } from "../shared/texts";
 import { resolveAdminChat } from "./store";
+import { sendPasswordResetEmail } from "./email-service";
+import { createOtp, verifyOtp, consumeVerifyToken } from "./otp-store";
+import { updatePasswordHash } from "./db";
 
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "30d";
@@ -93,7 +98,7 @@ function validateEmail(email: string): boolean {
 }
 
 function validatePassword(password: string): string | null {
-  if (password.length < 6) return "Пароль должен быть минимум 6 символов";
+  if (password.length < 8) return "Пароль должен быть минимум 8 символов";
   if (password.length > 128) return "Пароль слишком длинный";
   return null;
 }
@@ -109,6 +114,12 @@ function getServerBaseUrl(server: ServerRow): string {
 export async function processWebPaymentFromWebhook(paymentId: string, api?: Api): Promise<void> {
   const pending = getPendingPayment(paymentId);
   if (!pending || pending.status === "succeeded") return;
+
+  if (await isPaymentProcessed(paymentId)) {
+    pending.status = "succeeded";
+    return;
+  }
+  await markPaymentProcessed(paymentId);
 
   pending.status = "succeeded";
 
@@ -502,6 +513,96 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       status: updated?.status ?? pending.status,
       config: updated?.config ?? pending.config ?? null,
     });
+  });
+
+  // ════════════════════════════════════════════════════════════
+  //  Password reset (forgot password)
+  // ════════════════════════════════════════════════════════════
+
+  app.post("/api/web/forgot-password", async (req, res) => {
+    const { email } = req.body ?? {};
+    if (!email || !validateEmail(email)) {
+      res.status(400).json({ error: "Некорректный email" });
+      return;
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    try {
+      const user = await getUserByEmail(normalizedEmail);
+      if (!user) {
+        res.json({ ok: true });
+        return;
+      }
+
+      const result = createOtp(normalizedEmail, "reset");
+      if ("error" in result) {
+        res.status(429).json({ error: result.error });
+        return;
+      }
+
+      await sendPasswordResetEmail(normalizedEmail, result.code);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("Forgot password error:", err);
+      res.status(500).json({ error: "Не удалось отправить код" });
+    }
+  });
+
+  app.post("/api/web/verify-reset-code", async (req, res) => {
+    const { email, code } = req.body ?? {};
+    if (!email || !code) {
+      res.status(400).json({ error: "Email и код обязательны" });
+      return;
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const result = verifyOtp(normalizedEmail, "reset", code.trim());
+
+    if ("error" in result) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
+    res.json({ verified: true, verifyToken: result.verifyToken });
+  });
+
+  app.post("/api/web/reset-password", async (req, res) => {
+    const { email, verifyToken, newPassword } = req.body ?? {};
+    if (!email || !verifyToken || !newPassword) {
+      res.status(400).json({ error: "Все поля обязательны" });
+      return;
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const pwErr = validatePassword(newPassword);
+    if (pwErr) {
+      res.status(400).json({ error: pwErr });
+      return;
+    }
+
+    if (!consumeVerifyToken(normalizedEmail, "reset", verifyToken)) {
+      res.status(403).json({ error: "Токен недействителен. Пройдите верификацию заново" });
+      return;
+    }
+
+    try {
+      const user = await getUserByEmail(normalizedEmail);
+      if (!user) {
+        res.status(404).json({ error: "Пользователь не найден" });
+        return;
+      }
+
+      const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+      await updatePasswordHash(user.id, hash);
+
+      const tokens = generateTokens(user.id);
+      res.json({ ok: true, ...tokens });
+    } catch (err) {
+      console.error("Reset password error:", err);
+      res.status(500).json({ error: "Не удалось сбросить пароль" });
+    }
   });
 
   // ════════════════════════════════════════════════════════════

@@ -125,3 +125,24 @@
 .switchBtn:hover {
   opacity: 0.8;
 }
+
+.forgotBtn {
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.forgotBtn:hover {
+  color: var(--accent-blue);
+}
+
+.codeInput {
+  text-align: center;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  max-width: 240px;
+  align-self: center;
+}
