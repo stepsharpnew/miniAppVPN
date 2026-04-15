@@ -24,7 +24,15 @@ import {
 import { addMessage } from "./chat-store";
 import { createApiServer } from "./api";
 import { type MemeContext, type SessionData } from "./types";
-import { closeDb, initDb } from "./db";
+import {
+  closeDb,
+  initDb,
+  generatePromoCodes,
+  getUserSubscription,
+  upsertUserSubscription,
+  redeemPromoCode,
+} from "./db";
+import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 import { scheduleSubscriptionExpiryReminders } from "./subscription-reminders";
 
 const botToken = (process.env.BOT_TOKEN ?? "").trim();
@@ -103,6 +111,138 @@ bot.command("start", async (ctx) => {
     parse_mode: "HTML",
     ...(openKb ? { reply_markup: openKb } : {}),
   });
+});
+
+// ────────────────── /promocode <count> <months> (только из админ-чата) ──────────────────
+
+bot.command("promocode", async (ctx) => {
+  const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
+  if (!rawBuyChat) return;
+
+  const { chatId } = resolveAdminChat(rawBuyChat);
+  if (ctx.chat.id.toString() !== chatId) return;
+
+  const args = (ctx.match ?? "").trim().split(/\s+/).filter(Boolean);
+  const count = parseInt(args[0] ?? "", 10);
+  const months = parseInt(args[1] ?? "", 10);
+
+  if (!count || count < 1 || count > 50 || ![1, 3, 6].includes(months)) {
+    await ctx.reply(
+      "Использование: <code>/promocode &lt;кол-во&gt; &lt;месяцев&gt;</code>\n" +
+      "Количество: от 1 до 50\n" +
+      "Месяцев: 1, 3 или 6\n\n" +
+      "Пример: <code>/promocode 3 1</code>",
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  try {
+    const codes = await generatePromoCodes(count, months as 1 | 3 | 6);
+    const list = codes.map((c) => `<code>${c}</code>`).join("\n");
+    await ctx.reply(
+      `🎟 <b>${count} промокод${count === 1 ? "" : count < 5 ? "а" : "ов"} на ${months} мес.:</b>\n\n${list}`,
+      { parse_mode: "HTML" },
+    );
+  } catch (err) {
+    console.error("Ошибка генерации промокодов:", err);
+    await ctx.reply("⚠️ Не удалось сгенерировать промокоды. Попробуй позже.");
+  }
+});
+
+// ────────────────── /redeem <code> (пользователи в личке) ──────────────────
+
+bot.command("redeem", async (ctx) => {
+  const telegramId = ctx.from?.id;
+  if (!telegramId) return;
+
+  const rawCode = (ctx.match ?? "").trim();
+  if (!rawCode) {
+    await ctx.reply(
+      "Введи промокод: <code>/redeem XXXXXXXX</code>",
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  try {
+    let user = await getUserSubscription(telegramId);
+    if (!user) {
+      user = await upsertUserSubscription(
+        telegramId,
+        0,
+        undefined,
+        ctx.from?.username ? `@${ctx.from.username}` : null,
+      );
+    }
+
+    const result = await redeemPromoCode(user.id, rawCode);
+
+    if (!result.ok) {
+      if (result.error === "rate_limited") {
+        await ctx.reply("⛔ Слишком много неверных попыток. Попробуй через час.");
+      } else {
+        await ctx.reply("❌ Промокод недействителен или уже использован.");
+      }
+      return;
+    }
+
+    user = await getUserSubscription(telegramId);
+    if (!user) {
+      throw new Error(`User not found after promo redemption: ${telegramId}`);
+    }
+    await syncVpnForPromoRedemption(
+      user,
+      result.months!,
+      getTelegramClientName(telegramId, ctx.from?.username),
+    );
+    user = await getUserSubscription(telegramId);
+    if (!user) {
+      throw new Error(`User not found after VPN promo sync: ${telegramId}`);
+    }
+
+    const newDate = new Date(result.newExpiredAt!).toLocaleDateString("ru-RU", {
+      day: "2-digit", month: "2-digit", year: "numeric",
+    });
+    await ctx.reply(
+      `✅ Промокод активирован!\n` +
+      `Подписка продлена на <b>${result.months} мес.</b>\n` +
+      `Действует до: <b>${newDate}</b>`,
+      { parse_mode: "HTML" },
+    );
+
+    const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
+    if (rawBuyChat) {
+      const admin = resolveAdminChat(rawBuyChat);
+      const userName = ctx.from?.first_name ?? "Аноним";
+      const userTag = ctx.from?.username ? `@${ctx.from.username}` : "без @ника";
+      const oldStr = result.oldExpiredAt
+        ? new Date(result.oldExpiredAt).toLocaleString("ru-RU")
+        : "не было";
+      const newStr = new Date(result.newExpiredAt!).toLocaleString("ru-RU");
+      try {
+        await ctx.api.sendMessage(
+          admin.chatId,
+          `🎟 <b>Промокод активирован</b>\n\n` +
+          `👤 ${escapeHtml(userName)} (${escapeHtml(userTag)})\n` +
+          `🆔 tg_id: <code>${telegramId}</code> | user_id: <code>${user.id}</code>\n` +
+          `🔑 Код: <code>${escapeHtml(rawCode.toUpperCase())}</code>\n` +
+          `📅 Срок: +${result.months} мес.\n` +
+          `🕐 Было: ${oldStr}\n` +
+          `🕑 Стало: ${newStr}`,
+          {
+            parse_mode: "HTML",
+            ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
+          },
+        );
+      } catch {
+        /* best-effort */
+      }
+    }
+  } catch (err) {
+    console.error("Ошибка активации промокода:", err);
+    await ctx.reply("⚠️ Произошла ошибка. Попробуй позже.");
+  }
 });
 
 // ────────────────── Mini App web_app_data ──────────────────
@@ -415,6 +555,7 @@ void (async () => {
   try {
     await bot.api.setMyCommands([
       { command: "start", description: "О сервисе и запуск приложения" },
+      { command: "redeem", description: "Активировать промокод" },
     ]);
   } catch (e) {
     console.warn("Не удалось установить команды бота:", e);

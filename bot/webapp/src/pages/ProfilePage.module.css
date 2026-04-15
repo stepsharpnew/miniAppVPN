@@ -94,6 +94,47 @@
   align-items: center;
 }
 
+.promoBlock {
+  display: flex;
+  flex-direction: column;
+}
+
+.promoRow {
+  display: flex;
+  gap: 10px;
+}
+
+.promoInput {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 12px;
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.promoInput::placeholder {
+  color: var(--text-secondary);
+  text-transform: none;
+}
+
+.promoBtn {
+  padding: 0 16px;
+  border-radius: var(--border-radius-sm);
+  background: var(--btn-gradient);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.promoBtn:disabled {
+  opacity: 0.6;
+}
+
 .noConfig {
   font-size: 13px;
   color: var(--text-secondary);

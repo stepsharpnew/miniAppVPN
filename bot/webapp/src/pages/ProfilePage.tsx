@@ -43,6 +43,8 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const [sent, setSent] = useState(false);
   const [sub, setSub] = useState<SubscriptionInfo | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [promoCode, setPromoCode] = useState("");
+  const [promoLoading, setPromoLoading] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -114,6 +116,42 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
     }
   }, [sending, activeConfig]);
 
+  const handleRedeemPromo = useCallback(async () => {
+    const normalizedCode = promoCode.trim().toUpperCase();
+    if (!normalizedCode || promoLoading) return;
+
+    setPromoLoading(true);
+    try {
+      const res = await fetch("/api/promocode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": WebApp.initData,
+        },
+        body: JSON.stringify({ code: normalizedCode }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error ?? "Не удалось активировать промокод.");
+      }
+
+      if (data?.subscription) {
+        setSub(data.subscription);
+        if (data.subscription.config) {
+          saveLocalConfig(data.subscription.config);
+        }
+      }
+      setPromoCode("");
+      WebApp.showAlert(`Промокод активирован. Подписка продлена на ${data?.months ?? 0} мес.`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Не удалось активировать промокод.";
+      WebApp.showAlert(message);
+    } finally {
+      setPromoLoading(false);
+    }
+  }, [promoCode, promoLoading, saveLocalConfig]);
+
   return (
     <div className={styles.page}>
       <div className={styles.profileCard}>
@@ -145,6 +183,28 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
                 {formatExpiry(sub.expired_at)}
               </div>
             )}
+          </div>
+        </div>
+
+        <div className={styles.divider} />
+
+        <div className={styles.promoBlock}>
+          <div className={styles.sectionHeader}>Промокод</div>
+          <div className={styles.promoRow}>
+            <input
+              className={styles.promoInput}
+              value={promoCode}
+              onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+              placeholder="Введите промокод"
+              maxLength={32}
+            />
+            <button
+              className={styles.promoBtn}
+              onClick={handleRedeemPromo}
+              disabled={promoLoading || promoCode.trim().length === 0}
+            >
+              {promoLoading ? "..." : "Активировать"}
+            </button>
           </div>
         </div>
 

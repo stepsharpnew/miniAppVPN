@@ -14,6 +14,8 @@ import {
   incrementServerUserCount,
   isPaymentProcessed,
   markPaymentProcessed,
+  redeemPromoCode,
+  updatePasswordHash,
   type UserRow,
   type ServerRow,
 } from "./db";
@@ -27,11 +29,11 @@ import {
   savePendingPayment,
 } from "./payment-store";
 import { PRICING, type PaymentMetadata } from "../shared/plans";
-import { BRAND_NAME, PAYMENT_ADMIN_NOTIFY } from "../shared/texts";
+import { BRAND_NAME, escapeHtml, PAYMENT_ADMIN_NOTIFY } from "../shared/texts";
 import { resolveAdminChat } from "./store";
 import { sendPasswordResetEmail } from "./email-service";
 import { createOtp, verifyOtp, consumeVerifyToken } from "./otp-store";
-import { updatePasswordHash } from "./db";
+import { getWebClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "30d";
@@ -107,6 +109,11 @@ function getServerBaseUrl(server: ServerRow): string {
   const raw = server.domain_server_name;
   if (!raw) throw new Error(`Server ${server.server_id} has no domain_server_name`);
   return raw.replace(/\/+$/, "");
+}
+
+function formatRuDateTime(value: string | null | undefined): string {
+  if (!value) return "не было";
+  return new Date(value).toLocaleString("ru-RU");
 }
 
 // ── Web payment processing (shared between polling and webhook) ──
@@ -361,6 +368,80 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader("Content-Disposition", "attachment; filename=\"meme-vpn.conf\"");
     res.send(user.vpn_config);
+  });
+
+  app.post("/api/web/promocode", webAuth, async (req, res) => {
+    const userId = getWebUserId(req);
+    const user = await getUserById(userId);
+    if (!user) {
+      res.status(404).json({ error: "Пользователь не найден" });
+      return;
+    }
+
+    const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+    if (!code) {
+      res.status(400).json({ error: "Промокод обязателен" });
+      return;
+    }
+
+    try {
+      const result = await redeemPromoCode(user.id, code);
+
+      if (!result.ok) {
+        if (result.error === "rate_limited") {
+          res.status(429).json({ error: "Слишком много неверных попыток. Попробуйте через час." });
+          return;
+        }
+
+        res.status(400).json({ error: "Промокод недействителен или уже использован" });
+        return;
+      }
+
+      const redeemedUser = await getUserById(user.id);
+      if (!redeemedUser) {
+        throw new Error(`Web user not found after promo redemption: ${user.id}`);
+      }
+      await syncVpnForPromoRedemption(
+        redeemedUser,
+        result.months!,
+        getWebClientName(redeemedUser),
+      );
+
+      const updatedUser = await getUserById(user.id);
+      const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
+      if (api && rawBuyChat) {
+        const admin = resolveAdminChat(rawBuyChat);
+        const identity = user.email ? `email:${user.email}` : "без email";
+        try {
+          await api.sendMessage(
+            admin.chatId,
+            `🎟 <b>Промокод активирован</b>\n\n` +
+              `👤 ${escapeHtml(user.email ?? "Веб-пользователь")} (${escapeHtml(identity)})\n` +
+              `🆔 user_id: <code>${user.id}</code>\n` +
+              `🔑 Код: <code>${escapeHtml(code.toUpperCase())}</code>\n` +
+              `📅 Срок: +${result.months} мес.\n` +
+              `🕐 Было: ${escapeHtml(formatRuDateTime(result.oldExpiredAt))}\n` +
+              `🕑 Стало: ${escapeHtml(formatRuDateTime(result.newExpiredAt))}`,
+            {
+              parse_mode: "HTML",
+              ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
+            },
+          );
+        } catch {
+          /* admin notification best-effort */
+        }
+      }
+
+      res.json({
+        ok: true,
+        months: result.months,
+        expired_at: result.newExpiredAt,
+        user: updatedUser ? sanitizeUser(updatedUser) : undefined,
+      });
+    } catch (err) {
+      console.error("Redeem web promocode failed:", err);
+      res.status(500).json({ error: "Не удалось активировать промокод" });
+    }
   });
 
   // ════════════════════════════════════════════════════════════

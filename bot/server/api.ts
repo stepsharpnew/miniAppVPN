@@ -8,6 +8,7 @@ import { addMessage, getMessages, hasMessages } from "./chat-store";
 import { resolveAdminChat, saveForwardedMessage, setActiveDialog } from "./store";
 import {
   BRAND_NAME,
+  escapeHtml,
   PAYMENT_ADMIN_NOTIFY,
   PAYMENT_SUCCESS_USER,
   SUPPORT_MEDIA_CAPTION_ADMIN,
@@ -31,8 +32,10 @@ import {
   incrementServerUserCount,
   isPaymentProcessed,
   markPaymentProcessed,
+  redeemPromoCode,
   upsertUserSubscription,
 } from "./db";
+import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 import { mountWebAuthRoutes } from "./web-auth";
 import { mountSyncRoutes } from "./sync-routes";
 
@@ -56,6 +59,11 @@ function normalizeTelegramNickname(username?: string): string | null {
   // Legacy fallback value from older flow should not be stored as nickname.
   if (trimmed.startsWith("tg_")) return null;
   return trimmed;
+}
+
+function formatRuDateTime(value: string | null | undefined): string {
+  if (!value) return "не было";
+  return new Date(value).toLocaleString("ru-RU");
 }
 
 /** @MemeVPNbest — подписка на канал; пусто = не требовать (удобно для локальной разработки). */
@@ -409,6 +417,92 @@ export function createApiServer(api: Api, botToken: string) {
     } catch (err) {
       console.error("Subscription check error:", err);
       res.status(500).json({ error: "Internal error" });
+    }
+  });
+
+  app.post("/api/promocode", auth, requireChannelSubscription, async (req, res) => {
+    const tgUser = getUser(req);
+    const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+    if (!code) {
+      res.status(400).json({ error: "Промокод обязателен" });
+      return;
+    }
+
+    try {
+      let dbUser = await getUserSubscription(tgUser.id);
+      if (!dbUser) {
+        dbUser = await upsertUserSubscription(
+          tgUser.id,
+          0,
+          undefined,
+          normalizeTelegramNickname(tgUser.username),
+        );
+      }
+
+      const result = await redeemPromoCode(dbUser.id, code);
+      if (!result.ok) {
+        if (result.error === "rate_limited") {
+          res.status(429).json({ error: "Слишком много неверных попыток. Попробуйте через час." });
+          return;
+        }
+
+        res.status(400).json({ error: "Промокод недействителен или уже использован" });
+        return;
+      }
+
+      dbUser = await getUserSubscription(tgUser.id);
+      if (!dbUser) {
+        throw new Error(`Telegram user not found after promo redemption: ${tgUser.id}`);
+      }
+      await syncVpnForPromoRedemption(
+        dbUser,
+        result.months!,
+        getTelegramClientName(tgUser.id, tgUser.username),
+      );
+
+      const updated = await getUserSubscription(tgUser.id);
+      const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
+      if (rawBuyChat) {
+        const admin = resolveAdminChat(rawBuyChat);
+        const userTag = tgUser.username ? `@${tgUser.username}` : "без @ника";
+        try {
+          await api.sendMessage(
+            admin.chatId,
+            `🎟 <b>Промокод активирован</b>\n\n` +
+              `👤 ${escapeHtml(tgUser.first_name)} (${escapeHtml(userTag)})\n` +
+              `🆔 tg_id: <code>${tgUser.id}</code> | user_id: <code>${dbUser.id}</code>\n` +
+              `🔑 Код: <code>${escapeHtml(code.toUpperCase())}</code>\n` +
+              `📅 Срок: +${result.months} мес.\n` +
+              `🕐 Было: ${escapeHtml(formatRuDateTime(result.oldExpiredAt))}\n` +
+              `🕑 Стало: ${escapeHtml(formatRuDateTime(result.newExpiredAt))}`,
+            {
+              parse_mode: "HTML",
+              ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
+            },
+          );
+        } catch {
+          /* admin notification best-effort */
+        }
+      }
+
+      res.json({
+        ok: true,
+        months: result.months,
+        expired_at: result.newExpiredAt,
+        subscription: updated
+          ? {
+              active: !!updated.expired_at && new Date(updated.expired_at).getTime() > Date.now(),
+              expired_at: updated.expired_at,
+              is_blocked: updated.is_blocked,
+              telegram_nickname: updated.telegram_nickname,
+              config: updated.vpn_config,
+              created_at: updated.created_at,
+            }
+          : null,
+      });
+    } catch (err) {
+      console.error("Promo redeem error:", err);
+      res.status(500).json({ error: "Не удалось активировать промокод" });
     }
   });
 

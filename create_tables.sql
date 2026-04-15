@@ -81,7 +81,28 @@ CREATE TABLE IF NOT EXISTS processed_payments (
     payment_id  TEXT                        PRIMARY KEY,
     processed_at TIMESTAMP WITH TIME ZONE   NOT NULL DEFAULT NOW()
 );
+-- ── Промокоды ──
+CREATE TABLE IF NOT EXISTS promo_codes (
+    id          UUID                     PRIMARY KEY DEFAULT gen_random_uuid(),
+    code        CHAR(8)                  NOT NULL UNIQUE,
+    months      SMALLINT                 NOT NULL CHECK (months IN (1, 3, 6)),
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    used_at     TIMESTAMP WITH TIME ZONE,
+    used_by     UUID                     REFERENCES users(id)
+);
 
+-- Попытки ввода промокодов (rate-limit + аудит)
+CREATE TABLE IF NOT EXISTS promo_attempts (
+    id           UUID                     PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      UUID                     NOT NULL REFERENCES users(id),
+    code         TEXT                     NOT NULL,
+    success      BOOLEAN                  NOT NULL DEFAULT FALSE,
+    attempted_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS promo_attempts_user_window
+    ON promo_attempts (user_id, attempted_at)
+    WHERE success = FALSE;
 -- ── Таблица серверов ──
 CREATE TABLE IF NOT EXISTS servers (
     id                  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
