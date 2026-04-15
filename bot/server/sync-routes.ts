@@ -153,11 +153,6 @@ export function mountSyncRoutes(
       return;
     }
 
-    if (!consumeVerifyToken(normalizedEmail, "sync", verifyToken)) {
-      res.status(403).json({ error: "Токен недействителен. Пройдите верификацию заново" });
-      return;
-    }
-
     try {
       const existing = await getUserByEmail(normalizedEmail);
       if (existing) {
@@ -170,6 +165,11 @@ export function mountSyncRoutes(
 
       if (!user) {
         res.status(404).json({ error: "Telegram-аккаунт не найден" });
+        return;
+      }
+
+      if (!consumeVerifyToken(normalizedEmail, "sync", verifyToken)) {
+        res.status(403).json({ error: "Токен недействителен. Пройдите верификацию заново" });
         return;
       }
 
@@ -192,11 +192,6 @@ export function mountSyncRoutes(
     }
 
     const normalizedEmail = email.toLowerCase().trim();
-
-    if (!consumeVerifyToken(normalizedEmail, "sync", verifyToken)) {
-      res.status(403).json({ error: "Токен недействителен. Пройдите верификацию заново" });
-      return;
-    }
 
     try {
       const webUser = await getUserByEmail(normalizedEmail);
@@ -227,6 +222,11 @@ export function mountSyncRoutes(
       const tgUser = await getUserByTelegramId(tg.id);
       if (!tgUser) {
         res.status(404).json({ error: "Telegram-аккаунт не найден" });
+        return;
+      }
+
+      if (!consumeVerifyToken(normalizedEmail, "sync", verifyToken)) {
+        res.status(403).json({ error: "Токен недействителен. Пройдите верификацию заново" });
         return;
       }
 

@@ -207,6 +207,12 @@ export function SyncPage({ onBack }: SyncPageProps) {
         {step === "email" && (
           <>
             <div className={styles.title}>Привязка аккаунта</div>
+            <div className={styles.infoBox}>
+              <span className={styles.infoIcon}>i</span>
+              <span>
+                Бета-тестирование: функционал синхронизации может работать нестабильно.
+              </span>
+            </div>
             <p className={styles.subtitle}>
               Введите email, на который придёт код подтверждения.
               После привязки вы сможете входить на сайт с помощью email и пароля.

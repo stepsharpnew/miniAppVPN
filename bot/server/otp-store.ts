@@ -18,7 +18,6 @@ const store = new Map<string, OtpEntry>();
 
 const CODE_TTL_MS = 15 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
-const ATTEMPT_COOLDOWN_MS = 30 * 1000;
 const RESEND_COOLDOWN_MS = 30 * 1000;
 const MAX_CODES_PER_EMAIL_PER_HOUR = 6;
 
@@ -124,16 +123,8 @@ export function verifyOtp(
     return { error: "Превышено количество попыток. Запросите новый код" };
   }
 
-  const now = Date.now();
-  if (entry.lastAttemptAt > 0 && now - entry.lastAttemptAt < ATTEMPT_COOLDOWN_MS) {
-    const waitSec = Math.ceil(
-      (ATTEMPT_COOLDOWN_MS - (now - entry.lastAttemptAt)) / 1000,
-    );
-    return { error: `Подождите ${waitSec} сек. перед следующей попыткой` };
-  }
-
   entry.attempts++;
-  entry.lastAttemptAt = now;
+  entry.lastAttemptAt = Date.now();
 
   if (entry.code !== code) {
     const remaining = MAX_ATTEMPTS - entry.attempts;
