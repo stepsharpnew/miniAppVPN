@@ -46,6 +46,9 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const [promoCode, setPromoCode] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
   const [showSyncInfo, setShowSyncInfo] = useState(false);
+  const [syncChecked, setSyncChecked] = useState(false);
+  const [isSynced, setIsSynced] = useState(false);
+  const [syncedEmail, setSyncedEmail] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -70,6 +73,28 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
         }
       });
     return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/sync/status", {
+      headers: { "X-Telegram-Init-Data": WebApp.initData },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!alive) return;
+        setIsSynced(Boolean(data?.synced));
+        setSyncedEmail(data?.email ?? null);
+        setSyncChecked(true);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setSyncChecked(true);
+      });
+
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const activeConfig = sub?.config ?? (sub?.active ? localConfig : null);
@@ -185,6 +210,28 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
               </div>
             )}
           </div>
+        </div>
+
+        <div className={styles.divider} />
+
+        <div className={styles.syncStatusCard}>
+          <div className={styles.syncStatusTitle}>Синхронизация аккаунта</div>
+          {!syncChecked ? (
+            <div className={styles.syncStatusText}>Проверяем статус...</div>
+          ) : isSynced ? (
+            <>
+              <div className={styles.syncStatusOk}>✓ Аккаунт синхронизирован</div>
+              {syncedEmail && (
+                <div className={styles.syncStatusText}>
+                  Вход в веб-кабинет: <b>{syncedEmail}</b>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className={styles.syncStatusText}>
+              Аккаунт пока не синхронизирован с веб-версией.
+            </div>
+          )}
         </div>
 
         <div className={styles.divider} />

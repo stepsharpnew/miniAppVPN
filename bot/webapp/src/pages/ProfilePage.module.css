@@ -94,6 +94,34 @@
   align-items: center;
 }
 
+.syncStatusCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(77, 139, 255, 0.2);
+  background: rgba(77, 139, 255, 0.08);
+}
+
+.syncStatusTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: #d9e7ff;
+}
+
+.syncStatusOk {
+  font-size: 13px;
+  font-weight: 700;
+  color: #88f0b3;
+}
+
+.syncStatusText {
+  font-size: 12px;
+  color: #c4d6ff;
+  line-height: 1.45;
+}
+
 .promoBlock {
   display: flex;
   flex-direction: column;
@@ -171,7 +199,8 @@
 }
 
 .syncBtn {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 14px;
   border-radius: var(--border-radius-sm);
   background: rgba(77, 139, 255, 0.12);
