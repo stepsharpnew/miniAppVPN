@@ -72,6 +72,15 @@
   width: 100%;
 }
 
+.inlineLink {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--accent-blue);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 600;
+}
+
 .contactCard {
   background: var(--bg-card);
   border-radius: var(--border-radius);

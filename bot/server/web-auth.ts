@@ -116,6 +116,11 @@ function formatRuDateTime(value: string | null | undefined): string {
   return new Date(value).toLocaleString("ru-RU");
 }
 
+async function isTelegramSyncedWebUser(userId: string): Promise<boolean> {
+  const user = await getUserById(userId);
+  return Boolean(user?.telegram_id);
+}
+
 // ── Web payment processing (shared between polling and webhook) ──
 
 export async function processWebPaymentFromWebhook(paymentId: string, api?: Api): Promise<void> {
@@ -690,14 +695,28 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
   //  Support chat
   // ════════════════════════════════════════════════════════════
 
-  app.get("/api/web/support/messages", webAuth, (req: express.Request, res: express.Response) => {
+  app.get("/api/web/support/messages", webAuth, async (req: express.Request, res: express.Response) => {
     const userId = getWebUserId(req);
     const after = req.query.after ? Number(req.query.after) : undefined;
-    res.json({ messages: getMessages(userId, after) });
+    try {
+      const synced = await isTelegramSyncedWebUser(userId);
+      if (!synced) {
+        res.status(403).json({ error: "Support chat requires Telegram sync" });
+        return;
+      }
+      res.json({ messages: getMessages(userId, after) });
+    } catch {
+      res.status(500).json({ error: "Failed to check sync status" });
+    }
   });
 
   app.post("/api/web/support/send", webAuth, async (req: express.Request, res: express.Response) => {
     const userId = getWebUserId(req);
+    const synced = await isTelegramSyncedWebUser(userId);
+    if (!synced) {
+      res.status(403).json({ error: "Support chat requires Telegram sync" });
+      return;
+    }
     const { text } = req.body;
     if (!text?.trim()) {
       res.status(400).json({ error: "Empty message" });

@@ -55,6 +55,7 @@ export function SupportPage({ user }: SupportPageProps) {
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastTsRef = useRef(0);
+  const isTelegramSynced = !!user && user.auth_source !== "web";
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
@@ -63,7 +64,7 @@ export function SupportPage({ user }: SupportPageProps) {
   }, []);
 
   useEffect(() => {
-    if (!user || loaded) return;
+    if (!user || !isTelegramSynced || loaded) return;
     apiFetch<{ messages: ChatMessage[] }>("/api/web/support/messages")
       .then((data) => {
         if (data.messages.length > 0) {
@@ -74,10 +75,10 @@ export function SupportPage({ user }: SupportPageProps) {
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
-  }, [user, loaded]);
+  }, [user, isTelegramSynced, loaded]);
 
   useEffect(() => {
-    if (!chatStarted || !user) return;
+    if (!chatStarted || !user || !isTelegramSynced) return;
     let alive = true;
     const poll = async () => {
       try {
@@ -98,7 +99,7 @@ export function SupportPage({ user }: SupportPageProps) {
     };
     const id = setInterval(poll, 3000);
     return () => { alive = false; clearInterval(id); };
-  }, [chatStarted, user, scrollToBottom]);
+  }, [chatStarted, user, isTelegramSynced, scrollToBottom]);
 
   useEffect(() => {
     if (messages.length > 0) scrollToBottom();
@@ -145,10 +146,22 @@ export function SupportPage({ user }: SupportPageProps) {
           <div className={styles.subtitle}>
             Опишите проблему — менеджер ответит прямо здесь
           </div>
-          {user ? (
+          {user && isTelegramSynced ? (
             <button type="button" className={styles.startBtn} onClick={() => setChatStarted(true)}>
               Начать диалог
             </button>
+          ) : user ? (
+            <div className={styles.noAuth}>
+              Чат станет доступен после синхронизации аккаунта с Telegram-ботом.
+              <a
+                href={TELEGRAM_BOT_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.inlineLink}
+              >
+                Синхронизировать сейчас
+              </a>
+            </div>
           ) : (
             <div className={styles.noAuth}>
               Войдите в аккаунт для доступа к чату
