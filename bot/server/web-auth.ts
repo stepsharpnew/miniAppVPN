@@ -21,6 +21,7 @@ import {
 } from "./db";
 import {
   getSupportMessages,
+  resolveSupportActor,
   sendSupportTextMessage,
 } from "./support-service";
 import { getConfig, saveConfig } from "./config-store";
@@ -733,11 +734,12 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     }
 
     try {
-      const message = await sendSupportTextMessage(api, {
-        dialogUserId: user.telegram_id,
-        userName: user.email?.split("@")[0] ?? "Веб-пользователь",
-        userTag: user.email ?? "без email",
-      }, text);
+      const actor = await resolveSupportActor(api, user);
+      if (!actor) {
+        res.status(403).json({ error: "Support chat requires Telegram sync" });
+        return;
+      }
+      const message = await sendSupportTextMessage(api, actor, text);
       res.json({ message });
     } catch (err) {
       if (err instanceof Error && err.message === "support_unavailable") {
