@@ -40,6 +40,12 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [promoCode, setPromoCode] = useState("");
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [promoMessage, setPromoMessage] = useState<string | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+
+  const isTelegramLinked = user.auth_source === "both" || user.auth_source === "telegram";
 
   useEffect(() => {
     if (!user) return;
@@ -100,6 +106,43 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
       .catch(() => {});
   }, []);
 
+  const handleApplyPromo = useCallback(async () => {
+    const code = promoCode.trim().toUpperCase();
+    if (!code || promoLoading) return;
+
+    setPromoLoading(true);
+    setPromoError(null);
+    setPromoMessage(null);
+
+    try {
+      const data = await apiFetch<{ expired_at?: string | null }>("/api/web/promocode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+
+      setPromoCode("");
+      setPromoMessage("Промокод успешно активирован");
+      setSub((prev) =>
+        prev
+          ? {
+              ...prev,
+              active: true,
+              expired_at: data.expired_at ?? prev.expired_at,
+            }
+          : prev,
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : "Не удалось активировать промокод";
+      setPromoError(message);
+    } finally {
+      setPromoLoading(false);
+    }
+  }, [promoCode, promoLoading]);
+
   if (!user) return null;
 
   return (
@@ -122,6 +165,51 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
               </div>
             )}
           </div>
+        </div>
+
+        <div className={styles.divider} />
+
+        <div className={styles.telegramSyncBlock}>
+          <div className={styles.sectionHeader}>Синхронизация Telegram</div>
+          <div
+            className={`${styles.syncStatus} ${isTelegramLinked ? styles.syncLinked : styles.syncNotLinked}`}
+          >
+            {isTelegramLinked
+              ? "Аккаунт привязан к Telegram"
+              : "Аккаунт не привязан к Telegram"}
+          </div>
+        </div>
+
+        <div className={styles.divider} />
+
+        <div className={styles.promoBlock}>
+          <div className={styles.sectionHeader}>Промокод</div>
+          <div className={styles.promoRow}>
+            <input
+              type="text"
+              value={promoCode}
+              onChange={(e) => setPromoCode(e.target.value)}
+              className={styles.promoInput}
+              placeholder="Введите промокод"
+              disabled={promoLoading}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleApplyPromo();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className={styles.promoBtn}
+              disabled={!promoCode.trim() || promoLoading}
+              onClick={() => void handleApplyPromo()}
+            >
+              {promoLoading ? "Проверяем..." : "Активировать"}
+            </button>
+          </div>
+          {promoMessage ? <div className={styles.promoSuccess}>{promoMessage}</div> : null}
+          {promoError ? <div className={styles.promoError}>{promoError}</div> : null}
         </div>
 
         <div className={styles.divider} />

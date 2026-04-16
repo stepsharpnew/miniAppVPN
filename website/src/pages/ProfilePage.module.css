@@ -75,6 +75,89 @@
   margin: 16px 0;
 }
 
+.telegramSyncBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.syncStatus {
+  width: 100%;
+  border-radius: var(--border-radius-sm);
+  padding: 12px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.syncLinked {
+  background: rgba(0, 200, 83, 0.12);
+  border: 1px solid rgba(0, 200, 83, 0.25);
+  color: #7df5ab;
+}
+
+.syncNotLinked {
+  background: rgba(255, 171, 0, 0.12);
+  border: 1px solid rgba(255, 171, 0, 0.25);
+  color: #ffd27d;
+}
+
+.promoBlock {
+  width: 100%;
+}
+
+.promoRow {
+  display: flex;
+  gap: 8px;
+}
+
+.promoInput {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  text-transform: uppercase;
+}
+
+.promoInput:focus {
+  border-color: var(--accent-blue);
+}
+
+.promoInput:disabled {
+  opacity: 0.7;
+}
+
+.promoBtn {
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--btn-gradient);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  transition: opacity 0.15s;
+}
+
+.promoBtn:disabled {
+  opacity: 0.45;
+}
+
+.promoSuccess {
+  margin-top: 10px;
+  color: #7df5ab;
+  font-size: 12px;
+}
+
+.promoError {
+  margin-top: 10px;
+  color: #ff8e8e;
+  font-size: 12px;
+}
+
 .configBlock {
   display: flex;
   flex-direction: column;

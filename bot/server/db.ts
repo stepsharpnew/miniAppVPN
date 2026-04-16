@@ -333,6 +333,16 @@ export async function mergeAccounts(
       [webUserId, telegramId, telegramNickname, bestExpiry, bestConfig],
     );
 
+    // Reassign FK references from the old Telegram row to the merged web row before deleting.
+    await client.query(
+      "UPDATE promo_attempts SET user_id = $1 WHERE user_id = $2",
+      [webUserId, telegramUserId],
+    );
+    await client.query(
+      "UPDATE promo_codes SET used_by = $1 WHERE used_by = $2",
+      [webUserId, telegramUserId],
+    );
+
     await client.query("DELETE FROM users WHERE id = $1", [telegramUserId]);
 
     await client.query("COMMIT");
