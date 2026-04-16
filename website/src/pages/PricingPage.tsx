@@ -26,6 +26,16 @@ export function PricingPage({ user }: PricingPageProps) {
     if (!user) return;
     setError("");
     setLoading(true);
+
+    // iOS Safari blocks window.open after async calls.
+    // Pre-open a blank window synchronously to preserve user gesture context.
+    let payWindow: Window | null = null;
+    try {
+      payWindow = window.open("about:blank", "_blank");
+    } catch {
+      /* blocked */
+    }
+
     try {
       const { confirmationUrl, paymentId: pid } = await apiFetch<{
         confirmationUrl: string;
@@ -36,9 +46,16 @@ export function PricingPage({ user }: PricingPageProps) {
         body: JSON.stringify({ months: selected.months }),
       });
       setPaymentId(pid);
-      window.open(confirmationUrl, "_blank");
+
+      if (payWindow && !payWindow.closed) {
+        payWindow.location.href = confirmationUrl;
+      } else {
+        window.location.href = confirmationUrl;
+      }
+
       startPolling(pid);
     } catch (err: any) {
+      if (payWindow && !payWindow.closed) payWindow.close();
       setError(err.message || "Ошибка создания платежа");
     } finally {
       setLoading(false);

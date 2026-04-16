@@ -237,6 +237,15 @@ export function PurchasePage({ active }: PurchasePageProps) {
 
     setStatus("loading");
 
+    // iOS Safari / WKWebView block window.open after async calls.
+    // Pre-open a blank window synchronously to preserve user gesture context.
+    let payWindow: Window | null = null;
+    try {
+      payWindow = window.open("about:blank", "_blank");
+    } catch {
+      /* blocked */
+    }
+
     try {
       const res = await fetch("/api/payments/create-payment", {
         method: "POST",
@@ -259,14 +268,19 @@ export function PurchasePage({ active }: PurchasePageProps) {
         /* ok */
       }
 
-      try {
-        WebApp.openLink(confirmationUrl, { try_instant_view: false });
-      } catch {
-        window.open(confirmationUrl, "_blank", "noopener,noreferrer");
+      if (payWindow && !payWindow.closed) {
+        payWindow.location.href = confirmationUrl;
+      } else {
+        try {
+          WebApp.openLink(confirmationUrl, { try_instant_view: false });
+        } catch {
+          window.location.href = confirmationUrl;
+        }
       }
 
       startPollingLoop(paymentId);
     } catch (err) {
+      if (payWindow && !payWindow.closed) payWindow.close();
       const message = err instanceof Error ? err.message : "Неизвестная ошибка";
       WebApp.showAlert(`Ошибка: ${message}`);
       setStatus("idle");
