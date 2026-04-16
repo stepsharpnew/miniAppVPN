@@ -39,6 +39,10 @@ import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 import { mountWebAuthRoutes } from "./web-auth";
 import { mountSyncRoutes } from "./sync-routes";
 import { PLATFORM_BOT_TEXTS, type PlatformId } from "../shared/platforms";
+import {
+  getSupportMessages,
+  sendSupportTextMessage,
+} from "./support-service";
 
 function getServerBaseUrl(server: ServerRow): string {
   const raw = server.domain_server_name;
@@ -225,7 +229,7 @@ export function createApiServer(api: Api, botToken: string) {
   app.get("/api/support/messages", auth, requireChannelSubscription, (req, res) => {
     const user = getUser(req);
     const after = req.query.after ? Number(req.query.after) : undefined;
-    res.json({ messages: getMessages(user.id, after) });
+    res.json({ messages: getSupportMessages(user.id, after) });
   });
 
   // ── Send text ──
@@ -238,38 +242,18 @@ export function createApiServer(api: Api, botToken: string) {
       return;
     }
 
-    const raw = process.env.ADMIN_CHAT_ID_SUPPORT;
-    if (!raw) {
-      res.status(503).json({ error: "Support unavailable" });
-      return;
-    }
-
-    const { chatId, topicId } = resolveAdminChat(raw);
-    const userName = user.first_name;
-    const userTag = user.username ? `@${user.username}` : "без @ника";
-    const isNew = !hasMessages(user.id);
-
     try {
-      const message = addMessage(user.id, {
-        from: "user",
-        type: "text",
-        text: text.trim(),
-      });
-
-      const adminText = isNew
-        ? SUPPORT_TICKET_ADMIN(userName, userTag, user.id, text.trim())
-        : SUPPORT_USER_TEXT_ADMIN(userName, userTag, user.id, text.trim());
-
-      const sent = await api.sendMessage(chatId, adminText, {
-        parse_mode: "HTML",
-        ...(topicId !== undefined ? { message_thread_id: topicId } : {}),
-      });
-
-      saveForwardedMessage(chatId, sent.message_id, user.id);
-      setActiveDialog(user.id, { chatId, topicId });
-
+      const message = await sendSupportTextMessage(api, {
+        dialogUserId: user.id,
+        userName: user.first_name,
+        userTag: user.username ? `@${user.username}` : "без @ника",
+      }, text);
       res.json({ message });
     } catch (error) {
+      if (error instanceof Error && error.message === "support_unavailable") {
+        res.status(503).json({ error: "Support unavailable" });
+        return;
+      }
       console.error("API send error:", error);
       res.status(500).json({ error: "Failed to send" });
     }

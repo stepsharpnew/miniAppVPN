@@ -103,11 +103,22 @@ export function PurchasePage({ active }: PurchasePageProps) {
     [saveConfig],
   );
 
+  const cancelPaymentWait = useCallback(() => {
+    stopPolling();
+    try {
+      sessionStorage.removeItem(PENDING_KEY);
+    } catch {
+      /* ok */
+    }
+    setStatus("idle");
+  }, [stopPolling]);
+
   const pollForConfig = useCallback(
     (paymentId: string) => {
       setStatus("polling");
       let attempts = 0;
       const MAX_ATTEMPTS = 90;
+      let notFoundStreak = 0;
 
       pollingRef.current = setInterval(async () => {
         attempts++;
@@ -115,7 +126,18 @@ export function PurchasePage({ active }: PurchasePageProps) {
           const res = await fetch(`/api/payments/status/${paymentId}`, {
             headers: { "X-Telegram-Init-Data": WebApp.initData },
           });
+
+          if (res.status === 404) {
+            notFoundStreak++;
+            if (notFoundStreak >= 3) {
+              cancelPaymentWait();
+              return;
+            }
+            return;
+          }
+
           if (!res.ok) return;
+          notFoundStreak = 0;
           const data = await res.json();
 
           if (data.status === "succeeded") {
@@ -124,18 +146,17 @@ export function PurchasePage({ active }: PurchasePageProps) {
               await showConfig(data.config);
             }
             refreshSubscription();
-            setStatus("idle");
-            return;
-          }
-
-          if (data.status === "canceled") {
-            stopPolling();
             try {
               sessionStorage.removeItem(PENDING_KEY);
             } catch {
               /* ok */
             }
             setStatus("idle");
+            return;
+          }
+
+          if (data.status === "canceled") {
+            cancelPaymentWait();
             return;
           }
         } catch {
@@ -156,7 +177,7 @@ export function PurchasePage({ active }: PurchasePageProps) {
         }
       }, 2000);
     },
-    [showConfig, stopPolling, refreshSubscription],
+    [showConfig, stopPolling, refreshSubscription, cancelPaymentWait],
   );
 
   useEffect(() => {
@@ -200,7 +221,11 @@ export function PurchasePage({ active }: PurchasePageProps) {
         /* ok */
       }
 
-      WebApp.openLink(confirmationUrl, { try_instant_view: false });
+      try {
+        WebApp.openLink(confirmationUrl, { try_instant_view: false });
+      } catch {
+        window.open(confirmationUrl, "_blank", "noopener,noreferrer");
+      }
 
       pollForConfig(paymentId);
     } catch (err) {
@@ -264,11 +289,18 @@ export function PurchasePage({ active }: PurchasePageProps) {
         {status === "polling" && (
           <div className={styles.pollingContainer}>
             <div className={styles.spinner} />
-            <p className={styles.pollingTitle}>Ожидаем оплату...</p>
+            <p className={styles.pollingTitle}>Ожидание оплаты...</p>
             <p className={styles.pollingHint}>
-              Оплатите в открывшемся браузере и вернитесь сюда. Конфиг появится
+              Оплатите в открывшемся окне и вернитесь сюда. Конфиг появится
               автоматически.
             </p>
+            <button
+              type="button"
+              className={styles.cancelBtn}
+              onClick={cancelPaymentWait}
+            >
+              Отменить ожидание
+            </button>
           </div>
         )}
 
