@@ -1,10 +1,35 @@
 import { Accordion } from "../components/Accordion";
 import { PLATFORMS } from "../../../shared/platforms";
 import { PlatformLogo } from "../components/PlatformLogo";
-import { PLATFORM_INSTRUCTION_PDF } from "./instructionPdfs";
+import { useState } from "react";
+import { waitForTelegramInitData } from "../utils/telegramInitData";
 import styles from "./InstructionsPage.module.css";
 
 export function InstructionsPage() {
+  const [sendingFor, setSendingFor] = useState<string | null>(null);
+
+  const sendInstructionToChat = async (platformId: string) => {
+    if (sendingFor) return;
+    setSendingFor(platformId);
+    try {
+      const initData = await waitForTelegramInitData();
+      const res = await fetch("/api/instructions/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": initData ?? "",
+        },
+        body: JSON.stringify({ platformId }),
+      });
+      if (!res.ok) throw new Error("send_failed");
+      alert("Инструкция отправлена в чат с ботом");
+    } catch {
+      alert("Не удалось отправить инструкцию. Попробуйте еще раз.");
+    } finally {
+      setSendingFor(null);
+    }
+  };
+
   return (
     <div className={styles.page}>
       <div className={styles.hero}>
@@ -40,17 +65,14 @@ export function InstructionsPage() {
               📥 Скачать AmneziaWG
             </a>
 
-            {PLATFORM_INSTRUCTION_PDF[platform.id] && (
-              <a
-                href={PLATFORM_INSTRUCTION_PDF[platform.id]!.url}
-                download={PLATFORM_INSTRUCTION_PDF[platform.id]!.fileName}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={styles.instructionPdfLink}
-              >
-                Инструкция
-              </a>
-            )}
+            <button
+              type="button"
+              className={styles.instructionPdfLink}
+              onClick={() => void sendInstructionToChat(platform.id)}
+              disabled={sendingFor === platform.id}
+            >
+              {sendingFor === platform.id ? "Отправка..." : "Отправить инструкцию в чат"}
+            </button>
           </Accordion>
         ))}
       </div>

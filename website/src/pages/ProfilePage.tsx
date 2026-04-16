@@ -45,8 +45,6 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
 
-  const isTelegramLinked = user.auth_source === "both" || user.auth_source === "telegram";
-
   useEffect(() => {
     if (!user) return;
     apiFetch<SubData>("/api/web/subscription")
@@ -144,6 +142,8 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   }, [promoCode, promoLoading]);
 
   if (!user) return null;
+  const isTelegramLinked =
+    user.auth_source === "both" || user.auth_source === "telegram";
 
   return (
     <div className={styles.page}>

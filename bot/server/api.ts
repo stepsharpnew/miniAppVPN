@@ -38,6 +38,7 @@ import {
 import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 import { mountWebAuthRoutes } from "./web-auth";
 import { mountSyncRoutes } from "./sync-routes";
+import { PLATFORM_BOT_TEXTS, type PlatformId } from "../shared/platforms";
 
 function getServerBaseUrl(server: ServerRow): string {
   const raw = server.domain_server_name;
@@ -199,6 +200,27 @@ export function createApiServer(api: Api, botToken: string) {
   });
 
   // ── Messages history ──
+
+  app.post("/api/instructions/send", auth, requireChannelSubscription, async (req, res) => {
+    const user = getUser(req);
+    const platformIdRaw =
+      typeof req.body?.platformId === "string" ? req.body.platformId : "";
+    const platformId = platformIdRaw as PlatformId;
+    const instructionText = PLATFORM_BOT_TEXTS[platformId];
+
+    if (!instructionText) {
+      res.status(400).json({ error: "Unknown platform" });
+      return;
+    }
+
+    try {
+      await api.sendMessage(user.id, instructionText);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error("Instruction send error:", error);
+      res.status(500).json({ error: "Failed to send instruction" });
+    }
+  });
 
   app.get("/api/support/messages", auth, requireChannelSubscription, (req, res) => {
     const user = getUser(req);

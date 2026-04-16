@@ -74,6 +74,13 @@
   font-weight: 600;
   font-size: 12px;
   text-decoration: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.instructionPdfLink:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .helpCard {
