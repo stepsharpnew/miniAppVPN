@@ -78,9 +78,14 @@ export function PurchasePage({ active }: PurchasePageProps) {
     }
   }, []);
 
+  const pendingIdRef = useRef<string | null>(null);
+  const pollAliveRef = useRef(false);
+  const attemptsRef = useRef(0);
+
   const stopPolling = useCallback(() => {
+    pollAliveRef.current = false;
     if (pollingRef.current) {
-      clearInterval(pollingRef.current);
+      clearTimeout(pollingRef.current);
       pollingRef.current = null;
     }
   }, []);
@@ -92,6 +97,7 @@ export function PurchasePage({ active }: PurchasePageProps) {
       } catch {
         /* ok */
       }
+      pendingIdRef.current = null;
       saveConfig(config);
       const dataUrl = await QRCode.toDataURL(config, {
         width: 260,
@@ -105,6 +111,7 @@ export function PurchasePage({ active }: PurchasePageProps) {
 
   const cancelPaymentWait = useCallback(() => {
     stopPolling();
+    pendingIdRef.current = null;
     try {
       sessionStorage.removeItem(PENDING_KEY);
     } catch {
@@ -113,73 +120,100 @@ export function PurchasePage({ active }: PurchasePageProps) {
     setStatus("idle");
   }, [stopPolling]);
 
-  const pollForConfig = useCallback(
-    (paymentId: string) => {
-      setStatus("polling");
-      let attempts = 0;
-      const MAX_ATTEMPTS = 90;
-      let notFoundStreak = 0;
+  const checkPaymentOnce = useCallback(
+    async (paymentId: string): Promise<"continue" | "done"> => {
+      try {
+        const res = await fetch(`/api/payments/status/${paymentId}`, {
+          headers: { "X-Telegram-Init-Data": WebApp.initData },
+        });
 
-      pollingRef.current = setInterval(async () => {
-        attempts++;
-        try {
-          const res = await fetch(`/api/payments/status/${paymentId}`, {
-            headers: { "X-Telegram-Init-Data": WebApp.initData },
-          });
+        if (res.status === 404) return "done";
+        if (!res.ok) return "continue";
 
-          if (res.status === 404) {
-            notFoundStreak++;
-            if (notFoundStreak >= 3) {
-              cancelPaymentWait();
-              return;
-            }
-            return;
-          }
+        const data = await res.json();
 
-          if (!res.ok) return;
-          notFoundStreak = 0;
-          const data = await res.json();
-
-          if (data.status === "succeeded") {
-            stopPolling();
-            if (data.config) {
-              await showConfig(data.config);
-            }
-            refreshSubscription();
-            try {
-              sessionStorage.removeItem(PENDING_KEY);
-            } catch {
-              /* ok */
-            }
-            setStatus("idle");
-            return;
-          }
-
-          if (data.status === "canceled") {
-            cancelPaymentWait();
-            return;
-          }
-        } catch {
-          /* retry */
-        }
-
-        if (attempts >= MAX_ATTEMPTS) {
+        if (data.status === "succeeded") {
           stopPolling();
+          if (data.config) {
+            await showConfig(data.config);
+          }
+          refreshSubscription();
           try {
             sessionStorage.removeItem(PENDING_KEY);
           } catch {
             /* ok */
           }
-          WebApp.showAlert(
-            "Оплата прошла, но конфиг ещё не готов. Он появится в профиле или в чате с ботом.",
-          );
-          setStatus("error");
+          pendingIdRef.current = null;
+          setStatus("idle");
+          return "done";
         }
-      }, 2000);
+
+        if (data.status === "canceled") {
+          cancelPaymentWait();
+          return "done";
+        }
+      } catch {
+        /* retry */
+      }
+      return "continue";
     },
     [showConfig, stopPolling, refreshSubscription, cancelPaymentWait],
   );
 
+  const startPollingLoop = useCallback(
+    (paymentId: string) => {
+      if (pollAliveRef.current) return;
+      pollAliveRef.current = true;
+      setStatus("polling");
+
+      const tick = async () => {
+        if (!pollAliveRef.current) return;
+        attemptsRef.current++;
+
+        const result = await checkPaymentOnce(paymentId);
+        if (result === "done" || !pollAliveRef.current) return;
+
+        if (attemptsRef.current >= 120) {
+          stopPolling();
+          pendingIdRef.current = null;
+          try {
+            sessionStorage.removeItem(PENDING_KEY);
+          } catch {
+            /* ok */
+          }
+          setStatus("error");
+          return;
+        }
+
+        pollingRef.current = setTimeout(tick, 2000);
+      };
+
+      pollingRef.current = setTimeout(tick, 1500);
+    },
+    [checkPaymentOnce, stopPolling],
+  );
+
+  // On iOS, when user returns from Safari the WebView unfreezes.
+  // Immediately check payment status once and restart polling loop.
+  useEffect(() => {
+    const onVisible = async () => {
+      if (document.visibilityState !== "visible") return;
+      const pid = pendingIdRef.current;
+      if (!pid) return;
+
+      const result = await checkPaymentOnce(pid);
+      if (result === "done") return;
+
+      if (!pollAliveRef.current) {
+        startPollingLoop(pid);
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [checkPaymentOnce, startPollingLoop]);
+
+  // Restore pending payment from sessionStorage on mount
   useEffect(() => {
     let savedId: string | null = null;
     try {
@@ -188,7 +222,9 @@ export function PurchasePage({ active }: PurchasePageProps) {
       /* ok */
     }
     if (savedId) {
-      pollForConfig(savedId);
+      pendingIdRef.current = savedId;
+      attemptsRef.current = 0;
+      startPollingLoop(savedId);
     }
     return () => {
       stopPolling();
@@ -215,6 +251,8 @@ export function PurchasePage({ active }: PurchasePageProps) {
 
       const { confirmationUrl, paymentId } = await res.json();
 
+      pendingIdRef.current = paymentId;
+      attemptsRef.current = 0;
       try {
         sessionStorage.setItem(PENDING_KEY, paymentId);
       } catch {
@@ -227,13 +265,13 @@ export function PurchasePage({ active }: PurchasePageProps) {
         window.open(confirmationUrl, "_blank", "noopener,noreferrer");
       }
 
-      pollForConfig(paymentId);
+      startPollingLoop(paymentId);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Неизвестная ошибка";
       WebApp.showAlert(`Ошибка: ${message}`);
       setStatus("idle");
     }
-  }, [status, selected, pollForConfig]);
+  }, [status, selected, startPollingLoop]);
 
   const isDisabled = status === "loading" || status === "polling";
   const buttonText =

@@ -10,7 +10,7 @@ import {
   SUPPORT_USER_TEXT_ADMIN,
 } from "../shared/texts";
 
-interface SupportActor {
+export interface SupportActor {
   dialogUserId: number;
   userName: string;
   userTag: string;
@@ -22,7 +22,10 @@ function getSupportAdminChat() {
   return resolveAdminChat(raw);
 }
 
-export function getSupportMessages(dialogUserId: number, after?: number) {
+export function getSupportMessages(
+  dialogUserId: number | string,
+  after?: number,
+) {
   return getMessages(dialogUserId, after);
 }
 

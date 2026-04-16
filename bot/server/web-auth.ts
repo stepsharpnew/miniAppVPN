@@ -19,7 +19,10 @@ import {
   type UserRow,
   type ServerRow,
 } from "./db";
-import { addMessage, getMessages, hasMessages } from "./chat-store";
+import {
+  getSupportMessages,
+  sendSupportTextMessage,
+} from "./support-service";
 import { getConfig, saveConfig } from "./config-store";
 import { provisionVpnClient, extendVpnClient } from "./vpn";
 import {
@@ -699,43 +702,55 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     const userId = getWebUserId(req);
     const after = req.query.after ? Number(req.query.after) : undefined;
     try {
-      const synced = await isTelegramSyncedWebUser(userId);
-      if (!synced) {
+      const user = await getUserById(userId);
+      if (!user?.telegram_id) {
         res.status(403).json({ error: "Support chat requires Telegram sync" });
         return;
       }
-      res.json({ messages: getMessages(userId, after) });
+      res.json({ messages: getSupportMessages(user.telegram_id, after) });
     } catch {
       res.status(500).json({ error: "Failed to check sync status" });
     }
   });
 
   app.post("/api/web/support/send", webAuth, async (req: express.Request, res: express.Response) => {
+    if (!api) {
+      res.status(503).json({ error: "Support unavailable" });
+      return;
+    }
+
     const userId = getWebUserId(req);
-    const synced = await isTelegramSyncedWebUser(userId);
-    if (!synced) {
+    const user = await getUserById(userId);
+    if (!user?.telegram_id) {
       res.status(403).json({ error: "Support chat requires Telegram sync" });
       return;
     }
+
     const { text } = req.body;
     if (!text?.trim()) {
       res.status(400).json({ error: "Empty message" });
       return;
     }
 
-    const raw = process.env.ADMIN_CHAT_ID_SUPPORT;
-    if (!raw) {
-      res.status(503).json({ error: "Support unavailable" });
-      return;
+    try {
+      const message = await sendSupportTextMessage(api, {
+        dialogUserId: user.telegram_id,
+        userName: user.email?.split("@")[0] ?? "Веб-пользователь",
+        userTag: user.email ?? "без email",
+      }, text);
+      res.json({ message });
+    } catch (err) {
+      if (err instanceof Error && err.message === "support_unavailable") {
+        res.status(503).json({ error: "Support unavailable" });
+        return;
+      }
+      if (err instanceof Error && err.message === "empty_message") {
+        res.status(400).json({ error: "Empty message" });
+        return;
+      }
+      console.error("Web support send error:", err);
+      res.status(500).json({ error: "Failed to send" });
     }
-
-    const message = addMessage(userId, {
-      from: "user",
-      type: "text",
-      text: text.trim(),
-    });
-
-    res.json({ message });
   });
 }
 
