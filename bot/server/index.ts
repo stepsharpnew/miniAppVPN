@@ -27,12 +27,10 @@ import { type MemeContext, type SessionData } from "./types";
 import {
   closeDb,
   initDb,
+  applyReferralCode,
+  createTelegramUserIfMissing,
   generatePromoCodes,
-  getUserSubscription,
-  upsertUserSubscription,
-  redeemPromoCode,
 } from "./db";
-import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 import { scheduleSubscriptionExpiryReminders } from "./subscription-reminders";
 
 const botToken = (process.env.BOT_TOKEN ?? "").trim();
@@ -68,6 +66,21 @@ if (!merchantShopId || !merchantKey) {
 }
 
 const apiPort = parseInt(process.env.API_PORT ?? "3001", 10);
+
+function mapReferralApplyError(error?: string): string {
+  switch (error) {
+    case "empty":
+      return "Промокод обязателен.";
+    case "not_found":
+      return "Код не найден.";
+    case "self_referral":
+      return "Нельзя применить собственный код.";
+    case "already_applied":
+      return "Код уже применен ранее.";
+    default:
+      return "Не удалось применить промокод.";
+  }
+}
 
 const bot = new Bot<MemeContext>(botToken);
 
@@ -166,82 +179,24 @@ bot.command("redeem", async (ctx) => {
   }
 
   try {
-    let user = await getUserSubscription(telegramId);
-    if (!user) {
-      user = await upsertUserSubscription(
-        telegramId,
-        0,
-        undefined,
-        ctx.from?.username ? `@${ctx.from.username}` : null,
-      );
-    }
-
-    const result = await redeemPromoCode(user.id, rawCode);
+    const user = await createTelegramUserIfMissing(
+      telegramId,
+      ctx.from?.username ?? null,
+    );
+    const result = await applyReferralCode(user.id, rawCode);
 
     if (!result.ok) {
-      if (result.error === "rate_limited") {
-        await ctx.reply("⛔ Слишком много неверных попыток. Попробуй через час.");
-      } else {
-        await ctx.reply("❌ Промокод недействителен или уже использован.");
-      }
+      await ctx.reply(`❌ ${mapReferralApplyError(result.error)}`);
       return;
     }
 
-    user = await getUserSubscription(telegramId);
-    if (!user) {
-      throw new Error(`User not found after promo redemption: ${telegramId}`);
-    }
-    await syncVpnForPromoRedemption(
-      user,
-      result.months!,
-      getTelegramClientName(telegramId, ctx.from?.username),
-    );
-    user = await getUserSubscription(telegramId);
-    if (!user) {
-      throw new Error(`User not found after VPN promo sync: ${telegramId}`);
-    }
-
-    const newDate = new Date(result.newExpiredAt!).toLocaleDateString("ru-RU", {
-      day: "2-digit", month: "2-digit", year: "numeric",
-    });
     await ctx.reply(
-      `✅ Промокод активирован!\n` +
-      `Подписка продлена на <b>${result.months} мес.</b>\n` +
-      `Действует до: <b>${newDate}</b>`,
+      "✅ Промокод успешно применен, при покупке вам будет в подарок 1 месяц",
       { parse_mode: "HTML" },
     );
-
-    const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
-    if (rawBuyChat) {
-      const admin = resolveAdminChat(rawBuyChat);
-      const userName = ctx.from?.first_name ?? "Аноним";
-      const userTag = ctx.from?.username ? `@${ctx.from.username}` : "без @ника";
-      const oldStr = result.oldExpiredAt
-        ? new Date(result.oldExpiredAt).toLocaleString("ru-RU")
-        : "не было";
-      const newStr = new Date(result.newExpiredAt!).toLocaleString("ru-RU");
-      try {
-        await ctx.api.sendMessage(
-          admin.chatId,
-          `🎟 <b>Промокод активирован</b>\n\n` +
-          `👤 ${escapeHtml(userName)} (${escapeHtml(userTag)})\n` +
-          `🆔 tg_id: <code>${telegramId}</code> | user_id: <code>${user.id}</code>\n` +
-          `🔑 Код: <code>${escapeHtml(rawCode.toUpperCase())}</code>\n` +
-          `📅 Срок: +${result.months} мес.\n` +
-          `🕐 Было: ${oldStr}\n` +
-          `🕑 Стало: ${newStr}`,
-          {
-            parse_mode: "HTML",
-            ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
-          },
-        );
-      } catch {
-        /* best-effort */
-      }
-    }
   } catch (err) {
-    console.error("Ошибка активации промокода:", err);
-    await ctx.reply("⚠️ Произошла ошибка. Попробуй позже.");
+    console.error("Ошибка применения промокода:", err);
+    await ctx.reply("⚠️ Не удалось применить промокод. Попробуй позже.");
   }
 });
 

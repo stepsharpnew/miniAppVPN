@@ -17,6 +17,10 @@ interface SubData {
   expired_at: string | null;
   config: string | null;
   email: string | null;
+  my_referral_code: string | null;
+  referred_by_applied: boolean;
+  referred_by_code: string | null;
+  referral_message: string | null;
 }
 
 function formatExpiry(iso: string): string {
@@ -39,7 +43,8 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   const [sub, setSub] = useState<SubData | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [configCopied, setConfigCopied] = useState(false);
+  const [referralCopied, setReferralCopied] = useState(false);
   const [promoCode, setPromoCode] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
@@ -50,6 +55,7 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
     apiFetch<SubData>("/api/web/subscription")
       .then((data) => {
         setSub(data);
+        setPromoMessage(data.referral_message ?? null);
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
@@ -74,11 +80,19 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   const handleCopyConfig = useCallback(() => {
     if (sub?.config) {
       navigator.clipboard.writeText(sub.config).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        setConfigCopied(true);
+        setTimeout(() => setConfigCopied(false), 2000);
       }).catch(() => {});
     }
   }, [sub?.config]);
+
+  const handleCopyReferralCode = useCallback(() => {
+    if (!sub?.my_referral_code) return;
+    navigator.clipboard.writeText(sub.my_referral_code).then(() => {
+      setReferralCopied(true);
+      setTimeout(() => setReferralCopied(false), 2000);
+    }).catch(() => {});
+  }, [sub?.my_referral_code]);
 
   const handleDownloadConf = useCallback(() => {
     const token = getAccessToken();
@@ -106,27 +120,37 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
 
   const handleApplyPromo = useCallback(async () => {
     const code = promoCode.trim().toUpperCase();
-    if (!code || promoLoading) return;
+    if (!code || promoLoading || sub?.referred_by_applied) return;
 
     setPromoLoading(true);
     setPromoError(null);
     setPromoMessage(null);
 
     try {
-      const data = await apiFetch<{ expired_at?: string | null }>("/api/web/promocode", {
+      const data = await apiFetch<{
+        referral_message?: string | null;
+        my_referral_code?: string | null;
+        referred_by_applied?: boolean;
+        referred_by_code?: string | null;
+      }>("/api/web/promocode", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code }),
       });
 
       setPromoCode("");
-      setPromoMessage("Промокод успешно активирован");
+      setPromoMessage(
+        data.referral_message ??
+          "Промокод успешно применен, при покупке вам будет в подарок 1 месяц",
+      );
       setSub((prev) =>
         prev
           ? {
               ...prev,
-              active: true,
-              expired_at: data.expired_at ?? prev.expired_at,
+              my_referral_code: data.my_referral_code ?? prev.my_referral_code,
+              referred_by_applied: Boolean(data.referred_by_applied),
+              referred_by_code: data.referred_by_code ?? code,
+              referral_message: data.referral_message ?? prev.referral_message,
             }
           : prev,
       );
@@ -139,7 +163,7 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
     } finally {
       setPromoLoading(false);
     }
-  }, [promoCode, promoLoading]);
+  }, [promoCode, promoLoading, sub?.referred_by_applied]);
 
   if (!user) return null;
   const isTelegramLinked =
@@ -183,15 +207,38 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
         <div className={styles.divider} />
 
         <div className={styles.promoBlock}>
-          <div className={styles.sectionHeader}>Промокод</div>
+          <div className={styles.sectionHeader}>Ваш реферальный код</div>
+          <div className={styles.referralCodeCard}>
+            <div className={styles.referralCodeValue}>
+              {sub?.my_referral_code ?? "Загрузка..."}
+            </div>
+            <button
+              type="button"
+              className={styles.secondaryBtn}
+              onClick={handleCopyReferralCode}
+              disabled={!sub?.my_referral_code}
+            >
+              {referralCopied ? "Скопировано" : "Копировать"}
+            </button>
+          </div>
+        </div>
+
+        <div className={styles.divider} />
+
+        <div className={styles.promoBlock}>
+          <div className={styles.sectionHeader}>Ввести чужой рефкод</div>
+          <div className={styles.referralHint}>
+            После покупки вы получите в подарок 1 месяц.
+          </div>
           <div className={styles.promoRow}>
             <input
               type="text"
               value={promoCode}
               onChange={(e) => setPromoCode(e.target.value)}
               className={styles.promoInput}
-              placeholder="Введите промокод"
-              disabled={promoLoading}
+              placeholder="Введите рефкод"
+              disabled={promoLoading || sub?.referred_by_applied}
+              readOnly={sub?.referred_by_applied}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -202,12 +249,17 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
             <button
               type="button"
               className={styles.promoBtn}
-              disabled={!promoCode.trim() || promoLoading}
+              disabled={!promoCode.trim() || promoLoading || sub?.referred_by_applied}
               onClick={() => void handleApplyPromo()}
             >
-              {promoLoading ? "Проверяем..." : "Активировать"}
+              {promoLoading ? "Проверяем..." : sub?.referred_by_applied ? "Применен" : "Применить"}
             </button>
           </div>
+          {sub?.referred_by_applied && sub.referred_by_code ? (
+            <div className={styles.referralHint}>
+              Применен код: <b>{sub.referred_by_code}</b>
+            </div>
+          ) : null}
           {promoMessage ? <div className={styles.promoSuccess}>{promoMessage}</div> : null}
           {promoError ? <div className={styles.promoError}>{promoError}</div> : null}
         </div>
@@ -228,7 +280,7 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
               />
               <div className={styles.configActions}>
                 <button className={styles.copyBtn} onClick={handleCopyConfig}>
-                  {copied ? "✅ Скопировано!" : "📋 Скопировать конфиг"}
+                  {configCopied ? "✅ Скопировано!" : "📋 Скопировать конфиг"}
                 </button>
                 <button className={styles.downloadBtn} onClick={handleDownloadConf}>
                   📥 Скачать .conf

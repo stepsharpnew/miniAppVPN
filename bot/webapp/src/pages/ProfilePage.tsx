@@ -13,6 +13,10 @@ interface SubscriptionInfo {
   is_blocked?: boolean;
   is_vip?: boolean;
   config?: string | null;
+  my_referral_code?: string;
+  referred_by_applied?: boolean;
+  referred_by_code?: string | null;
+  referral_message?: string | null;
 }
 
 function formatExpiry(iso: string): string {
@@ -45,6 +49,9 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const [loaded, setLoaded] = useState(false);
   const [promoCode, setPromoCode] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
+  const [referralCopied, setReferralCopied] = useState(false);
+  const [referralMessage, setReferralMessage] = useState<string | null>(null);
+  const [referralError, setReferralError] = useState<string | null>(null);
   const [showSyncInfo, setShowSyncInfo] = useState(false);
   const [syncChecked, setSyncChecked] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
@@ -60,6 +67,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
         if (!alive) return;
         if (data) {
           setSub(data);
+          setReferralMessage(data.referral_message ?? null);
           if (data.config) saveLocalConfig(data.config);
         } else {
           setSub({ active: false, expired_at: null, config: null });
@@ -144,9 +152,11 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
 
   const handleRedeemPromo = useCallback(async () => {
     const normalizedCode = promoCode.trim().toUpperCase();
-    if (!normalizedCode || promoLoading) return;
+    if (!normalizedCode || promoLoading || sub?.referred_by_applied) return;
 
     setPromoLoading(true);
+    setReferralError(null);
+    setReferralMessage(null);
     try {
       const res = await fetch("/api/promocode", {
         method: "POST",
@@ -162,21 +172,42 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
         throw new Error(data?.error ?? "Не удалось активировать промокод.");
       }
 
-      if (data?.subscription) {
-        setSub(data.subscription);
-        if (data.subscription.config) {
-          saveLocalConfig(data.subscription.config);
-        }
-      }
+      setSub((prev) => (
+        prev
+          ? {
+              ...prev,
+              my_referral_code: data?.my_referral_code ?? prev.my_referral_code,
+              referred_by_applied: Boolean(data?.referred_by_applied),
+              referred_by_code: data?.referred_by_code ?? normalizedCode,
+              referral_message: data?.referral_message ?? prev.referral_message,
+            }
+          : prev
+      ));
       setPromoCode("");
-      WebApp.showAlert(`Промокод активирован. Подписка продлена на ${data?.months ?? 0} мес.`);
+      setReferralMessage(
+        data?.referral_message ??
+          "Промокод успешно применен, при покупке вам будет в подарок 1 месяц",
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Не удалось активировать промокод.";
-      WebApp.showAlert(message);
+      setReferralError(message);
     } finally {
       setPromoLoading(false);
     }
-  }, [promoCode, promoLoading, saveLocalConfig]);
+  }, [promoCode, promoLoading, sub?.referred_by_applied]);
+
+  const handleCopyReferralCode = useCallback(async () => {
+    if (!sub?.my_referral_code) return;
+    try {
+      await navigator.clipboard.writeText(sub.my_referral_code);
+      setReferralCopied(true);
+      window.setTimeout(() => setReferralCopied(false), 2000);
+    } catch {
+      WebApp.showAlert("Не удалось скопировать код.");
+    }
+  }, [sub?.my_referral_code]);
+
+  const referralApplied = Boolean(sub?.referred_by_applied);
 
   return (
     <div className={styles.page}>
@@ -237,23 +268,57 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
         <div className={styles.divider} />
 
         <div className={styles.promoBlock}>
-          <div className={styles.sectionHeader}>Промокод</div>
+          <div className={styles.sectionHeader}>Ваш реферальный код</div>
+          <div className={styles.referralCodeCard}>
+            <div className={styles.referralCodeValue}>
+              {sub?.my_referral_code ?? "Загрузка..."}
+            </div>
+            <button
+              className={styles.secondaryBtn}
+              onClick={handleCopyReferralCode}
+              disabled={!sub?.my_referral_code}
+            >
+              {referralCopied ? "Скопировано" : "Копировать"}
+            </button>
+          </div>
+        </div>
+
+        <div className={styles.divider} />
+
+        <div className={styles.promoBlock}>
+          <div className={styles.sectionHeader}>Ввести чужой рефкод</div>
+          <div className={styles.referralHint}>
+            После покупки вы получите в подарок 1 месяц.
+          </div>
           <div className={styles.promoRow}>
             <input
               className={styles.promoInput}
               value={promoCode}
               onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
-              placeholder="Введите промокод"
+              placeholder="Введите рефкод"
               maxLength={32}
+              readOnly={referralApplied}
+              disabled={promoLoading || referralApplied}
             />
             <button
               className={styles.promoBtn}
               onClick={handleRedeemPromo}
-              disabled={promoLoading || promoCode.trim().length === 0}
+              disabled={promoLoading || promoCode.trim().length === 0 || referralApplied}
             >
-              {promoLoading ? "..." : "Активировать"}
+              {promoLoading ? "..." : referralApplied ? "Применен" : "Применить"}
             </button>
           </div>
+          {referralApplied && sub?.referred_by_code ? (
+            <div className={styles.referralHint}>
+              Применен код: <b>{sub.referred_by_code}</b>
+            </div>
+          ) : null}
+          {referralMessage ? (
+            <div className={styles.promoSuccess}>{referralMessage}</div>
+          ) : null}
+          {referralError ? (
+            <div className={styles.promoError}>{referralError}</div>
+          ) : null}
         </div>
 
         <div className={styles.divider} />

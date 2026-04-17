@@ -37,8 +37,55 @@ export interface UserRow {
   expired_at: string | null;
   vpn_config: string | null;
   created_at: string;
+  referral_code: string | null;
+  referred_by_user_id: string | null;
+  referral_applied_at: string | null;
   is_notificated_d3?: boolean;
   is_notificated_d1?: boolean;
+}
+
+export interface ReferralInfo {
+  my_referral_code: string;
+  referred_by_applied: boolean;
+  referred_by_code: string | null;
+  referral_message: string | null;
+  referred_by_user_id: string | null;
+}
+
+export type ApplyReferralCodeError =
+  | "empty"
+  | "not_found"
+  | "self_referral"
+  | "already_applied";
+
+export interface ApplyReferralCodeResult {
+  ok: boolean;
+  error?: ApplyReferralCodeError;
+  referred_by_user_id?: string;
+  applied_at?: string;
+  referred_by_code?: string;
+  referral_message?: string;
+}
+
+export interface ReferralRewardParty {
+  userId: string;
+  telegramId: number | null;
+  email: string | null;
+  referralCode: string | null;
+}
+
+export interface ReferralRewardResult {
+  applied: boolean;
+  alreadyRewarded: boolean;
+  reason?: "not_referred" | "already_rewarded";
+  paymentId: string;
+  invitedBonusMonths: number;
+  referrerBonusMonths: number;
+  isFirstPaidConversion: boolean;
+  invitedUserId: string;
+  referrerUserId: string | null;
+  invitedUser: ReferralRewardParty | null;
+  referrerUser: ReferralRewardParty | null;
 }
 
 export interface SubscriptionReminderRow {
@@ -46,6 +93,66 @@ export interface SubscriptionReminderRow {
   telegram_id: number;
   expired_at: string;
   telegram_nickname: string | null;
+}
+
+export const REFERRAL_APPLY_SUCCESS_MESSAGE =
+  "Промокод успешно применен, при покупке вам будет в подарок 1 месяц";
+
+const CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const REFERRAL_CODE_LENGTH = 8;
+const REFERRAL_BONUS_MONTHS = 1;
+
+function generateRandomCode(length: number): string {
+  const bytes = crypto.randomBytes(length);
+  return Array.from(bytes)
+    .map((b) => CODE_ALPHABET[b % CODE_ALPHABET.length])
+    .join("");
+}
+
+function generateReferralCode(): string {
+  return generateRandomCode(REFERRAL_CODE_LENGTH);
+}
+
+function isUniqueViolation(error: unknown, constraintName?: string): boolean {
+  if (!error || typeof error !== "object") return false;
+  const pgError = error as { code?: string; constraint?: string };
+  return pgError.code === "23505" && (!constraintName || pgError.constraint === constraintName);
+}
+
+async function getUserReferralCode(userId: string): Promise<string | null> {
+  const { rows } = await getPool().query<{ referral_code: string | null }>(
+    "SELECT referral_code FROM users WHERE id = $1",
+    [userId],
+  );
+  return rows[0]?.referral_code ?? null;
+}
+
+async function ensureUserReferralCodeForMutation(userId: string): Promise<string> {
+  const existingCode = await getUserReferralCode(userId);
+  if (existingCode) return existingCode;
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const code = generateReferralCode();
+    try {
+      const { rows } = await getPool().query<{ referral_code: string }>(
+        `UPDATE users
+         SET referral_code = $2
+         WHERE id = $1
+           AND referral_code IS NULL
+         RETURNING referral_code`,
+        [userId, code],
+      );
+      if (rows[0]?.referral_code) return rows[0].referral_code;
+
+      const currentCode = await getUserReferralCode(userId);
+      if (currentCode) return currentCode;
+    } catch (error) {
+      if (isUniqueViolation(error, "users_referral_code_unique")) continue;
+      throw error;
+    }
+  }
+
+  throw new Error(`Failed to assign referral code for user ${userId}`);
 }
 
 // ── Telegram-flow (существующий функционал бота) ──
@@ -62,23 +169,41 @@ export async function upsertUserSubscription(
   vpnConfig?: string,
   telegramNickname?: string | null,
 ): Promise<UserRow> {
-  const { rows } = await getPool().query<UserRow>(
-    `INSERT INTO users (telegram_id, expired_at, vpn_config, telegram_nickname, auth_source)
-     VALUES ($1, NOW() + make_interval(months => $2), $3, $4, 'telegram')
-     ON CONFLICT (telegram_id) DO UPDATE
-       SET expired_at = CASE
-         WHEN users.expired_at IS NOT NULL AND users.expired_at > NOW()
-           THEN users.expired_at + make_interval(months => $2)
-           ELSE NOW() + make_interval(months => $2)
-       END,
-       vpn_config = COALESCE($3, users.vpn_config),
-       telegram_nickname = COALESCE($4, users.telegram_nickname),
-       is_notificated_d3 = FALSE,
-       is_notificated_d1 = FALSE
-     RETURNING *`,
-    [telegramId, months, vpnConfig ?? null, telegramNickname ?? null],
-  );
-  return rows[0];
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const referralCode = generateReferralCode();
+    try {
+      const { rows } = await getPool().query<UserRow>(
+        `INSERT INTO users (
+           telegram_id,
+           expired_at,
+           vpn_config,
+           telegram_nickname,
+           auth_source,
+           referral_code
+         )
+         VALUES ($1, NOW() + make_interval(months => $2), $3, $4, 'telegram', $5)
+         ON CONFLICT (telegram_id) DO UPDATE
+           SET expired_at = CASE
+             WHEN users.expired_at IS NOT NULL AND users.expired_at > NOW()
+               THEN users.expired_at + make_interval(months => $2)
+               ELSE NOW() + make_interval(months => $2)
+           END,
+           vpn_config = COALESCE($3, users.vpn_config),
+           telegram_nickname = COALESCE($4, users.telegram_nickname),
+           referral_code = COALESCE(users.referral_code, EXCLUDED.referral_code),
+           is_notificated_d3 = FALSE,
+           is_notificated_d1 = FALSE
+         RETURNING *`,
+        [telegramId, months, vpnConfig ?? null, telegramNickname ?? null, referralCode],
+      );
+      return rows[0];
+    } catch (error) {
+      if (isUniqueViolation(error, "users_referral_code_unique")) continue;
+      throw error;
+    }
+  }
+
+  throw new Error(`Failed to upsert telegram user ${telegramId} with referral code`);
 }
 
 export async function getUserSubscription(
@@ -166,13 +291,23 @@ export async function createWebUser(
   email: string,
   passwordHash: string,
 ): Promise<UserRow> {
-  const { rows } = await getPool().query<UserRow>(
-    `INSERT INTO users (email, password_hash, auth_source)
-     VALUES ($1, $2, 'web')
-     RETURNING *`,
-    [email, passwordHash],
-  );
-  return rows[0];
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const referralCode = generateReferralCode();
+    try {
+      const { rows } = await getPool().query<UserRow>(
+        `INSERT INTO users (email, password_hash, auth_source, referral_code)
+         VALUES ($1, $2, 'web', $3)
+         RETURNING *`,
+        [email, passwordHash, referralCode],
+      );
+      return rows[0];
+    } catch (error) {
+      if (isUniqueViolation(error, "users_referral_code_unique")) continue;
+      throw error;
+    }
+  }
+
+  throw new Error(`Failed to create web user for email ${email}`);
 }
 
 /**
@@ -184,21 +319,32 @@ export async function extendSubscriptionById(
   months: number,
   vpnConfig?: string,
 ): Promise<UserRow> {
-  const { rows } = await getPool().query<UserRow>(
-    `UPDATE users
-     SET expired_at = CASE
-       WHEN expired_at IS NOT NULL AND expired_at > NOW()
-         THEN expired_at + make_interval(months => $2)
-         ELSE NOW() + make_interval(months => $2)
-       END,
-       vpn_config = COALESCE($3, vpn_config),
-       is_notificated_d3 = FALSE,
-       is_notificated_d1 = FALSE
-     WHERE id = $1
-     RETURNING *`,
-    [userId, months, vpnConfig ?? null],
-  );
-  return rows[0];
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const referralCode = generateReferralCode();
+    try {
+      const { rows } = await getPool().query<UserRow>(
+        `UPDATE users
+         SET expired_at = CASE
+           WHEN expired_at IS NOT NULL AND expired_at > NOW()
+             THEN expired_at + make_interval(months => $2)
+             ELSE NOW() + make_interval(months => $2)
+           END,
+           vpn_config = COALESCE($3, vpn_config),
+           referral_code = COALESCE(referral_code, $4),
+           is_notificated_d3 = FALSE,
+           is_notificated_d1 = FALSE
+         WHERE id = $1
+         RETURNING *`,
+        [userId, months, vpnConfig ?? null, referralCode],
+      );
+      return rows[0];
+    } catch (error) {
+      if (isUniqueViolation(error, "users_referral_code_unique")) continue;
+      throw error;
+    }
+  }
+
+  throw new Error(`Failed to extend subscription for user ${userId}`);
 }
 
 export async function linkTelegramToUser(
@@ -206,30 +352,52 @@ export async function linkTelegramToUser(
   telegramId: number,
   telegramNickname?: string | null,
 ): Promise<UserRow> {
-  const { rows } = await getPool().query<UserRow>(
-    `UPDATE users
-     SET telegram_id = $2,
-         telegram_nickname = COALESCE($3, telegram_nickname)
-     WHERE id = $1
-     RETURNING *`,
-    [userId, telegramId, telegramNickname ?? null],
-  );
-  return rows[0];
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const referralCode = generateReferralCode();
+    try {
+      const { rows } = await getPool().query<UserRow>(
+        `UPDATE users
+         SET telegram_id = $2,
+             telegram_nickname = COALESCE($3, telegram_nickname),
+             referral_code = COALESCE(referral_code, $4)
+         WHERE id = $1
+         RETURNING *`,
+        [userId, telegramId, telegramNickname ?? null, referralCode],
+      );
+      return rows[0];
+    } catch (error) {
+      if (isUniqueViolation(error, "users_referral_code_unique")) continue;
+      throw error;
+    }
+  }
+
+  throw new Error(`Failed to link Telegram ${telegramId} to user ${userId}`);
 }
 
 export async function createTelegramUserIfMissing(
   telegramId: number,
   telegramNickname?: string | null,
 ): Promise<UserRow> {
-  const { rows } = await getPool().query<UserRow>(
-    `INSERT INTO users (telegram_id, telegram_nickname, auth_source)
-     VALUES ($1, $2, 'telegram')
-     ON CONFLICT (telegram_id) DO UPDATE
-       SET telegram_nickname = COALESCE(users.telegram_nickname, EXCLUDED.telegram_nickname)
-     RETURNING *`,
-    [telegramId, telegramNickname ?? null],
-  );
-  return rows[0];
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const referralCode = generateReferralCode();
+    try {
+      const { rows } = await getPool().query<UserRow>(
+        `INSERT INTO users (telegram_id, telegram_nickname, auth_source, referral_code)
+         VALUES ($1, $2, 'telegram', $3)
+         ON CONFLICT (telegram_id) DO UPDATE
+           SET telegram_nickname = COALESCE(users.telegram_nickname, EXCLUDED.telegram_nickname),
+               referral_code = COALESCE(users.referral_code, EXCLUDED.referral_code)
+         RETURNING *`,
+        [telegramId, telegramNickname ?? null, referralCode],
+      );
+      return rows[0];
+    } catch (error) {
+      if (isUniqueViolation(error, "users_referral_code_unique")) continue;
+      throw error;
+    }
+  }
+
+  throw new Error(`Failed to create or load telegram user ${telegramId}`);
 }
 
 // ── Sync: link email to existing telegram user (new registration) ──
@@ -239,16 +407,27 @@ export async function linkEmailToTelegramUser(
   email: string,
   passwordHash: string,
 ): Promise<UserRow> {
-  const { rows } = await getPool().query<UserRow>(
-    `UPDATE users
-     SET email = $2,
-         password_hash = $3,
-         auth_source = 'both'
-     WHERE telegram_id = $1
-     RETURNING *`,
-    [telegramId, email, passwordHash],
-  );
-  return rows[0];
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const referralCode = generateReferralCode();
+    try {
+      const { rows } = await getPool().query<UserRow>(
+        `UPDATE users
+         SET email = $2,
+             password_hash = $3,
+             auth_source = 'both',
+             referral_code = COALESCE(referral_code, $4)
+         WHERE telegram_id = $1
+         RETURNING *`,
+        [telegramId, email, passwordHash, referralCode],
+      );
+      return rows[0];
+    } catch (error) {
+      if (isUniqueViolation(error, "users_referral_code_unique")) continue;
+      throw error;
+    }
+  }
+
+  throw new Error(`Failed to link email ${email} to telegram user ${telegramId}`);
 }
 
 export async function updateUserVpnConfig(
@@ -263,6 +442,103 @@ export async function updateUserVpnConfig(
     [userId, vpnConfig],
   );
   return rows[0];
+}
+
+function getComparableTimestamp(value: string | null): number | null {
+  return value ? new Date(value).getTime() : null;
+}
+
+function pickDeterministicMergeSource(
+  telegramUser: UserRow,
+  webUser: UserRow,
+): UserRow {
+  const telegramCreatedAt = new Date(telegramUser.created_at).getTime();
+  const webCreatedAt = new Date(webUser.created_at).getTime();
+
+  if (telegramCreatedAt !== webCreatedAt) {
+    return telegramCreatedAt < webCreatedAt ? telegramUser : webUser;
+  }
+
+  return telegramUser.id.localeCompare(webUser.id) <= 0 ? telegramUser : webUser;
+}
+
+function pickMergedReferralAssignment(
+  telegramUser: UserRow,
+  webUser: UserRow,
+): Pick<UserRow, "referred_by_user_id" | "referral_applied_at"> {
+  if (telegramUser.referred_by_user_id && !webUser.referred_by_user_id) {
+    return {
+      referred_by_user_id: telegramUser.referred_by_user_id,
+      referral_applied_at: telegramUser.referral_applied_at,
+    };
+  }
+
+  if (!telegramUser.referred_by_user_id && webUser.referred_by_user_id) {
+    return {
+      referred_by_user_id: webUser.referred_by_user_id,
+      referral_applied_at: webUser.referral_applied_at,
+    };
+  }
+
+  if (!telegramUser.referred_by_user_id && !webUser.referred_by_user_id) {
+    return {
+      referred_by_user_id: null,
+      referral_applied_at: null,
+    };
+  }
+
+  if (telegramUser.referred_by_user_id === webUser.referred_by_user_id) {
+    const telegramAppliedAt = getComparableTimestamp(telegramUser.referral_applied_at);
+    const webAppliedAt = getComparableTimestamp(webUser.referral_applied_at);
+    if (telegramAppliedAt !== null && webAppliedAt !== null) {
+      return telegramAppliedAt <= webAppliedAt
+        ? {
+            referred_by_user_id: telegramUser.referred_by_user_id,
+            referral_applied_at: telegramUser.referral_applied_at,
+          }
+        : {
+            referred_by_user_id: webUser.referred_by_user_id,
+            referral_applied_at: webUser.referral_applied_at,
+          };
+    }
+  }
+
+  const telegramAppliedAt = getComparableTimestamp(telegramUser.referral_applied_at);
+  const webAppliedAt = getComparableTimestamp(webUser.referral_applied_at);
+
+  if (telegramAppliedAt !== null && webAppliedAt !== null && telegramAppliedAt !== webAppliedAt) {
+    return telegramAppliedAt < webAppliedAt
+      ? {
+          referred_by_user_id: telegramUser.referred_by_user_id,
+          referral_applied_at: telegramUser.referral_applied_at,
+        }
+      : {
+          referred_by_user_id: webUser.referred_by_user_id,
+          referral_applied_at: webUser.referral_applied_at,
+        };
+  }
+
+  if (telegramAppliedAt !== null && webAppliedAt === null) {
+    return {
+      referred_by_user_id: telegramUser.referred_by_user_id,
+      referral_applied_at: telegramUser.referral_applied_at,
+    };
+  }
+
+  if (telegramAppliedAt === null && webAppliedAt !== null) {
+    return {
+      referred_by_user_id: webUser.referred_by_user_id,
+      referral_applied_at: webUser.referral_applied_at,
+    };
+  }
+
+  // If timestamps are equal or missing on both sides, prefer the older account,
+  // and finally the lexicographically smaller UUID to keep merges deterministic.
+  const source = pickDeterministicMergeSource(telegramUser, webUser);
+  return {
+    referred_by_user_id: source.referred_by_user_id,
+    referral_applied_at: source.referral_applied_at,
+  };
 }
 
 /**
@@ -310,13 +586,47 @@ export async function mergeAccounts(
     const bestConfig = tgExpiry > webExpiry
       ? (tgUser.vpn_config ?? webUser.vpn_config)
       : (webUser.vpn_config ?? tgUser.vpn_config);
+    const mergedReferral = pickMergedReferralAssignment(tgUser, webUser);
+    const { rows: [referralUsage] } = await client.query<{
+      telegram_code_used: boolean;
+      web_code_used: boolean;
+    }>(
+      `SELECT
+         EXISTS (
+           SELECT 1 FROM users WHERE referred_by_user_id = $1
+         ) OR EXISTS (
+           SELECT 1 FROM referral_rewards WHERE referrer_user_id = $1
+         ) AS telegram_code_used,
+         EXISTS (
+           SELECT 1 FROM users WHERE referred_by_user_id = $2
+         ) OR EXISTS (
+           SELECT 1 FROM referral_rewards WHERE referrer_user_id = $2
+         ) AS web_code_used`,
+      [telegramUserId, webUserId],
+    );
+    const mergedReferralCode = (() => {
+      if (tgUser.referral_code && webUser.referral_code) {
+        if (referralUsage?.telegram_code_used && !referralUsage?.web_code_used) {
+          return tgUser.referral_code;
+        }
+        return webUser.referral_code;
+      }
+      return webUser.referral_code ?? tgUser.referral_code ?? generateReferralCode();
+    })();
+    const transferredReferralCode = mergedReferralCode === tgUser.referral_code
+      ? tgUser.referral_code
+      : null;
 
     // Detach telegram_id from old Telegram-only row first to avoid unique-constraint race.
     await client.query(
       `UPDATE users
-       SET telegram_id = NULL
+       SET telegram_id = NULL,
+           referral_code = CASE
+             WHEN $2 IS NOT NULL THEN NULL
+             ELSE referral_code
+           END
        WHERE id = $1`,
-      [telegramUserId],
+      [telegramUserId, transferredReferralCode],
     );
 
     const { rows: [merged] } = await client.query<UserRow>(
@@ -326,20 +636,44 @@ export async function mergeAccounts(
            auth_source = 'both',
            expired_at = COALESCE($4, expired_at),
            vpn_config = COALESCE($5, vpn_config),
+           referred_by_user_id = $6,
+           referral_applied_at = $7,
+           referral_code = COALESCE(referral_code, $8),
            is_notificated_d3 = FALSE,
            is_notificated_d1 = FALSE
        WHERE id = $1
        RETURNING *`,
-      [webUserId, telegramId, telegramNickname, bestExpiry, bestConfig],
+      [
+        webUserId,
+        telegramId,
+        telegramNickname,
+        bestExpiry,
+        bestConfig,
+        mergedReferral.referred_by_user_id,
+        mergedReferral.referral_applied_at,
+        mergedReferralCode,
+      ],
     );
 
     // Reassign FK references from the old Telegram row to the merged web row before deleting.
+    await client.query(
+      "UPDATE users SET referred_by_user_id = $1 WHERE referred_by_user_id = $2",
+      [webUserId, telegramUserId],
+    );
     await client.query(
       "UPDATE promo_attempts SET user_id = $1 WHERE user_id = $2",
       [webUserId, telegramUserId],
     );
     await client.query(
       "UPDATE promo_codes SET used_by = $1 WHERE used_by = $2",
+      [webUserId, telegramUserId],
+    );
+    await client.query(
+      "UPDATE referral_rewards SET invited_user_id = $1 WHERE invited_user_id = $2",
+      [webUserId, telegramUserId],
+    );
+    await client.query(
+      "UPDATE referral_rewards SET referrer_user_id = $1 WHERE referrer_user_id = $2",
       [webUserId, telegramUserId],
     );
 
@@ -373,6 +707,307 @@ export async function updatePasswordHash(
     "UPDATE users SET password_hash = $1 WHERE id = $2",
     [passwordHash, userId],
   );
+}
+
+async function extendSubscriptionWithClient(
+  client: Pick<Pool, "query">,
+  userId: string,
+  months: number,
+): Promise<void> {
+  await client.query(
+    `UPDATE users
+     SET expired_at = CASE
+       WHEN expired_at IS NOT NULL AND expired_at > NOW()
+         THEN expired_at + make_interval(months => $2)
+         ELSE NOW() + make_interval(months => $2)
+     END,
+     is_notificated_d3 = FALSE,
+     is_notificated_d1 = FALSE
+     WHERE id = $1`,
+    [userId, months],
+  );
+}
+
+function mapReferralParty(
+  user: Pick<UserRow, "id" | "telegram_id" | "email" | "referral_code">,
+): ReferralRewardParty {
+  return {
+    userId: user.id,
+    telegramId: user.telegram_id,
+    email: user.email,
+    referralCode: user.referral_code,
+  };
+}
+
+export async function getOrCreateUserReferralCode(userId: string): Promise<string> {
+  return ensureUserReferralCodeForMutation(userId);
+}
+
+export async function getUserReferralInfo(userId: string): Promise<ReferralInfo> {
+  const myReferralCode = await getOrCreateUserReferralCode(userId);
+  const { rows } = await getPool().query<{
+    referred_by_user_id: string | null;
+    referred_by_code: string | null;
+  }>(
+    `SELECT u.referred_by_user_id, ref.referral_code AS referred_by_code
+     FROM users u
+     LEFT JOIN users ref ON ref.id = u.referred_by_user_id
+     WHERE u.id = $1`,
+    [userId],
+  );
+
+  if (!rows[0]) throw new Error(`User ${userId} not found`);
+
+  return {
+    my_referral_code: myReferralCode,
+    referred_by_applied: rows[0].referred_by_user_id !== null,
+    referred_by_code: rows[0].referred_by_code ?? null,
+    referral_message:
+      rows[0].referred_by_user_id !== null ? REFERRAL_APPLY_SUCCESS_MESSAGE : null,
+    referred_by_user_id: rows[0].referred_by_user_id,
+  };
+}
+
+export async function applyReferralCode(
+  userId: string,
+  rawCode: string,
+): Promise<ApplyReferralCodeResult> {
+  const code = rawCode.trim().toUpperCase();
+  if (!code) {
+    return { ok: false, error: "empty" };
+  }
+
+  const ownReferralCode = await getOrCreateUserReferralCode(userId);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: userRows } = await client.query<UserRow>(
+      `SELECT *
+       FROM users
+       WHERE id = $1
+       FOR UPDATE`,
+      [userId],
+    );
+    const user = userRows[0];
+    if (!user) throw new Error(`User ${userId} not found`);
+
+    if (user.referred_by_user_id) {
+      await client.query("COMMIT");
+      return { ok: false, error: "already_applied" };
+    }
+
+    const { rows: referrerRows } = await client.query<UserRow>(
+      `SELECT *
+       FROM users
+       WHERE referral_code = $1
+       FOR UPDATE`,
+      [code],
+    );
+    const referrer = referrerRows[0];
+    if (!referrer) {
+      await client.query("COMMIT");
+      return { ok: false, error: "not_found" };
+    }
+
+    if (referrer.id === userId || code === ownReferralCode) {
+      await client.query("COMMIT");
+      return { ok: false, error: "self_referral" };
+    }
+
+    const { rows: appliedRows } = await client.query<{
+      referred_by_user_id: string;
+      referral_applied_at: string;
+    }>(
+      `UPDATE users
+       SET referred_by_user_id = $2,
+           referral_applied_at = NOW()
+       WHERE id = $1
+         AND referred_by_user_id IS NULL
+       RETURNING referred_by_user_id, referral_applied_at`,
+      [userId, referrer.id],
+    );
+
+    if (!appliedRows[0]) {
+      await client.query("COMMIT");
+      return { ok: false, error: "already_applied" };
+    }
+
+    await client.query("COMMIT");
+    return {
+      ok: true,
+      referred_by_user_id: appliedRows[0].referred_by_user_id,
+      applied_at: appliedRows[0].referral_applied_at,
+      referred_by_code: referrer.referral_code ?? code,
+      referral_message: REFERRAL_APPLY_SUCCESS_MESSAGE,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function applyReferralRewardsForPayment(
+  paymentId: string,
+  invitedUserId: string,
+): Promise<ReferralRewardResult> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: invitedRows } = await client.query<UserRow>(
+      `SELECT *
+       FROM users
+       WHERE id = $1
+       FOR UPDATE`,
+      [invitedUserId],
+    );
+    const invitedUser = invitedRows[0];
+    if (!invitedUser) throw new Error(`Invited user ${invitedUserId} not found`);
+
+    if (!invitedUser.referred_by_user_id) {
+      await client.query("COMMIT");
+      return {
+        applied: false,
+        alreadyRewarded: false,
+        reason: "not_referred",
+        paymentId,
+        invitedBonusMonths: REFERRAL_BONUS_MONTHS,
+        referrerBonusMonths: REFERRAL_BONUS_MONTHS,
+        isFirstPaidConversion: false,
+        invitedUserId,
+        referrerUserId: null,
+        invitedUser: mapReferralParty(invitedUser),
+        referrerUser: null,
+      };
+    }
+
+    const { rows: referrerRows } = await client.query<UserRow>(
+      `SELECT *
+       FROM users
+       WHERE id = $1
+       FOR UPDATE`,
+      [invitedUser.referred_by_user_id],
+    );
+    const referrerUser = referrerRows[0];
+    if (!referrerUser) {
+      await client.query("COMMIT");
+      return {
+        applied: false,
+        alreadyRewarded: false,
+        reason: "not_referred",
+        paymentId,
+        invitedBonusMonths: REFERRAL_BONUS_MONTHS,
+        referrerBonusMonths: REFERRAL_BONUS_MONTHS,
+        isFirstPaidConversion: false,
+        invitedUserId,
+        referrerUserId: null,
+        invitedUser: mapReferralParty(invitedUser),
+        referrerUser: null,
+      };
+    }
+
+    const { rows: insertedRows } = await client.query<{
+      invited_bonus_months: number;
+      referrer_bonus_months: number;
+      is_first_paid_conversion: boolean;
+    }>(
+      `WITH prior_reward AS (
+         SELECT EXISTS (
+           SELECT 1
+           FROM referral_rewards
+           WHERE invited_user_id = $2
+             AND referrer_user_id = $3
+         ) AS has_prior_reward
+       ),
+       inserted AS (
+         INSERT INTO referral_rewards (
+           payment_id,
+           invited_user_id,
+           referrer_user_id,
+           invited_bonus_months,
+           referrer_bonus_months,
+           is_first_paid_conversion
+         )
+         SELECT
+           $1,
+           $2,
+           $3,
+           $4,
+           $4,
+           NOT has_prior_reward
+         FROM prior_reward
+         ON CONFLICT (payment_id) DO NOTHING
+         RETURNING invited_bonus_months, referrer_bonus_months, is_first_paid_conversion
+       )
+       SELECT * FROM inserted`,
+      [paymentId, invitedUserId, referrerUser.id, REFERRAL_BONUS_MONTHS],
+    );
+
+    if (!insertedRows[0]) {
+      const { rows: existingRows } = await client.query<{
+        invited_bonus_months: number;
+        referrer_bonus_months: number;
+        is_first_paid_conversion: boolean;
+      }>(
+        `SELECT invited_bonus_months, referrer_bonus_months, is_first_paid_conversion
+         FROM referral_rewards
+         WHERE payment_id = $1`,
+        [paymentId],
+      );
+
+      await client.query("COMMIT");
+      return {
+        applied: false,
+        alreadyRewarded: true,
+        reason: "already_rewarded",
+        paymentId,
+        invitedBonusMonths:
+          existingRows[0]?.invited_bonus_months ?? REFERRAL_BONUS_MONTHS,
+        referrerBonusMonths:
+          existingRows[0]?.referrer_bonus_months ?? REFERRAL_BONUS_MONTHS,
+        isFirstPaidConversion: existingRows[0]?.is_first_paid_conversion ?? false,
+        invitedUserId,
+        referrerUserId: referrerUser.id,
+        invitedUser: mapReferralParty(invitedUser),
+        referrerUser: mapReferralParty(referrerUser),
+      };
+    }
+
+    // Keep reward insert and month extensions in one transaction so duplicate
+    // webhooks/status polls cannot ever grant the same referral bonus twice.
+    await extendSubscriptionWithClient(
+      client,
+      invitedUser.id,
+      insertedRows[0].invited_bonus_months,
+    );
+    await extendSubscriptionWithClient(
+      client,
+      referrerUser.id,
+      insertedRows[0].referrer_bonus_months,
+    );
+
+    await client.query("COMMIT");
+    return {
+      applied: true,
+      alreadyRewarded: false,
+      paymentId,
+      invitedBonusMonths: insertedRows[0].invited_bonus_months,
+      referrerBonusMonths: insertedRows[0].referrer_bonus_months,
+      isFirstPaidConversion: insertedRows[0].is_first_paid_conversion,
+      invitedUserId,
+      referrerUserId: referrerUser.id,
+      invitedUser: mapReferralParty(invitedUser),
+      referrerUser: mapReferralParty(referrerUser),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 // ── Payment idempotency ──
@@ -436,17 +1071,9 @@ export async function incrementServerUserCount(
 
 // ── Promo codes ──
 
-const PROMO_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const PROMO_LENGTH = 8;
 const PROMO_RATE_LIMIT = 5;
 const PROMO_WINDOW_INTERVAL = "1 hour";
-
-function generateCode(): string {
-  const bytes = crypto.randomBytes(PROMO_LENGTH);
-  return Array.from(bytes)
-    .map((b) => PROMO_ALPHABET[b % PROMO_ALPHABET.length])
-    .join("");
-}
 
 export async function generatePromoCodes(
   count: number,
@@ -458,7 +1085,7 @@ export async function generatePromoCodes(
     let code: string;
     let inserted = false;
     while (!inserted) {
-      code = generateCode();
+      code = generateRandomCode(PROMO_LENGTH);
       const { rowCount } = await pool.query(
         `INSERT INTO promo_codes (code, months) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
         [code, months],

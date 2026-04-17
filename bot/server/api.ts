@@ -25,17 +25,20 @@ import {
   savePendingPayment,
 } from "./payment-store";
 import {
+  applyReferralCode,
+  applyReferralRewardsForPayment,
+  createTelegramUserIfMissing,
+  getUserReferralInfo,
   type ServerRow,
+  type UserRow,
   getAllEnabledServers,
   getRandomEnabledServer,
   getUserSubscription,
   incrementServerUserCount,
   isPaymentProcessed,
   markPaymentProcessed,
-  redeemPromoCode,
   upsertUserSubscription,
 } from "./db";
-import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 import { mountWebAuthRoutes } from "./web-auth";
 import { mountSyncRoutes } from "./sync-routes";
 import { PLATFORM_BOT_TEXTS, type PlatformId } from "../shared/platforms";
@@ -43,6 +46,7 @@ import {
   getSupportMessages,
   sendSupportTextMessage,
 } from "./support-service";
+import { sendReferralRewardNotifications } from "./referral-notifications";
 
 function getServerBaseUrl(server: ServerRow): string {
   const raw = server.domain_server_name;
@@ -66,9 +70,19 @@ function normalizeTelegramNickname(username?: string): string | null {
   return trimmed;
 }
 
-function formatRuDateTime(value: string | null | undefined): string {
-  if (!value) return "не было";
-  return new Date(value).toLocaleString("ru-RU");
+function mapReferralApplyError(error?: string): { status: number; message: string } {
+  switch (error) {
+    case "empty":
+      return { status: 400, message: "Промокод обязателен" };
+    case "not_found":
+      return { status: 400, message: "Код не найден" };
+    case "self_referral":
+      return { status: 400, message: "Нельзя применить собственный код" };
+    case "already_applied":
+      return { status: 400, message: "Код уже применен ранее" };
+    default:
+      return { status: 500, message: "Не удалось применить промокод" };
+  }
 }
 
 /** @MemeVPNbest — подписка на канал; пусто = не требовать (удобно для локальной разработки). */
@@ -405,11 +419,11 @@ export function createApiServer(api: Api, botToken: string) {
   app.get("/api/subscription", auth, requireChannelSubscription, async (req, res) => {
     const user = getUser(req);
     try {
-      const row = await getUserSubscription(user.id);
-      if (!row) {
-        res.json({ active: false, expired_at: null, config: null });
-        return;
-      }
+      const row = await createTelegramUserIfMissing(
+        user.id,
+        normalizeTelegramNickname(user.username),
+      );
+      const referralInfo = await getUserReferralInfo(row.id);
       const expiredAt = row.expired_at ? new Date(row.expired_at) : null;
       const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
       res.json({
@@ -419,6 +433,10 @@ export function createApiServer(api: Api, botToken: string) {
         telegram_nickname: row.telegram_nickname,
         config: active ? row.vpn_config : null,
         created_at: row.created_at,
+        my_referral_code: referralInfo.my_referral_code,
+        referred_by_applied: referralInfo.referred_by_applied,
+        referred_by_code: referralInfo.referred_by_code,
+        referral_message: referralInfo.referral_message,
       });
     } catch (err) {
       console.error("Subscription check error:", err);
@@ -435,80 +453,29 @@ export function createApiServer(api: Api, botToken: string) {
     }
 
     try {
-      let dbUser = await getUserSubscription(tgUser.id);
-      if (!dbUser) {
-        dbUser = await upsertUserSubscription(
-          tgUser.id,
-          0,
-          undefined,
-          normalizeTelegramNickname(tgUser.username),
-        );
-      }
-
-      const result = await redeemPromoCode(dbUser.id, code);
+      const dbUser = await createTelegramUserIfMissing(
+        tgUser.id,
+        normalizeTelegramNickname(tgUser.username),
+      );
+      const result = await applyReferralCode(dbUser.id, code);
       if (!result.ok) {
-        if (result.error === "rate_limited") {
-          res.status(429).json({ error: "Слишком много неверных попыток. Попробуйте через час." });
-          return;
-        }
-
-        res.status(400).json({ error: "Промокод недействителен или уже использован" });
+        const mapped = mapReferralApplyError(result.error);
+        res.status(mapped.status).json({ error: mapped.message });
         return;
       }
 
-      dbUser = await getUserSubscription(tgUser.id);
-      if (!dbUser) {
-        throw new Error(`Telegram user not found after promo redemption: ${tgUser.id}`);
-      }
-      await syncVpnForPromoRedemption(
-        dbUser,
-        result.months!,
-        getTelegramClientName(tgUser.id, tgUser.username),
-      );
-
-      const updated = await getUserSubscription(tgUser.id);
-      const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
-      if (rawBuyChat) {
-        const admin = resolveAdminChat(rawBuyChat);
-        const userTag = tgUser.username ? `@${tgUser.username}` : "без @ника";
-        try {
-          await api.sendMessage(
-            admin.chatId,
-            `🎟 <b>Промокод активирован</b>\n\n` +
-              `👤 ${escapeHtml(tgUser.first_name)} (${escapeHtml(userTag)})\n` +
-              `🆔 tg_id: <code>${tgUser.id}</code> | user_id: <code>${dbUser.id}</code>\n` +
-              `🔑 Код: <code>${escapeHtml(code.toUpperCase())}</code>\n` +
-              `📅 Срок: +${result.months} мес.\n` +
-              `🕐 Было: ${escapeHtml(formatRuDateTime(result.oldExpiredAt))}\n` +
-              `🕑 Стало: ${escapeHtml(formatRuDateTime(result.newExpiredAt))}`,
-            {
-              parse_mode: "HTML",
-              ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
-            },
-          );
-        } catch {
-          /* admin notification best-effort */
-        }
-      }
+      const referralInfo = await getUserReferralInfo(dbUser.id);
 
       res.json({
         ok: true,
-        months: result.months,
-        expired_at: result.newExpiredAt,
-        subscription: updated
-          ? {
-              active: !!updated.expired_at && new Date(updated.expired_at).getTime() > Date.now(),
-              expired_at: updated.expired_at,
-              is_blocked: updated.is_blocked,
-              telegram_nickname: updated.telegram_nickname,
-              config: updated.vpn_config,
-              created_at: updated.created_at,
-            }
-          : null,
+        referral_message: result.referral_message,
+        my_referral_code: referralInfo.my_referral_code,
+        referred_by_applied: referralInfo.referred_by_applied,
+        referred_by_code: referralInfo.referred_by_code,
       });
     } catch (err) {
-      console.error("Promo redeem error:", err);
-      res.status(500).json({ error: "Не удалось активировать промокод" });
+      console.error("Referral apply error:", err);
+      res.status(500).json({ error: "Не удалось применить промокод" });
     }
   });
 
@@ -692,8 +659,9 @@ export function createApiServer(api: Api, botToken: string) {
 
     markPaymentSucceeded(paymentId, config);
 
+    let paidUser: UserRow | null = null;
     try {
-      await upsertUserSubscription(
+      paidUser = await upsertUserSubscription(
         userId,
         pending.months,
         config,
@@ -701,6 +669,17 @@ export function createApiServer(api: Api, botToken: string) {
       );
     } catch (err) {
       console.error("DB upsert after payment failed:", err);
+    }
+
+    if (paidUser) {
+      try {
+        const referralReward = await applyReferralRewardsForPayment(paymentId, paidUser.id);
+        if (referralReward.applied) {
+          await sendReferralRewardNotifications(api, referralReward);
+        }
+      } catch (err) {
+        console.error("Referral rewards after payment failed:", err);
+      }
     }
 
     const plan = PRICING.find((p) => p.months === pending.months);
@@ -903,8 +882,9 @@ export function createApiServer(api: Api, botToken: string) {
       }
     }
 
+    let paidUser: UserRow | null = null;
     try {
-      await upsertUserSubscription(
+      paidUser = await upsertUserSubscription(
         userId,
         months,
         config,
@@ -912,6 +892,17 @@ export function createApiServer(api: Api, botToken: string) {
       );
     } catch (err) {
       console.error("DB upsert after webhook payment failed:", err);
+    }
+
+    if (paidUser) {
+      try {
+        const referralReward = await applyReferralRewardsForPayment(paymentId, paidUser.id);
+        if (referralReward.applied) {
+          await sendReferralRewardNotifications(api, referralReward);
+        }
+      } catch (err) {
+        console.error("Referral rewards after webhook payment failed:", err);
+      }
     }
 
     const plan = PRICING.find((p) => p.months === months);

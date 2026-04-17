@@ -4,6 +4,8 @@ import bcrypt from "bcryptjs";
 import express from "express";
 import { type Api } from "grammy";
 import {
+  applyReferralCode,
+  applyReferralRewardsForPayment,
   getUserByEmail,
   getUserById,
   createWebUser,
@@ -11,10 +13,10 @@ import {
   extendSubscriptionById,
   getRandomEnabledServer,
   getAllEnabledServers,
+  getUserReferralInfo,
   incrementServerUserCount,
   isPaymentProcessed,
   markPaymentProcessed,
-  redeemPromoCode,
   updatePasswordHash,
   type UserRow,
   type ServerRow,
@@ -33,11 +35,11 @@ import {
   savePendingPayment,
 } from "./payment-store";
 import { PRICING, type PaymentMetadata } from "../shared/plans";
-import { BRAND_NAME, escapeHtml, PAYMENT_ADMIN_NOTIFY } from "../shared/texts";
+import { BRAND_NAME, PAYMENT_ADMIN_NOTIFY } from "../shared/texts";
 import { resolveAdminChat } from "./store";
 import { sendPasswordResetEmail } from "./email-service";
 import { createOtp, verifyOtp, consumeVerifyToken } from "./otp-store";
-import { getWebClientName, syncVpnForPromoRedemption } from "./promo-vpn";
+import { sendReferralRewardNotifications } from "./referral-notifications";
 
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "30d";
@@ -115,9 +117,19 @@ function getServerBaseUrl(server: ServerRow): string {
   return raw.replace(/\/+$/, "");
 }
 
-function formatRuDateTime(value: string | null | undefined): string {
-  if (!value) return "не было";
-  return new Date(value).toLocaleString("ru-RU");
+function mapReferralApplyError(error?: string): { status: number; message: string } {
+  switch (error) {
+    case "empty":
+      return { status: 400, message: "Промокод обязателен" };
+    case "not_found":
+      return { status: 400, message: "Код не найден" };
+    case "self_referral":
+      return { status: 400, message: "Нельзя применить собственный код" };
+    case "already_applied":
+      return { status: 400, message: "Код уже применен ранее" };
+    default:
+      return { status: 500, message: "Не удалось применить промокод" };
+  }
 }
 
 async function isTelegramSyncedWebUser(userId: string): Promise<boolean> {
@@ -181,10 +193,22 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
 
   markPaymentSucceeded(paymentId, config);
 
+  let paidUser: UserRow | null = null;
   try {
-    await extendSubscriptionById(userId, pending.months, config);
+    paidUser = await extendSubscriptionById(userId, pending.months, config);
   } catch (err) {
     console.error("DB upsert after web payment failed:", err);
+  }
+
+  if (paidUser && api) {
+    try {
+      const referralReward = await applyReferralRewardsForPayment(paymentId, paidUser.id);
+      if (referralReward.applied) {
+        await sendReferralRewardNotifications(api, referralReward);
+      }
+    } catch (err) {
+      console.error("Referral rewards after web payment failed:", err);
+    }
   }
 
   const plan = PRICING.find((p) => p.months === pending.months);
@@ -350,6 +374,7 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       res.status(404).json({ error: "Пользователь не найден" });
       return;
     }
+    const referralInfo = await getUserReferralInfo(user.id);
     const expiredAt = user.expired_at ? new Date(user.expired_at) : null;
     const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
     res.json({
@@ -359,6 +384,10 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       config: active ? user.vpn_config : null,
       created_at: user.created_at,
       email: user.email,
+      my_referral_code: referralInfo.my_referral_code,
+      referred_by_applied: referralInfo.referred_by_applied,
+      referred_by_code: referralInfo.referred_by_code,
+      referral_message: referralInfo.referral_message,
     });
   });
 
@@ -394,62 +423,26 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     }
 
     try {
-      const result = await redeemPromoCode(user.id, code);
+      const result = await applyReferralCode(user.id, code);
 
       if (!result.ok) {
-        if (result.error === "rate_limited") {
-          res.status(429).json({ error: "Слишком много неверных попыток. Попробуйте через час." });
-          return;
-        }
-
-        res.status(400).json({ error: "Промокод недействителен или уже использован" });
+        const mapped = mapReferralApplyError(result.error);
+        res.status(mapped.status).json({ error: mapped.message });
         return;
       }
 
-      const redeemedUser = await getUserById(user.id);
-      if (!redeemedUser) {
-        throw new Error(`Web user not found after promo redemption: ${user.id}`);
-      }
-      await syncVpnForPromoRedemption(
-        redeemedUser,
-        result.months!,
-        getWebClientName(redeemedUser),
-      );
-
-      const updatedUser = await getUserById(user.id);
-      const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
-      if (api && rawBuyChat) {
-        const admin = resolveAdminChat(rawBuyChat);
-        const identity = user.email ? `email:${user.email}` : "без email";
-        try {
-          await api.sendMessage(
-            admin.chatId,
-            `🎟 <b>Промокод активирован</b>\n\n` +
-              `👤 ${escapeHtml(user.email ?? "Веб-пользователь")} (${escapeHtml(identity)})\n` +
-              `🆔 user_id: <code>${user.id}</code>\n` +
-              `🔑 Код: <code>${escapeHtml(code.toUpperCase())}</code>\n` +
-              `📅 Срок: +${result.months} мес.\n` +
-              `🕐 Было: ${escapeHtml(formatRuDateTime(result.oldExpiredAt))}\n` +
-              `🕑 Стало: ${escapeHtml(formatRuDateTime(result.newExpiredAt))}`,
-            {
-              parse_mode: "HTML",
-              ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
-            },
-          );
-        } catch {
-          /* admin notification best-effort */
-        }
-      }
+      const referralInfo = await getUserReferralInfo(user.id);
 
       res.json({
         ok: true,
-        months: result.months,
-        expired_at: result.newExpiredAt,
-        user: updatedUser ? sanitizeUser(updatedUser) : undefined,
+        referral_message: result.referral_message,
+        my_referral_code: referralInfo.my_referral_code,
+        referred_by_applied: referralInfo.referred_by_applied,
+        referred_by_code: referralInfo.referred_by_code,
       });
     } catch (err) {
-      console.error("Redeem web promocode failed:", err);
-      res.status(500).json({ error: "Не удалось активировать промокод" });
+      console.error("Apply web referral code failed:", err);
+      res.status(500).json({ error: "Не удалось применить промокод" });
     }
   });
 
