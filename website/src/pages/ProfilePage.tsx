@@ -6,6 +6,9 @@ import { BRAND_NAME } from "../data/plans";
 import { StatusBadge } from "../components/StatusBadge";
 import styles from "./ProfilePage.module.css";
 
+const REFERRAL_INVITER_SUCCESS =
+  "Промокод успешно применен, при покупке вам будет в подарок 1 месяц";
+
 interface ProfilePageProps {
   user: WebUser | null;
   onLogout: () => void;
@@ -47,13 +50,16 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
+  const [inviterCode, setInviterCode] = useState("");
+  const [inviterLoading, setInviterLoading] = useState(false);
+  const [inviterMessage, setInviterMessage] = useState<string | null>(null);
+  const [inviterError, setInviterError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
     apiFetch<SubData>("/api/web/subscription")
       .then((data) => {
         setSub(data);
-        setPromoMessage(data.referral_message ?? null);
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
@@ -118,12 +124,9 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
 
     try {
       const data = await apiFetch<{
-        kind?: "gift" | "referral";
+        kind?: "gift";
         months?: number;
         subscription?: SubData;
-        referral_message?: string | null;
-        referred_by_applied?: boolean;
-        referred_by_code?: string | null;
       }>("/api/web/promocode", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -140,20 +143,7 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
         return;
       }
 
-      setPromoMessage(
-        data.referral_message ??
-          "Промокод успешно применен, при покупке вам будет в подарок 1 месяц",
-      );
-      setSub((prev) =>
-        prev
-          ? {
-              ...prev,
-              referred_by_applied: Boolean(data.referred_by_applied),
-              referred_by_code: data.referred_by_code ?? code,
-              referral_message: data.referral_message ?? prev.referral_message,
-            }
-          : prev,
-      );
+      throw new Error("Не удалось активировать промокод");
     } catch (err) {
       const message =
         err instanceof Error && err.message
@@ -164,6 +154,48 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
       setPromoLoading(false);
     }
   }, [promoCode, promoLoading]);
+
+  const handleApplyInviterReferral = useCallback(async () => {
+    const code = inviterCode.trim().toUpperCase();
+    if (!code || inviterLoading || sub?.referred_by_applied) return;
+
+    setInviterLoading(true);
+    setInviterError(null);
+    setInviterMessage(null);
+
+    try {
+      const data = await apiFetch<{
+        referral_message?: string | null;
+        referred_by_applied?: boolean;
+        referred_by_code?: string | null;
+      }>("/api/web/referral-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+
+      setInviterCode("");
+      setSub((prev) =>
+        prev
+          ? {
+              ...prev,
+              referred_by_applied: Boolean(data.referred_by_applied),
+              referred_by_code: data.referred_by_code ?? code,
+              referral_message: data.referral_message ?? prev.referral_message,
+            }
+          : prev,
+      );
+      setInviterMessage(data.referral_message ?? REFERRAL_INVITER_SUCCESS);
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : "Не удалось применить реферальный код";
+      setInviterError(message);
+    } finally {
+      setInviterLoading(false);
+    }
+  }, [inviterCode, inviterLoading, sub?.referred_by_applied]);
 
   if (!user) return null;
   const isTelegramLinked =
@@ -209,8 +241,7 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
         <div className={styles.promoBlock}>
           <div className={styles.sectionHeader}>Промокод</div>
           <div className={styles.referralHint}>
-            Подарочный промокод продлевает подписку сразу. Реферальный код — бонусный месяц после
-            оплаты.
+            Сюда только подарочный промокод — подписка продлится сразу после активации.
           </div>
           <div className={styles.promoRow}>
             <input
@@ -236,13 +267,56 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
               {promoLoading ? "Проверяем..." : "Применить"}
             </button>
           </div>
-          {sub?.referred_by_applied && sub.referred_by_code ? (
-            <div className={styles.referralHint}>
-              Применен код: <b>{sub.referred_by_code}</b>
-            </div>
-          ) : null}
           {promoMessage ? <div className={styles.promoSuccess}>{promoMessage}</div> : null}
           {promoError ? <div className={styles.promoError}>{promoError}</div> : null}
+        </div>
+
+        <div className={styles.divider} />
+
+        <div className={styles.promoBlock}>
+          <div className={styles.sectionHeader}>Реферальный код</div>
+          <div className={styles.referralHint}>
+            Вводится один раз. После успешной оплаты по подписке вам и пригласившему начислится по 1
+            месяцу.
+          </div>
+          <div className={styles.promoRow}>
+            <input
+              type="text"
+              value={inviterCode}
+              onChange={(e) => setInviterCode(e.target.value.toUpperCase())}
+              className={styles.promoInput}
+              placeholder="Реферальный код"
+              disabled={inviterLoading || sub?.referred_by_applied}
+              readOnly={sub?.referred_by_applied}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleApplyInviterReferral();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className={styles.promoBtn}
+              disabled={
+                !inviterCode.trim() || inviterLoading || Boolean(sub?.referred_by_applied)
+              }
+              onClick={() => void handleApplyInviterReferral()}
+            >
+              {inviterLoading
+                ? "Проверяем..."
+                : sub?.referred_by_applied
+                  ? "Уже применён"
+                  : "Применить"}
+            </button>
+          </div>
+          {sub?.referred_by_applied && sub.referred_by_code ? (
+            <div className={styles.referralHint}>
+              Применён код: <b>{sub.referred_by_code}</b>
+            </div>
+          ) : null}
+          {inviterMessage ? <div className={styles.promoSuccess}>{inviterMessage}</div> : null}
+          {inviterError ? <div className={styles.promoError}>{inviterError}</div> : null}
         </div>
 
         <div className={styles.divider} />

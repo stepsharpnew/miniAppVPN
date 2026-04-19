@@ -2,6 +2,9 @@ import WebApp from "@twa-dev/sdk";
 import QRCode from "qrcode";
 import { useCallback, useEffect, useState } from "react";
 import { BRAND_NAME } from "../../../shared/texts";
+
+const REFERRAL_INVITER_SUCCESS =
+  "Промокод успешно применен, при покупке вам будет в подарок 1 месяц";
 import { StatusBadge } from "../components/StatusBadge";
 import { useTelegramUser } from "../hooks/useTelegramUser";
 import { useVpnConfig } from "../hooks/useVpnConfig";
@@ -49,9 +52,13 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const [loaded, setLoaded] = useState(false);
   const [promoCode, setPromoCode] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
+  const [giftPromoMessage, setGiftPromoMessage] = useState<string | null>(null);
+  const [giftPromoError, setGiftPromoError] = useState<string | null>(null);
+  const [inviterCode, setInviterCode] = useState("");
+  const [inviterLoading, setInviterLoading] = useState(false);
+  const [inviterMessage, setInviterMessage] = useState<string | null>(null);
+  const [inviterError, setInviterError] = useState<string | null>(null);
   const [referralCopied, setReferralCopied] = useState(false);
-  const [referralMessage, setReferralMessage] = useState<string | null>(null);
-  const [referralError, setReferralError] = useState<string | null>(null);
   const [showSyncInfo, setShowSyncInfo] = useState(false);
   const [syncChecked, setSyncChecked] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
@@ -67,7 +74,6 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
         if (!alive) return;
         if (data) {
           setSub(data);
-          setReferralMessage(data.referral_message ?? null);
           if (data.config) saveLocalConfig(data.config);
         } else {
           setSub({ active: false, expired_at: null, config: null });
@@ -155,8 +161,8 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
     if (!normalizedCode || promoLoading) return;
 
     setPromoLoading(true);
-    setReferralError(null);
-    setReferralMessage(null);
+    setGiftPromoError(null);
+    setGiftPromoMessage(null);
     try {
       const res = await fetch("/api/promocode", {
         method: "POST",
@@ -193,12 +199,44 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
           referral_message: s.referral_message ?? null,
         });
         if (s.config) saveLocalConfig(s.config);
-        WebApp.showAlert(
+        setGiftPromoMessage(
           `Подарочный промокод активирован. Подписка продлена на ${data.months ?? 0} мес.`,
         );
         return;
       }
 
+      throw new Error("Не удалось активировать промокод.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Не удалось активировать промокод.";
+      setGiftPromoError(message);
+    } finally {
+      setPromoLoading(false);
+    }
+  }, [promoCode, promoLoading, saveLocalConfig]);
+
+  const handleApplyInviterReferral = useCallback(async () => {
+    const normalizedCode = inviterCode.trim().toUpperCase();
+    if (!normalizedCode || inviterLoading || sub?.referred_by_applied) return;
+
+    setInviterLoading(true);
+    setInviterError(null);
+    setInviterMessage(null);
+    try {
+      const res = await fetch("/api/referral-code", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": WebApp.initData,
+        },
+        body: JSON.stringify({ code: normalizedCode }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error ?? "Не удалось применить реферальный код.");
+      }
+
+      setInviterCode("");
       setSub((prev) =>
         prev
           ? {
@@ -210,17 +248,15 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
             }
           : prev,
       );
-      setReferralMessage(
-        data?.referral_message ??
-          "Промокод успешно применен, при покупке вам будет в подарок 1 месяц",
-      );
+      setInviterMessage(data?.referral_message ?? REFERRAL_INVITER_SUCCESS);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Не удалось активировать промокод.";
-      setReferralError(message);
+      const message =
+        err instanceof Error ? err.message : "Не удалось применить реферальный код.";
+      setInviterError(message);
     } finally {
-      setPromoLoading(false);
+      setInviterLoading(false);
     }
-  }, [promoCode, promoLoading, saveLocalConfig]);
+  }, [inviterCode, inviterLoading, sub?.referred_by_applied]);
 
   const handleCopyReferralCode = useCallback(async () => {
     if (!sub?.my_referral_code) return;
@@ -314,8 +350,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
         <div className={styles.promoBlock}>
           <div className={styles.sectionHeader}>Промокод</div>
           <div className={styles.referralHint}>
-            Подарочный промокод продлевает подписку сразу. Реферальный код — бонусный месяц после
-            оплаты.
+            Сюда только подарочный промокод — подписка продлится сразу после активации.
           </div>
           <div className={styles.promoRow}>
             <input
@@ -334,16 +369,52 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
               {promoLoading ? "..." : "Применить"}
             </button>
           </div>
+          {giftPromoMessage ? (
+            <div className={styles.promoSuccess}>{giftPromoMessage}</div>
+          ) : null}
+          {giftPromoError ? (
+            <div className={styles.promoError}>{giftPromoError}</div>
+          ) : null}
+        </div>
+
+        <div className={styles.divider} />
+
+        <div className={styles.promoBlock}>
+          <div className={styles.sectionHeader}>Реферальный код</div>
+          <div className={styles.referralHint}>
+            Вводится один раз. После успешной оплаты по подписке вам и пригласившему начислится по 1
+            месяцу.
+          </div>
+          <div className={styles.promoRow}>
+            <input
+              className={styles.promoInput}
+              value={inviterCode}
+              onChange={(e) => setInviterCode(e.target.value.toUpperCase())}
+              placeholder="Реферальный код"
+              maxLength={32}
+              readOnly={referralApplied}
+              disabled={inviterLoading || referralApplied}
+            />
+            <button
+              className={styles.promoBtn}
+              onClick={handleApplyInviterReferral}
+              disabled={
+                inviterLoading || inviterCode.trim().length === 0 || referralApplied
+              }
+            >
+              {inviterLoading ? "..." : referralApplied ? "Уже применён" : "Применить"}
+            </button>
+          </div>
           {referralApplied && sub?.referred_by_code ? (
             <div className={styles.referralHint}>
-              Применен код: <b>{sub.referred_by_code}</b>
+              Применён код: <b>{sub.referred_by_code}</b>
             </div>
           ) : null}
-          {referralMessage ? (
-            <div className={styles.promoSuccess}>{referralMessage}</div>
+          {inviterMessage ? (
+            <div className={styles.promoSuccess}>{inviterMessage}</div>
           ) : null}
-          {referralError ? (
-            <div className={styles.promoError}>{referralError}</div>
+          {inviterError ? (
+            <div className={styles.promoError}>{inviterError}</div>
           ) : null}
         </div>
 

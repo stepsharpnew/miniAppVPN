@@ -88,14 +88,14 @@ function mapReferralApplyError(error?: string): { status: number; message: strin
   }
 }
 
-function mapPromoRedeemError(error?: string): { status: number; message: string } | null {
+function mapPromoRedeemError(error?: string): { status: number; message: string } {
   switch (error) {
     case "rate_limited":
       return { status: 429, message: "Слишком много попыток. Попробуйте позже." };
     case "already_used":
       return { status: 400, message: "Этот подарочный промокод уже использован" };
     case "not_found":
-      return null;
+      return { status: 400, message: "Промокод не найден" };
     default:
       return { status: 500, message: "Не удалось активировать промокод" };
   }
@@ -507,11 +507,26 @@ export function createApiServer(api: Api, botToken: string) {
       }
 
       const promoErr = mapPromoRedeemError(promo.error);
-      if (promoErr) {
-        res.status(promoErr.status).json({ error: promoErr.message });
-        return;
-      }
+      res.status(promoErr.status).json({ error: promoErr.message });
+    } catch (err) {
+      console.error("Promocode apply error:", err);
+      res.status(500).json({ error: "Не удалось применить промокод" });
+    }
+  });
 
+  app.post("/api/referral-code", auth, requireChannelSubscription, async (req, res) => {
+    const tgUser = getUser(req);
+    const code = typeof req.body?.code === "string" ? req.body.code.trim().toUpperCase() : "";
+    if (!code) {
+      res.status(400).json({ error: "Введите реферальный код" });
+      return;
+    }
+
+    try {
+      const dbUser = await createTelegramUserIfMissing(
+        tgUser.id,
+        normalizeTelegramNickname(tgUser.username),
+      );
       const result = await applyReferralCode(dbUser.id, code);
       if (!result.ok) {
         const mapped = mapReferralApplyError(result.error);
@@ -520,18 +535,16 @@ export function createApiServer(api: Api, botToken: string) {
       }
 
       const referralInfo = await getUserReferralInfo(dbUser.id);
-
       res.json({
         ok: true,
-        kind: "referral" as const,
         referral_message: result.referral_message,
         my_referral_code: referralInfo.my_referral_code,
         referred_by_applied: referralInfo.referred_by_applied,
         referred_by_code: referralInfo.referred_by_code,
       });
     } catch (err) {
-      console.error("Promocode apply error:", err);
-      res.status(500).json({ error: "Не удалось применить промокод" });
+      console.error("Referral code apply error:", err);
+      res.status(500).json({ error: "Не удалось применить реферальный код" });
     }
   });
 
