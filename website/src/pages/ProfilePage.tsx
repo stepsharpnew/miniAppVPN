@@ -17,7 +17,6 @@ interface SubData {
   expired_at: string | null;
   config: string | null;
   email: string | null;
-  my_referral_code: string | null;
   referred_by_applied: boolean;
   referred_by_code: string | null;
   referral_message: string | null;
@@ -44,7 +43,6 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [configCopied, setConfigCopied] = useState(false);
-  const [referralCopied, setReferralCopied] = useState(false);
   const [promoCode, setPromoCode] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
@@ -86,14 +84,6 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
     }
   }, [sub?.config]);
 
-  const handleCopyReferralCode = useCallback(() => {
-    if (!sub?.my_referral_code) return;
-    navigator.clipboard.writeText(sub.my_referral_code).then(() => {
-      setReferralCopied(true);
-      setTimeout(() => setReferralCopied(false), 2000);
-    }).catch(() => {});
-  }, [sub?.my_referral_code]);
-
   const handleDownloadConf = useCallback(() => {
     const token = getAccessToken();
     if (!token) return;
@@ -129,7 +119,6 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
     try {
       const data = await apiFetch<{
         referral_message?: string | null;
-        my_referral_code?: string | null;
         referred_by_applied?: boolean;
         referred_by_code?: string | null;
       }>("/api/web/promocode", {
@@ -147,7 +136,6 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
         prev
           ? {
               ...prev,
-              my_referral_code: data.my_referral_code ?? prev.my_referral_code,
               referred_by_applied: Boolean(data.referred_by_applied),
               referred_by_code: data.referred_by_code ?? code,
               referral_message: data.referral_message ?? prev.referral_message,
@@ -201,25 +189,6 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
             {isTelegramLinked
               ? "Аккаунт привязан к Telegram"
               : "Аккаунт не привязан к Telegram"}
-          </div>
-        </div>
-
-        <div className={styles.divider} />
-
-        <div className={styles.promoBlock}>
-          <div className={styles.sectionHeader}>Ваш реферальный код</div>
-          <div className={styles.referralCodeCard}>
-            <div className={styles.referralCodeValue}>
-              {sub?.my_referral_code ?? "Загрузка..."}
-            </div>
-            <button
-              type="button"
-              className={styles.secondaryBtn}
-              onClick={handleCopyReferralCode}
-              disabled={!sub?.my_referral_code}
-            >
-              {referralCopied ? "Скопировано" : "Копировать"}
-            </button>
           </div>
         </div>
 

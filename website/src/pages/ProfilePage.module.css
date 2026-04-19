@@ -106,26 +106,6 @@
   width: 100%;
 }
 
-.referralCodeCard {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.referralCodeValue {
-  flex: 1;
-  min-width: 0;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  text-align: center;
-}
-
 .promoRow {
   display: flex;
   gap: 8px;
@@ -170,21 +150,6 @@
 }
 
 .promoBtn:disabled {
-  opacity: 0.45;
-}
-
-.secondaryBtn {
-  padding: 0 14px;
-  height: 46px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.secondaryBtn:disabled {
   opacity: 0.45;
 }
 

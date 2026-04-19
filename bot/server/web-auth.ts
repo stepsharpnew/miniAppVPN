@@ -13,7 +13,7 @@ import {
   extendSubscriptionById,
   getRandomEnabledServer,
   getAllEnabledServers,
-  getUserReferralInfo,
+  getUserReferralInfoForWeb,
   incrementServerUserCount,
   isPaymentProcessed,
   markPaymentProcessed,
@@ -374,7 +374,7 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       res.status(404).json({ error: "Пользователь не найден" });
       return;
     }
-    const referralInfo = await getUserReferralInfo(user.id);
+    const referralInfo = await getUserReferralInfoForWeb(user.id);
     const expiredAt = user.expired_at ? new Date(user.expired_at) : null;
     const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
     res.json({
@@ -384,7 +384,6 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       config: active ? user.vpn_config : null,
       created_at: user.created_at,
       email: user.email,
-      my_referral_code: referralInfo.my_referral_code,
       referred_by_applied: referralInfo.referred_by_applied,
       referred_by_code: referralInfo.referred_by_code,
       referral_message: referralInfo.referral_message,
@@ -431,12 +430,11 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
         return;
       }
 
-      const referralInfo = await getUserReferralInfo(user.id);
+      const referralInfo = await getUserReferralInfoForWeb(user.id);
 
       res.json({
         ok: true,
         referral_message: result.referral_message,
-        my_referral_code: referralInfo.my_referral_code,
         referred_by_applied: referralInfo.referred_by_applied,
         referred_by_code: referralInfo.referred_by_code,
       });

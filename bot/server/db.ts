@@ -45,7 +45,8 @@ export interface UserRow {
 }
 
 export interface ReferralInfo {
-  my_referral_code: string;
+  /** null если код ещё не выдан (на вебе код не выдаётся — только в Mini App). */
+  my_referral_code: string | null;
   referred_by_applied: boolean;
   referred_by_code: string | null;
   referral_message: string | null;
@@ -291,23 +292,13 @@ export async function createWebUser(
   email: string,
   passwordHash: string,
 ): Promise<UserRow> {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const referralCode = generateReferralCode();
-    try {
-      const { rows } = await getPool().query<UserRow>(
-        `INSERT INTO users (email, password_hash, auth_source, referral_code)
-         VALUES ($1, $2, 'web', $3)
-         RETURNING *`,
-        [email, passwordHash, referralCode],
-      );
-      return rows[0];
-    } catch (error) {
-      if (isUniqueViolation(error, "users_referral_code_unique")) continue;
-      throw error;
-    }
-  }
-
-  throw new Error(`Failed to create web user for email ${email}`);
+  const { rows } = await getPool().query<UserRow>(
+    `INSERT INTO users (email, password_hash, auth_source)
+     VALUES ($1, $2, 'web')
+     RETURNING *`,
+    [email, passwordHash],
+  );
+  return rows[0];
 }
 
 /**
@@ -319,32 +310,21 @@ export async function extendSubscriptionById(
   months: number,
   vpnConfig?: string,
 ): Promise<UserRow> {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const referralCode = generateReferralCode();
-    try {
-      const { rows } = await getPool().query<UserRow>(
-        `UPDATE users
-         SET expired_at = CASE
-           WHEN expired_at IS NOT NULL AND expired_at > NOW()
-             THEN expired_at + make_interval(months => $2)
-             ELSE NOW() + make_interval(months => $2)
-           END,
-           vpn_config = COALESCE($3, vpn_config),
-           referral_code = COALESCE(referral_code, $4),
-           is_notificated_d3 = FALSE,
-           is_notificated_d1 = FALSE
-         WHERE id = $1
-         RETURNING *`,
-        [userId, months, vpnConfig ?? null, referralCode],
-      );
-      return rows[0];
-    } catch (error) {
-      if (isUniqueViolation(error, "users_referral_code_unique")) continue;
-      throw error;
-    }
-  }
-
-  throw new Error(`Failed to extend subscription for user ${userId}`);
+  const { rows } = await getPool().query<UserRow>(
+    `UPDATE users
+     SET expired_at = CASE
+       WHEN expired_at IS NOT NULL AND expired_at > NOW()
+         THEN expired_at + make_interval(months => $2)
+         ELSE NOW() + make_interval(months => $2)
+       END,
+       vpn_config = COALESCE($3, vpn_config),
+       is_notificated_d3 = FALSE,
+       is_notificated_d1 = FALSE
+     WHERE id = $1
+     RETURNING *`,
+    [userId, months, vpnConfig ?? null],
+  );
+  return rows[0];
 }
 
 export async function linkTelegramToUser(
@@ -352,26 +332,15 @@ export async function linkTelegramToUser(
   telegramId: number,
   telegramNickname?: string | null,
 ): Promise<UserRow> {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const referralCode = generateReferralCode();
-    try {
-      const { rows } = await getPool().query<UserRow>(
-        `UPDATE users
-         SET telegram_id = $2,
-             telegram_nickname = COALESCE($3, telegram_nickname),
-             referral_code = COALESCE(referral_code, $4)
-         WHERE id = $1
-         RETURNING *`,
-        [userId, telegramId, telegramNickname ?? null, referralCode],
-      );
-      return rows[0];
-    } catch (error) {
-      if (isUniqueViolation(error, "users_referral_code_unique")) continue;
-      throw error;
-    }
-  }
-
-  throw new Error(`Failed to link Telegram ${telegramId} to user ${userId}`);
+  const { rows } = await getPool().query<UserRow>(
+    `UPDATE users
+     SET telegram_id = $2,
+         telegram_nickname = COALESCE($3, telegram_nickname)
+     WHERE id = $1
+     RETURNING *`,
+    [userId, telegramId, telegramNickname ?? null],
+  );
+  return rows[0];
 }
 
 export async function createTelegramUserIfMissing(
@@ -611,7 +580,7 @@ export async function mergeAccounts(
         }
         return webUser.referral_code;
       }
-      return webUser.referral_code ?? tgUser.referral_code ?? generateReferralCode();
+      return webUser.referral_code ?? tgUser.referral_code ?? null;
     })();
     const transferredReferralCode = mergedReferralCode === tgUser.referral_code
       ? tgUser.referral_code
@@ -768,6 +737,32 @@ export async function getUserReferralInfo(userId: string): Promise<ReferralInfo>
   };
 }
 
+/** Для сайта: не создаёт referral_code (выдача только через Mini App). */
+export async function getUserReferralInfoForWeb(userId: string): Promise<ReferralInfo> {
+  const myReferralCode = await getUserReferralCode(userId);
+  const { rows } = await getPool().query<{
+    referred_by_user_id: string | null;
+    referred_by_code: string | null;
+  }>(
+    `SELECT u.referred_by_user_id, ref.referral_code AS referred_by_code
+     FROM users u
+     LEFT JOIN users ref ON ref.id = u.referred_by_user_id
+     WHERE u.id = $1`,
+    [userId],
+  );
+
+  if (!rows[0]) throw new Error(`User ${userId} not found`);
+
+  return {
+    my_referral_code: myReferralCode,
+    referred_by_applied: rows[0].referred_by_user_id !== null,
+    referred_by_code: rows[0].referred_by_code ?? null,
+    referral_message:
+      rows[0].referred_by_user_id !== null ? REFERRAL_APPLY_SUCCESS_MESSAGE : null,
+    referred_by_user_id: rows[0].referred_by_user_id,
+  };
+}
+
 export async function applyReferralCode(
   userId: string,
   rawCode: string,
@@ -777,7 +772,6 @@ export async function applyReferralCode(
     return { ok: false, error: "empty" };
   }
 
-  const ownReferralCode = await getOrCreateUserReferralCode(userId);
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -810,7 +804,7 @@ export async function applyReferralCode(
       return { ok: false, error: "not_found" };
     }
 
-    if (referrer.id === userId || code === ownReferralCode) {
+    if (referrer.id === userId) {
       await client.query("COMMIT");
       return { ok: false, error: "self_referral" };
     }
