@@ -110,7 +110,7 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
 
   const handleApplyPromo = useCallback(async () => {
     const code = promoCode.trim().toUpperCase();
-    if (!code || promoLoading || sub?.referred_by_applied) return;
+    if (!code || promoLoading) return;
 
     setPromoLoading(true);
     setPromoError(null);
@@ -118,6 +118,9 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
 
     try {
       const data = await apiFetch<{
+        kind?: "gift" | "referral";
+        months?: number;
+        subscription?: SubData;
         referral_message?: string | null;
         referred_by_applied?: boolean;
         referred_by_code?: string | null;
@@ -128,6 +131,15 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
       });
 
       setPromoCode("");
+
+      if (data.kind === "gift" && data.subscription) {
+        setSub(data.subscription);
+        setPromoMessage(
+          `Подарочный промокод активирован. Подписка +${data.months ?? 0} мес.`,
+        );
+        return;
+      }
+
       setPromoMessage(
         data.referral_message ??
           "Промокод успешно применен, при покупке вам будет в подарок 1 месяц",
@@ -151,7 +163,7 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
     } finally {
       setPromoLoading(false);
     }
-  }, [promoCode, promoLoading, sub?.referred_by_applied]);
+  }, [promoCode, promoLoading]);
 
   if (!user) return null;
   const isTelegramLinked =
@@ -195,19 +207,19 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
         <div className={styles.divider} />
 
         <div className={styles.promoBlock}>
-          <div className={styles.sectionHeader}>Ввести чужой рефкод</div>
+          <div className={styles.sectionHeader}>Промокод</div>
           <div className={styles.referralHint}>
-            После покупки вы получите в подарок 1 месяц.
+            Подарочный промокод продлевает подписку сразу. Реферальный код — бонусный месяц после
+            оплаты.
           </div>
           <div className={styles.promoRow}>
             <input
               type="text"
               value={promoCode}
-              onChange={(e) => setPromoCode(e.target.value)}
+              onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
               className={styles.promoInput}
-              placeholder="Введите рефкод"
-              disabled={promoLoading || sub?.referred_by_applied}
-              readOnly={sub?.referred_by_applied}
+              placeholder="Введите промокод"
+              disabled={promoLoading}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -218,10 +230,10 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
             <button
               type="button"
               className={styles.promoBtn}
-              disabled={!promoCode.trim() || promoLoading || sub?.referred_by_applied}
+              disabled={!promoCode.trim() || promoLoading}
               onClick={() => void handleApplyPromo()}
             >
-              {promoLoading ? "Проверяем..." : sub?.referred_by_applied ? "Применен" : "Применить"}
+              {promoLoading ? "Проверяем..." : "Применить"}
             </button>
           </div>
           {sub?.referred_by_applied && sub.referred_by_code ? (

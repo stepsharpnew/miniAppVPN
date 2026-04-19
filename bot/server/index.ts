@@ -30,7 +30,10 @@ import {
   applyReferralCode,
   createTelegramUserIfMissing,
   generatePromoCodes,
+  getUserById,
+  redeemPromoCode,
 } from "./db";
+import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 import { scheduleSubscriptionExpiryReminders } from "./subscription-reminders";
 
 const botToken = (process.env.BOT_TOKEN ?? "").trim();
@@ -72,13 +75,26 @@ function mapReferralApplyError(error?: string): string {
     case "empty":
       return "Промокод обязателен.";
     case "not_found":
-      return "Код не найден.";
+      return "Промокод не найден.";
     case "self_referral":
       return "Нельзя применить собственный код.";
     case "already_applied":
-      return "Код уже применен ранее.";
+      return "Реферальный код уже применён ранее.";
     default:
       return "Не удалось применить промокод.";
+  }
+}
+
+function mapPromoRedeemError(error?: string): string | null {
+  switch (error) {
+    case "rate_limited":
+      return "Слишком много попыток. Попробуйте позже.";
+    case "already_used":
+      return "Этот подарочный промокод уже использован.";
+    case "not_found":
+      return null;
+    default:
+      return "Не удалось активировать промокод.";
   }
 }
 
@@ -169,7 +185,7 @@ bot.command("redeem", async (ctx) => {
   const telegramId = ctx.from?.id;
   if (!telegramId) return;
 
-  const rawCode = (ctx.match ?? "").trim();
+  const rawCode = (ctx.match ?? "").trim().toUpperCase();
   if (!rawCode) {
     await ctx.reply(
       "Введи промокод: <code>/redeem XXXXXXXX</code>",
@@ -183,6 +199,29 @@ bot.command("redeem", async (ctx) => {
       telegramId,
       ctx.from?.username ?? null,
     );
+
+    const promo = await redeemPromoCode(user.id, rawCode);
+    if (promo.ok && promo.months != null) {
+      let row = await getUserById(user.id);
+      if (!row) throw new Error(`User missing after promo: ${user.id}`);
+      await syncVpnForPromoRedemption(
+        row,
+        promo.months,
+        getTelegramClientName(telegramId, ctx.from?.username ?? null),
+      );
+      await ctx.reply(
+        `✅ Подарочный промокод активирован. Подписка +${promo.months} мес.`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    const promoMsg = mapPromoRedeemError(promo.error);
+    if (promoMsg) {
+      await ctx.reply(`❌ ${promoMsg}`);
+      return;
+    }
+
     const result = await applyReferralCode(user.id, rawCode);
 
     if (!result.ok) {

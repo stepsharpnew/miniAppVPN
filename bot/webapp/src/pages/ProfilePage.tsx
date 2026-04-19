@@ -152,7 +152,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
 
   const handleRedeemPromo = useCallback(async () => {
     const normalizedCode = promoCode.trim().toUpperCase();
-    if (!normalizedCode || promoLoading || sub?.referred_by_applied) return;
+    if (!normalizedCode || promoLoading) return;
 
     setPromoLoading(true);
     setReferralError(null);
@@ -172,7 +172,34 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
         throw new Error(data?.error ?? "Не удалось активировать промокод.");
       }
 
-      setSub((prev) => (
+      setPromoCode("");
+
+      if (data?.kind === "gift" && data?.subscription) {
+        const s = data.subscription as SubscriptionInfo & {
+          my_referral_code?: string;
+          referred_by_applied?: boolean;
+          referred_by_code?: string | null;
+          referral_message?: string | null;
+        };
+        setSub({
+          active: Boolean(s.active),
+          expired_at: s.expired_at ?? null,
+          is_blocked: s.is_blocked,
+          is_vip: s.is_vip,
+          config: s.config ?? null,
+          my_referral_code: s.my_referral_code,
+          referred_by_applied: Boolean(s.referred_by_applied),
+          referred_by_code: s.referred_by_code ?? null,
+          referral_message: s.referral_message ?? null,
+        });
+        if (s.config) saveLocalConfig(s.config);
+        WebApp.showAlert(
+          `Подарочный промокод активирован. Подписка продлена на ${data.months ?? 0} мес.`,
+        );
+        return;
+      }
+
+      setSub((prev) =>
         prev
           ? {
               ...prev,
@@ -181,9 +208,8 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
               referred_by_code: data?.referred_by_code ?? normalizedCode,
               referral_message: data?.referral_message ?? prev.referral_message,
             }
-          : prev
-      ));
-      setPromoCode("");
+          : prev,
+      );
       setReferralMessage(
         data?.referral_message ??
           "Промокод успешно применен, при покупке вам будет в подарок 1 месяц",
@@ -194,7 +220,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
     } finally {
       setPromoLoading(false);
     }
-  }, [promoCode, promoLoading, sub?.referred_by_applied]);
+  }, [promoCode, promoLoading, saveLocalConfig]);
 
   const handleCopyReferralCode = useCallback(async () => {
     if (!sub?.my_referral_code) return;
@@ -286,26 +312,26 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
         <div className={styles.divider} />
 
         <div className={styles.promoBlock}>
-          <div className={styles.sectionHeader}>Ввести чужой рефкод</div>
+          <div className={styles.sectionHeader}>Промокод</div>
           <div className={styles.referralHint}>
-            После покупки вы получите в подарок 1 месяц.
+            Подарочный промокод продлевает подписку сразу. Реферальный код — бонусный месяц после
+            оплаты.
           </div>
           <div className={styles.promoRow}>
             <input
               className={styles.promoInput}
               value={promoCode}
               onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
-              placeholder="Введите рефкод"
+              placeholder="Введите промокод"
               maxLength={32}
-              readOnly={referralApplied}
-              disabled={promoLoading || referralApplied}
+              disabled={promoLoading}
             />
             <button
               className={styles.promoBtn}
               onClick={handleRedeemPromo}
-              disabled={promoLoading || promoCode.trim().length === 0 || referralApplied}
+              disabled={promoLoading || promoCode.trim().length === 0}
             >
-              {promoLoading ? "..." : referralApplied ? "Применен" : "Применить"}
+              {promoLoading ? "..." : "Применить"}
             </button>
           </div>
           {referralApplied && sub?.referred_by_code ? (

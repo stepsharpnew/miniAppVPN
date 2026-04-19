@@ -14,6 +14,7 @@ import {
   getRandomEnabledServer,
   getAllEnabledServers,
   getUserReferralInfoForWeb,
+  redeemPromoCode,
   incrementServerUserCount,
   isPaymentProcessed,
   markPaymentProcessed,
@@ -40,6 +41,7 @@ import { resolveAdminChat } from "./store";
 import { sendPasswordResetEmail } from "./email-service";
 import { createOtp, verifyOtp, consumeVerifyToken } from "./otp-store";
 import { sendReferralRewardNotifications } from "./referral-notifications";
+import { getWebClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "30d";
@@ -122,13 +124,26 @@ function mapReferralApplyError(error?: string): { status: number; message: strin
     case "empty":
       return { status: 400, message: "Промокод обязателен" };
     case "not_found":
-      return { status: 400, message: "Код не найден" };
+      return { status: 400, message: "Промокод не найден" };
     case "self_referral":
       return { status: 400, message: "Нельзя применить собственный код" };
     case "already_applied":
-      return { status: 400, message: "Код уже применен ранее" };
+      return { status: 400, message: "Реферальный код уже применён ранее" };
     default:
       return { status: 500, message: "Не удалось применить промокод" };
+  }
+}
+
+function mapPromoRedeemError(error?: string): { status: number; message: string } | null {
+  switch (error) {
+    case "rate_limited":
+      return { status: 429, message: "Слишком много попыток. Попробуйте позже." };
+    case "already_used":
+      return { status: 400, message: "Этот подарочный промокод уже использован" };
+    case "not_found":
+      return null;
+    default:
+      return { status: 500, message: "Не удалось активировать промокод" };
   }
 }
 
@@ -415,13 +430,51 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       return;
     }
 
-    const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+    const code = typeof req.body?.code === "string" ? req.body.code.trim().toUpperCase() : "";
     if (!code) {
       res.status(400).json({ error: "Промокод обязателен" });
       return;
     }
 
     try {
+      const promo = await redeemPromoCode(user.id, code);
+      if (promo.ok && promo.months != null) {
+        let userRow = await getUserById(user.id);
+        if (!userRow) throw new Error(`User missing after promo redeem: ${user.id}`);
+        const { config } = await syncVpnForPromoRedemption(
+          userRow,
+          promo.months,
+          getWebClientName(userRow),
+        );
+        userRow = await getUserById(user.id);
+        if (!userRow) throw new Error(`User missing after VPN promo sync: ${user.id}`);
+        const referralInfo = await getUserReferralInfoForWeb(user.id);
+        const expiredAt = userRow.expired_at ? new Date(userRow.expired_at) : null;
+        const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
+        res.json({
+          ok: true,
+          kind: "gift" as const,
+          months: promo.months,
+          subscription: {
+            active,
+            expired_at: userRow.expired_at,
+            is_blocked: userRow.is_blocked,
+            config: active ? (userRow.vpn_config ?? config ?? null) : null,
+            email: userRow.email,
+            referred_by_applied: referralInfo.referred_by_applied,
+            referred_by_code: referralInfo.referred_by_code,
+            referral_message: referralInfo.referral_message,
+          },
+        });
+        return;
+      }
+
+      const promoErr = mapPromoRedeemError(promo.error);
+      if (promoErr) {
+        res.status(promoErr.status).json({ error: promoErr.message });
+        return;
+      }
+
       const result = await applyReferralCode(user.id, code);
 
       if (!result.ok) {
@@ -434,12 +487,13 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
 
       res.json({
         ok: true,
+        kind: "referral" as const,
         referral_message: result.referral_message,
         referred_by_applied: referralInfo.referred_by_applied,
         referred_by_code: referralInfo.referred_by_code,
       });
     } catch (err) {
-      console.error("Apply web referral code failed:", err);
+      console.error("Apply web promocode failed:", err);
       res.status(500).json({ error: "Не удалось применить промокод" });
     }
   });
