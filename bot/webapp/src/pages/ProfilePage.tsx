@@ -56,7 +56,6 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const [giftPromoError, setGiftPromoError] = useState<string | null>(null);
   const [inviterCode, setInviterCode] = useState("");
   const [inviterLoading, setInviterLoading] = useState(false);
-  const [inviterMessage, setInviterMessage] = useState<string | null>(null);
   const [inviterError, setInviterError] = useState<string | null>(null);
   const [referralCopied, setReferralCopied] = useState(false);
   const [showSyncInfo, setShowSyncInfo] = useState(false);
@@ -220,7 +219,6 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
 
     setInviterLoading(true);
     setInviterError(null);
-    setInviterMessage(null);
     try {
       const res = await fetch("/api/referral-code", {
         method: "POST",
@@ -248,7 +246,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
             }
           : prev,
       );
-      setInviterMessage(data?.referral_message ?? REFERRAL_INVITER_SUCCESS);
+      WebApp.showAlert(data?.referral_message ?? REFERRAL_INVITER_SUCCESS);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Не удалось применить реферальный код.";
@@ -377,46 +375,39 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
           ) : null}
         </div>
 
-        <div className={styles.divider} />
+        {!referralApplied ? (
+          <>
+            <div className={styles.divider} />
 
-        <div className={styles.promoBlock}>
-          <div className={styles.sectionHeader}>Реферальный код</div>
-          <div className={styles.referralHint}>
-            Вводится один раз. После успешной оплаты по подписке вам и пригласившему начислится по 1
-            месяцу.
-          </div>
-          <div className={styles.promoRow}>
-            <input
-              className={styles.promoInput}
-              value={inviterCode}
-              onChange={(e) => setInviterCode(e.target.value.toUpperCase())}
-              placeholder="Реферальный код"
-              maxLength={32}
-              readOnly={referralApplied}
-              disabled={inviterLoading || referralApplied}
-            />
-            <button
-              className={styles.promoBtn}
-              onClick={handleApplyInviterReferral}
-              disabled={
-                inviterLoading || inviterCode.trim().length === 0 || referralApplied
-              }
-            >
-              {inviterLoading ? "..." : referralApplied ? "Уже применён" : "Применить"}
-            </button>
-          </div>
-          {referralApplied && sub?.referred_by_code ? (
-            <div className={styles.referralHint}>
-              Применён код: <b>{sub.referred_by_code}</b>
+            <div className={styles.promoBlock}>
+              <div className={styles.sectionHeader}>Реферальный код</div>
+              <div className={styles.referralHint}>
+                Вводится один раз. После успешной оплаты по подписке вам и пригласившему начислится по
+                1 месяцу.
+              </div>
+              <div className={styles.promoRow}>
+                <input
+                  className={styles.promoInput}
+                  value={inviterCode}
+                  onChange={(e) => setInviterCode(e.target.value.toUpperCase())}
+                  placeholder="Реферальный код"
+                  maxLength={32}
+                  disabled={inviterLoading}
+                />
+                <button
+                  className={styles.promoBtn}
+                  onClick={handleApplyInviterReferral}
+                  disabled={inviterLoading || inviterCode.trim().length === 0}
+                >
+                  {inviterLoading ? "..." : "Применить"}
+                </button>
+              </div>
+              {inviterError ? (
+                <div className={styles.promoError}>{inviterError}</div>
+              ) : null}
             </div>
-          ) : null}
-          {inviterMessage ? (
-            <div className={styles.promoSuccess}>{inviterMessage}</div>
-          ) : null}
-          {inviterError ? (
-            <div className={styles.promoError}>{inviterError}</div>
-          ) : null}
-        </div>
+          </>
+        ) : null}
 
         <div className={styles.divider} />
 
