@@ -50,6 +50,7 @@ import {
   sendSupportTextMessage,
 } from "./support-service";
 import { sendReferralRewardNotifications } from "./referral-notifications";
+import { sendGiftPromoAdminNotification } from "./promo-notifications";
 
 function getServerBaseUrl(server: ServerRow): string {
   const raw = server.domain_server_name;
@@ -485,6 +486,20 @@ export function createApiServer(api: Api, botToken: string) {
         );
         userRow = await getUserById(dbUser.id);
         if (!userRow) throw new Error(`User missing after VPN promo sync: ${dbUser.id}`);
+        if (promo.newExpiredAt != null) {
+          const userName = tgUser.first_name ?? "Аноним";
+          const userTag = tgUser.username ? `@${tgUser.username}` : "без @ника";
+          await sendGiftPromoAdminNotification(api, {
+            userName,
+            userTag,
+            telegramId: tgUser.id,
+            dbUserId: dbUser.id,
+            code,
+            months: promo.months,
+            oldExpiredAt: promo.oldExpiredAt,
+            newExpiredAt: promo.newExpiredAt,
+          });
+        }
         const referralInfo = await getUserReferralInfo(dbUser.id);
         const expiredAt = userRow.expired_at ? new Date(userRow.expired_at) : null;
         const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
