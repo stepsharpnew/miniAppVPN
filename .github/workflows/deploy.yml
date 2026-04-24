@@ -78,6 +78,15 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
             set -euo pipefail
             cd ~/meme_bot
+            # Освободить 80/443 под edge-nginx: на многих VPS по умолчанию включён nginx/apache.
+            if command -v systemctl >/dev/null 2>&1; then
+              for svc in nginx apache2 httpd; do
+                if systemctl is-active --quiet "$svc" 2>/dev/null; then
+                  echo "Stopping host $svc (releases ports for Docker edge-nginx)"
+                  sudo systemctl stop "$svc" || true
+                fi
+              done
+            fi
             docker compose --env-file .env config > /dev/null
             docker compose pull postgres
             docker compose build --no-cache bot nginx
