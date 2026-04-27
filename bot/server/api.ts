@@ -672,11 +672,13 @@ export function createApiServer(api: Api, botToken: string) {
     const pending = getPendingPayment(paymentId);
     if (!pending || pending.status === "succeeded") return;
 
+    // NB: idempotency flag is set AFTER everything below succeeds far enough to
+    // notify admin; otherwise a transient error would leave the payment in a
+    // "processed but silent" state forever (no admin notif on retries).
     if (await isPaymentProcessed(paymentId)) {
       pending.status = "succeeded";
       return;
     }
-    await markPaymentProcessed(paymentId);
 
     pending.status = "succeeded";
 
@@ -763,7 +765,9 @@ export function createApiServer(api: Api, botToken: string) {
       await api.sendMessage(userId, PAYMENT_SUCCESS_USER(planLabel, amountStr, pending.isRenewal), {
         parse_mode: "HTML",
       });
-    } catch { /* user notification best-effort */ }
+    } catch (err) {
+      console.error("User payment notification failed:", userId, err);
+    }
 
     const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
     if (rawBuyChat) {
@@ -777,8 +781,21 @@ export function createApiServer(api: Api, botToken: string) {
             ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
           },
         );
-      } catch { /* admin notification best-effort */ }
+      } catch (err) {
+        console.error(
+          "Admin payment notification failed:",
+          { chatId: admin.chatId, topicId: admin.topicId, paymentId, userId },
+          err,
+        );
+      }
+    } else {
+      console.warn("ADMIN_CHAT_ID_BUY is not set — admin payment notification skipped");
     }
+
+    // Mark idempotency flag last: if an unhandled error sneaks past the catches
+    // above, the next webhook/poll will retry the whole flow instead of silently
+    // skipping it (which is what made the renewal admin notification disappear).
+    await markPaymentProcessed(paymentId);
   }
 
   app.get("/api/payments/status/:paymentId", auth, requireChannelSubscription, async (req, res) => {
@@ -897,8 +914,6 @@ export function createApiServer(api: Api, botToken: string) {
       return;
     }
 
-    await markPaymentProcessed(paymentId);
-
     const username = meta?.username ?? "";
     const firstName = meta?.first_name ?? "Аноним";
     const months = meta ? Number(meta.months) : 0;
@@ -983,7 +998,9 @@ export function createApiServer(api: Api, botToken: string) {
       await api.sendMessage(userId, PAYMENT_SUCCESS_USER(planLabel, amountStr, isRenewal), {
         parse_mode: "HTML",
       });
-    } catch { /* best-effort */ }
+    } catch (err) {
+      console.error("User payment notification (webhook) failed:", userId, err);
+    }
 
     const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
     if (rawBuyChat) {
@@ -997,8 +1014,20 @@ export function createApiServer(api: Api, botToken: string) {
             ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
           },
         );
-      } catch { /* best-effort */ }
+      } catch (err) {
+        console.error(
+          "Admin payment notification (webhook) failed:",
+          { chatId: admin.chatId, topicId: admin.topicId, paymentId, userId },
+          err,
+        );
+      }
+    } else {
+      console.warn("ADMIN_CHAT_ID_BUY is not set — admin payment notification (webhook) skipped");
     }
+
+    // Mark idempotency only after we've at least attempted to notify admin/user
+    // so transient failures don't permanently silence renewal notifications.
+    await markPaymentProcessed(paymentId);
 
     res.json({ ok: true });
   });

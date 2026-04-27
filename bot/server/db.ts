@@ -587,11 +587,13 @@ export async function mergeAccounts(
       : null;
 
     // Detach telegram_id from old Telegram-only row first to avoid unique-constraint race.
+    // Cast $2 explicitly: when transferredReferralCode is null, pg cannot infer the type
+    // from `IS NOT NULL` alone and fails with 42P18 (indeterminate_datatype).
     await client.query(
       `UPDATE users
        SET telegram_id = NULL,
            referral_code = CASE
-             WHEN $2 IS NOT NULL THEN NULL
+             WHEN $2::text IS NOT NULL THEN NULL
              ELSE referral_code
            END
        WHERE id = $1`,

@@ -31,8 +31,12 @@ export async function sendReferralRewardNotifications(
         `ваш промокод применен\nначислен <b>+${reward.referrerBonusMonths} месяц</b>`,
         { parse_mode: "HTML" },
       );
-    } catch {
-      /* referrer notification is best-effort */
+    } catch (err) {
+      console.error(
+        "Referrer reward notification failed:",
+        reward.referrerUser.telegramId,
+        err,
+      );
     }
   }
 
@@ -56,7 +60,11 @@ export async function sendReferralRewardNotifications(
         ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
       },
     );
-  } catch {
-    /* admin notification is best-effort */
+  } catch (err) {
+    console.error(
+      "Admin referral reward notification failed:",
+      { chatId: admin.chatId, topicId: admin.topicId, paymentId: reward.paymentId },
+      err,
+    );
   }
 }

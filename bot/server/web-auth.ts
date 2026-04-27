@@ -158,11 +158,12 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
   const pending = getPendingPayment(paymentId);
   if (!pending || pending.status === "succeeded") return;
 
+  // Idempotency flag is set at the very end of this function so transient errors
+  // before the admin notification don't silence retries.
   if (await isPaymentProcessed(paymentId)) {
     pending.status = "succeeded";
     return;
   }
-  await markPaymentProcessed(paymentId);
 
   pending.status = "succeeded";
 
@@ -251,10 +252,18 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
           ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
         },
       );
-    } catch {
-      /* admin notification best-effort */
+    } catch (err) {
+      console.error(
+        "Admin payment notification (web) failed:",
+        { chatId: admin.chatId, topicId: admin.topicId, paymentId, userId },
+        err,
+      );
     }
+  } else if (!rawBuyChat) {
+    console.warn("ADMIN_CHAT_ID_BUY is not set — admin payment notification (web) skipped");
   }
+
+  await markPaymentProcessed(paymentId);
 }
 
 // ── Mount all web routes ──
