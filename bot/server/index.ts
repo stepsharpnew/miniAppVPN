@@ -34,6 +34,7 @@ import {
   redeemPromoCode,
 } from "./db";
 import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
+import { sendGiftPromoAdminNotification } from "./promo-notifications";
 import { scheduleSubscriptionExpiryReminders } from "./subscription-reminders";
 
 const botToken = (process.env.BOT_TOKEN ?? "").trim();
@@ -209,6 +210,20 @@ bot.command("redeem", async (ctx) => {
         promo.months,
         getTelegramClientName(telegramId, ctx.from?.username ?? null),
       );
+      if (promo.newExpiredAt != null) {
+        const userName = ctx.from?.first_name ?? "Аноним";
+        const userTag = ctx.from?.username ? `@${ctx.from.username}` : "без @ника";
+        await sendGiftPromoAdminNotification(ctx.api, {
+          userName,
+          userTag,
+          telegramId,
+          dbUserId: user.id,
+          code: rawCode,
+          months: promo.months,
+          oldExpiredAt: promo.oldExpiredAt,
+          newExpiredAt: promo.newExpiredAt,
+        });
+      }
       await ctx.reply(
         `✅ Подарочный промокод активирован. Подписка +${promo.months} мес.`,
         { parse_mode: "HTML" },

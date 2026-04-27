@@ -41,6 +41,7 @@ import { resolveAdminChat } from "./store";
 import { sendPasswordResetEmail } from "./email-service";
 import { createOtp, verifyOtp, consumeVerifyToken } from "./otp-store";
 import { sendReferralRewardNotifications } from "./referral-notifications";
+import { sendGiftPromoAdminNotification } from "./promo-notifications";
 import { getWebClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 
 const ACCESS_TTL = "15m";
@@ -457,6 +458,24 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
         );
         userRow = await getUserById(user.id);
         if (!userRow) throw new Error(`User missing after VPN promo sync: ${user.id}`);
+        if (api && promo.newExpiredAt != null) {
+          const userName = userRow.email ?? "Веб-пользователь";
+          const userTag = userRow.telegram_nickname
+            ? `@${userRow.telegram_nickname}`
+            : userRow.email
+              ? `email: ${userRow.email}`
+              : "без контакта";
+          await sendGiftPromoAdminNotification(api, {
+            userName,
+            userTag,
+            telegramId: userRow.telegram_id,
+            dbUserId: user.id,
+            code,
+            months: promo.months,
+            oldExpiredAt: promo.oldExpiredAt,
+            newExpiredAt: promo.newExpiredAt,
+          });
+        }
         const referralInfo = await getUserReferralInfoForWeb(user.id);
         const expiredAt = userRow.expired_at ? new Date(userRow.expired_at) : null;
         const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
