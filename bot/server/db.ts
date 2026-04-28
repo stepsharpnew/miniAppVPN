@@ -42,6 +42,8 @@ export interface UserRow {
   referral_applied_at: string | null;
   is_notificated_d3?: boolean;
   is_notificated_d1?: boolean;
+  is_notificated_expired?: boolean;
+  is_notificated_cancelled?: boolean;
 }
 
 export interface ReferralInfo {
@@ -193,7 +195,9 @@ export async function upsertUserSubscription(
            telegram_nickname = COALESCE($4, users.telegram_nickname),
            referral_code = COALESCE(users.referral_code, EXCLUDED.referral_code),
            is_notificated_d3 = FALSE,
-           is_notificated_d1 = FALSE
+           is_notificated_d1 = FALSE,
+           is_notificated_expired = FALSE,
+           is_notificated_cancelled = FALSE
          RETURNING *`,
         [telegramId, months, vpnConfig ?? null, telegramNickname ?? null, referralCode],
       );
@@ -266,6 +270,58 @@ export async function markExpiryReminderD1Sent(userId: string): Promise<void> {
   );
 }
 
+/**
+ * Подписка только что истекла (от 0 до 2 дней назад).
+ * Отправляем уведомление с предложением продлить в течение 2 дней.
+ */
+export async function fetchUsersForExpiryExpired(): Promise<
+  SubscriptionReminderRow[]
+> {
+  const { rows } = await getPool().query<SubscriptionReminderRow>(
+    `SELECT id, telegram_id, expired_at, telegram_nickname
+     FROM users
+     WHERE telegram_id IS NOT NULL
+       AND is_blocked = FALSE
+       AND expired_at IS NOT NULL
+       AND expired_at <= NOW()
+       AND expired_at > NOW() - INTERVAL '2 days'
+       AND is_notificated_expired = FALSE`,
+  );
+  return rows;
+}
+
+/**
+ * Грейс-период (2 дня) истёк без оплаты — итоговое уведомление об отмене.
+ */
+export async function fetchUsersForExpiryCancelled(): Promise<
+  SubscriptionReminderRow[]
+> {
+  const { rows } = await getPool().query<SubscriptionReminderRow>(
+    `SELECT id, telegram_id, expired_at, telegram_nickname
+     FROM users
+     WHERE telegram_id IS NOT NULL
+       AND is_blocked = FALSE
+       AND expired_at IS NOT NULL
+       AND expired_at <= NOW() - INTERVAL '2 days'
+       AND is_notificated_cancelled = FALSE`,
+  );
+  return rows;
+}
+
+export async function markExpiryExpiredSent(userId: string): Promise<void> {
+  await getPool().query(
+    "UPDATE users SET is_notificated_expired = TRUE WHERE id = $1",
+    [userId],
+  );
+}
+
+export async function markExpiryCancelledSent(userId: string): Promise<void> {
+  await getPool().query(
+    "UPDATE users SET is_notificated_cancelled = TRUE WHERE id = $1",
+    [userId],
+  );
+}
+
 // ── Web-flow (для сайта — работа по UUID id / email) ──
 
 export async function getUserById(
@@ -319,7 +375,9 @@ export async function extendSubscriptionById(
        END,
        vpn_config = COALESCE($3, vpn_config),
        is_notificated_d3 = FALSE,
-       is_notificated_d1 = FALSE
+       is_notificated_d1 = FALSE,
+       is_notificated_expired = FALSE,
+       is_notificated_cancelled = FALSE
      WHERE id = $1
      RETURNING *`,
     [userId, months, vpnConfig ?? null],

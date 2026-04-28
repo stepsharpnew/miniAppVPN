@@ -4,14 +4,20 @@ import { GrammyError } from "grammy";
 import {
   fetchUsersForExpiryReminderD1,
   fetchUsersForExpiryReminderD3,
+  fetchUsersForExpiryExpired,
+  fetchUsersForExpiryCancelled,
   markExpiryReminderD1Sent,
   markExpiryReminderD3Sent,
+  markExpiryExpiredSent,
+  markExpiryCancelledSent,
   type SubscriptionReminderRow,
 } from "./db";
 import { resolveAdminChat } from "./store";
 import {
   SUBSCRIPTION_EXPIRING_D1_USER,
   SUBSCRIPTION_EXPIRING_D3_USER,
+  SUBSCRIPTION_EXPIRED_GRACE_USER,
+  SUBSCRIPTION_CANCELLED_USER,
   SUBSCRIPTION_REMINDER_SEND_FAIL_ADMIN,
 } from "../shared/texts";
 
@@ -63,21 +69,31 @@ async function notifyAdminSendFailure(
 async function sendReminderBatch(
   api: Api,
   rows: SubscriptionReminderRow[],
-  kind: "d3" | "d1",
+  kind: "d3" | "d1" | "expired" | "cancelled",
   getRenewKeyboard: () => InlineKeyboard | undefined,
   rawBuyChat: string | undefined,
 ): Promise<void> {
-  const body =
-    kind === "d3" ? SUBSCRIPTION_EXPIRING_D3_USER : SUBSCRIPTION_EXPIRING_D1_USER;
-  const mark =
-    kind === "d3" ? markExpiryReminderD3Sent : markExpiryReminderD1Sent;
+  const mark = {
+    d3: markExpiryReminderD3Sent,
+    d1: markExpiryReminderD1Sent,
+    expired: markExpiryExpiredSent,
+    cancelled: markExpiryCancelledSent,
+  }[kind];
 
   for (const row of rows) {
     const kb = getRenewKeyboard();
+    let text: string;
+    if (kind === "d3") text = SUBSCRIPTION_EXPIRING_D3_USER(formatExpiryMsk(row.expired_at));
+    else if (kind === "d1") text = SUBSCRIPTION_EXPIRING_D1_USER(formatExpiryMsk(row.expired_at));
+    else if (kind === "expired") text = SUBSCRIPTION_EXPIRED_GRACE_USER(formatExpiryMsk(row.expired_at));
+    else text = SUBSCRIPTION_CANCELLED_USER();
+
+    const showKeyboard = kind !== "cancelled";
+
     try {
-      await api.sendMessage(row.telegram_id, body(formatExpiryMsk(row.expired_at)), {
+      await api.sendMessage(row.telegram_id, text, {
         parse_mode: "HTML",
-        ...(kb ? { reply_markup: kb } : {}),
+        ...(showKeyboard && kb ? { reply_markup: kb } : {}),
       });
       await mark(row.id);
     } catch (error) {
@@ -104,6 +120,14 @@ export async function runSubscriptionExpiryRemindersOnce(
 
   const d1 = await fetchUsersForExpiryReminderD1();
   await sendReminderBatch(api, d1, "d1", getRenewKeyboard, rawBuyChat);
+
+  // Уведомление в момент истечения — даём 2 дня на продление
+  const expired = await fetchUsersForExpiryExpired();
+  await sendReminderBatch(api, expired, "expired", getRenewKeyboard, rawBuyChat);
+
+  // Финальное уведомление об отмене — грейс-период прошёл без оплаты
+  const cancelled = await fetchUsersForExpiryCancelled();
+  await sendReminderBatch(api, cancelled, "cancelled", getRenewKeyboard, rawBuyChat);
 }
 
 /**

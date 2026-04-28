@@ -85,6 +85,23 @@ export function SUBSCRIPTION_EXPIRING_D1_USER(expiresMsk: string): string {
   );
 }
 
+export function SUBSCRIPTION_EXPIRED_GRACE_USER(expiresMsk: string): string {
+  return (
+    `🔴 <b>Срок подписки истёк</b>\n\n` +
+    `Ваша подписка закончилась <b>${escapeHtml(expiresMsk)}</b>.\n\n` +
+    `Мы даём вам <b>2 дня</b> на продление — VPN продолжит работать в течение этого времени. ` +
+    `Пожалуйста, продлите подписку, чтобы не потерять доступ.`
+  );
+}
+
+export function SUBSCRIPTION_CANCELLED_USER(): string {
+  return (
+    `❌ <b>Подписка отменена</b>\n\n` +
+    `К сожалению, период ожидания истёк и ваша подписка была отменена.\n\n` +
+    `Вы можете оформить новую подписку в любой момент — доступ к VPN будет восстановлен сразу после оплаты.`
+  );
+}
+
 export function SUBSCRIPTION_REMINDER_SEND_FAIL_ADMIN(
   telegramId: number,
   nickname: string | null,

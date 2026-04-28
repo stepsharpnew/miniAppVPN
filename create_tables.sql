@@ -196,6 +196,10 @@ END $$;
 -- ── Напоминания об окончании подписки (cron в боте, 11:00 Europe/Moscow) ──
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_d3 BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_d1 BOOLEAN NOT NULL DEFAULT FALSE;
+-- Уведомление в момент истечения (грейс 2 дня на продление)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_expired BOOLEAN NOT NULL DEFAULT FALSE;
+-- Уведомление об окончательной отмене (спустя 2 дня грейса без оплаты)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_cancelled BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- ── Идемпотентность платежей (защита от дублей webhook) ──
 CREATE TABLE IF NOT EXISTS processed_payments (
