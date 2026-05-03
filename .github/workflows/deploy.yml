@@ -78,15 +78,45 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
             set -euo pipefail
             cd ~/meme_bot
-            # Освободить 80/443 под edge-nginx: на многих VPS по умолчанию включён nginx/apache.
+
+            # ── Освободить 80/443 под edge-nginx ──
+            # 1) Хостовые сервисы (типичные кандидаты).
             if command -v systemctl >/dev/null 2>&1; then
-              for svc in nginx apache2 httpd; do
+              for svc in nginx apache2 httpd caddy traefik lighttpd haproxy; do
                 if systemctl is-active --quiet "$svc" 2>/dev/null; then
                   echo "Stopping host $svc (releases ports for Docker edge-nginx)"
                   sudo systemctl stop "$svc" || true
                 fi
               done
             fi
+
+            # 2) Любые осиротевшие docker-контейнеры на 80/443 — останавливаем их
+            #    (наш edge-nginx будет пересоздан compose'ом ниже).
+            for port in 80 443; do
+              conflicting=$(docker ps --filter "publish=${port}" --format '{{.ID}} {{.Names}}' || true)
+              if [ -n "$conflicting" ]; then
+                echo "Containers holding host port ${port}:"
+                echo "$conflicting"
+                # shellcheck disable=SC2086
+                docker stop $(echo "$conflicting" | awk '{print $1}') || true
+              fi
+            done
+
+            # 3) Финальная проверка: если порт всё ещё занят — выводим, кто, и падаем явно.
+            for port in 80 443; do
+              if command -v ss >/dev/null 2>&1; then
+                holder=$(sudo ss -ltnp "( sport = :${port} )" 2>/dev/null | awk 'NR>1')
+              else
+                holder=$(sudo lsof -iTCP:${port} -sTCP:LISTEN -n -P 2>/dev/null || true)
+              fi
+              if [ -n "$holder" ]; then
+                echo "::error::Host port ${port} is still occupied by:"
+                echo "$holder"
+                echo "Освободите порт вручную или задайте EDGE_HTTP_PORT/EDGE_HTTPS_PORT в .env."
+                exit 1
+              fi
+            done
+
             docker compose --env-file .env config > /dev/null
             docker compose pull postgres
             docker compose build --no-cache bot nginx
