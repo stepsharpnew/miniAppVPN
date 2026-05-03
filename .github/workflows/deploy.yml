@@ -80,23 +80,21 @@ jobs:
             cd ~/meme_bot
 
             # ── Освободить 80/443 под edge-nginx ──
-            # 1) Хостовые сервисы (типичные кандидаты): stop + disable + mask, чтобы
-            #    они не воскресали (Restart=, cron, watchdog и т. п.).
+            # 1) Хостовые сервисы: stop + disable + mask.
+            #    Не полагаемся на list-unit-files (формат/локаль отличаются) — проверяем через systemctl cat.
             if command -v systemctl >/dev/null 2>&1; then
               for svc in nginx apache2 httpd caddy traefik lighttpd haproxy; do
-                # Юнит вообще существует на этом хосте?
-                if ! systemctl list-unit-files --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "${svc}.service"; then
+                if ! systemctl cat "${svc}.service" >/dev/null 2>&1; then
                   continue
                 fi
                 echo "Disabling+masking host service ${svc} (frees ports for Docker edge-nginx)"
-                sudo systemctl stop "$svc" 2>/dev/null || true
-                sudo systemctl disable "$svc" 2>/dev/null || true
-                sudo systemctl mask "$svc" 2>/dev/null || true
+                sudo systemctl stop "${svc}.service" 2>/dev/null || true
+                sudo systemctl disable "${svc}.service" 2>/dev/null || true
+                sudo systemctl mask "${svc}.service" 2>/dev/null || true
               done
             fi
 
-            # 2) Любые осиротевшие docker-контейнеры на 80/443 — останавливаем их
-            #    (наш edge-nginx будет пересоздан compose'ом ниже).
+            # 2) Осиротевшие docker-контейнеры с publish 80/443 (не host-network).
             for port in 80 443; do
               conflicting=$(docker ps --filter "publish=${port}" --format '{{.ID}} {{.Names}}' || true)
               if [ -n "$conflicting" ]; then
@@ -107,7 +105,26 @@ jobs:
               fi
             done
 
-            # 3) Финальная проверка: если порт всё ещё занят — выводим, кто, и падаем явно.
+            # 3) Жёстко освободить порты: nginx, запущенный вне systemd, host-network контейнеры и т. п.
+            #    fuser есть в пакете psmisc на Debian/Ubuntu; если нет — добиваем по PID из ss.
+            for port in 80 443; do
+              if command -v fuser >/dev/null 2>&1; then
+                sudo fuser -k "${port}/tcp" 2>/dev/null || true
+              else
+                pids=$(sudo ss -ltnp "sport = :${port}" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | sort -u)
+                for pid in $pids; do
+                  sudo kill -TERM "$pid" 2>/dev/null || true
+                done
+                sleep 1
+                pids=$(sudo ss -ltnp "sport = :${port}" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | sort -u)
+                for pid in $pids; do
+                  sudo kill -KILL "$pid" 2>/dev/null || true
+                done
+              fi
+            done
+            sleep 2
+
+            # 4) Финальная проверка
             for port in 80 443; do
               if command -v ss >/dev/null 2>&1; then
                 holder=$(sudo ss -ltnp "( sport = :${port} )" 2>/dev/null | awk 'NR>1')
