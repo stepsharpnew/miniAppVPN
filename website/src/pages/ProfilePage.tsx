@@ -19,7 +19,7 @@ interface SubData {
   active: boolean;
   expired_at: string | null;
   config: string | null;
-  email: string | null;
+  login: string | null;
   referred_by_applied: boolean;
   referred_by_code: string | null;
   referral_message: string | null;
@@ -207,10 +207,10 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
       <div className={styles.profileCard}>
         <div className={styles.profileTop}>
           <div className={styles.avatarPlaceholder}>
-            {(user.email ?? "?").charAt(0).toUpperCase()}
+            {(user.login ?? "?").charAt(0).toUpperCase()}
           </div>
           <div className={styles.profileMeta}>
-            <div className={styles.userName}>{user.email}</div>
+            <div className={styles.userName}>{user.login}</div>
             <div className={styles.userId}>ID: {user.id.slice(0, 8)}...</div>
           </div>
           <div className={styles.statusWrap}>

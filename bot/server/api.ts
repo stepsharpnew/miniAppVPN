@@ -1047,10 +1047,10 @@ export function createApiServer(api: Api, botToken: string) {
     res.json({ ok: true });
   });
 
-  // ── Web auth routes (email/password, JWT) ──
+  // ── Web auth routes (login/password, JWT) ──
   mountWebAuthRoutes(app, api);
 
-  // ── Sync routes (Telegram ↔ Web, email verification) ──
+  // ── Sync routes (Telegram ↔ Web, доказательство владения = initData + пароль) ──
   mountSyncRoutes(app, auth);
 
   return app;

@@ -31,7 +31,12 @@ export function getTelegramClientName(
 }
 
 export function getWebClientName(user: UserRow): string {
-  return user.email?.replace(/[^a-zA-Z0-9_-]/g, "_") ?? `web_${user.id.slice(0, 8)}`;
+  // Имя VPN-клиента детерминировано из login: для существующих пользователей,
+  // у которых раньше login = их прежний email, имя остаётся прежним
+  // (валидные символы email — латиница/цифры/._-/@ — попадают в безопасный набор
+  // или заменяются на «_»). Менять login после первой провизии нельзя,
+  // иначе extendVpnClient не найдёт клиента.
+  return user.login?.replace(/[^a-zA-Z0-9_-]/g, "_") ?? `web_${user.id.slice(0, 8)}`;
 }
 
 export async function syncVpnForPromoRedemption(

@@ -2,21 +2,16 @@ import bcrypt from "bcryptjs";
 import express from "express";
 import {
   createTelegramUserIfMissing,
-  getUserByEmail,
+  getUserByLogin,
   getUserByTelegramId,
-  linkEmailToTelegramUser,
+  linkLoginToTelegramUser,
   mergeAccounts,
+  updatePasswordHash,
 } from "./db";
-import { sendOtpEmail } from "./email-service";
-import { createOtp, verifyOtp, consumeVerifyToken } from "./otp-store";
-import { generateTokens } from "./web-auth";
+import { generateTokens, normalizeLogin, validateLogin } from "./web-auth";
 
 const SALT_ROUNDS = 10;
 const MIN_PASSWORD_LENGTH = 8;
-
-function validateEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
 
 interface TelegramUser {
   id: number;
@@ -28,26 +23,41 @@ function getTgUser(req: express.Request): TelegramUser {
   return (req as any).tgUser;
 }
 
+function validatePassword(password: string): string | null {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return `Пароль должен быть минимум ${MIN_PASSWORD_LENGTH} символов`;
+  }
+  if (password.length > 128) {
+    return "Пароль слишком длинный";
+  }
+  return null;
+}
+
 /**
  * Mounts sync routes under /api/sync/*.
  * All routes require Telegram initData auth (the `auth` middleware from api.ts).
+ *
+ * Доверие:
+ *  - Владение Telegram-аккаунтом доказывается подписанным initData (через `auth` middleware).
+ *  - Владение веб-аккаунтом доказывается знанием пароля (для login-веток).
+ * OTP/email больше не нужны.
  */
 export function mountSyncRoutes(
   app: express.Express,
   auth: express.RequestHandler,
 ) {
-  // Check current sync status for the telegram user
+  // Текущее состояние привязки для текущего Telegram-юзера.
   app.get("/api/sync/status", auth, async (req, res) => {
     const tg = getTgUser(req);
     try {
       const user = await getUserByTelegramId(tg.id);
       if (!user) {
-        res.json({ synced: false, email: null });
+        res.json({ synced: false, login: null });
         return;
       }
       res.json({
-        synced: !!user.email,
-        email: user.email ?? null,
+        synced: !!user.login,
+        login: user.login ?? null,
       });
     } catch (err) {
       console.error("Sync status error:", err);
@@ -55,124 +65,52 @@ export function mountSyncRoutes(
     }
   });
 
-  // Step 1: Send OTP code to email
-  app.post("/api/sync/send-code", auth, async (req, res) => {
+  // Регистрация веб-аккаунта изнутри Mini App: создаём логин/пароль и привязываем к TG.
+  app.post("/api/sync/register", auth, async (req, res) => {
     const tg = getTgUser(req);
-    const { email } = req.body ?? {};
+    const { login, password } = req.body ?? {};
 
-    if (!email || !validateEmail(email)) {
-      res.status(400).json({ error: "Некорректный email" });
+    if (!login || !password) {
+      res.status(400).json({ error: "Логин и пароль обязательны" });
       return;
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
+    const loginErr = validateLogin(login);
+    if (loginErr) {
+      res.status(400).json({ error: loginErr });
+      return;
+    }
+
+    const pwErr = validatePassword(password);
+    if (pwErr) {
+      res.status(400).json({ error: pwErr });
+      return;
+    }
+
+    const normalizedLogin = normalizeLogin(login);
 
     try {
       const tgUser = await getUserByTelegramId(tg.id);
-      if (tgUser?.email) {
+      if (tgUser?.login) {
         res.status(409).json({
-          error: "У вашего Telegram-аккаунта уже привязана почта",
+          error: "У вашего Telegram-аккаунта уже есть привязанный логин",
         });
         return;
       }
 
-      const existingEmail = await getUserByEmail(normalizedEmail);
-      if (existingEmail?.telegram_id && existingEmail.telegram_id !== tg.id) {
-        res.status(409).json({
-          error: "Этот email уже привязан к другому Telegram-аккаунту",
-        });
-        return;
-      }
-
-      const result = createOtp(normalizedEmail, "sync", tg.id);
-      if ("error" in result) {
-        res.status(429).json({ error: result.error });
-        return;
-      }
-
-      await sendOtpEmail(normalizedEmail, result.code);
-
-      res.json({ ok: true, message: "Код отправлен на почту" });
-    } catch (err) {
-      console.error("Sync send-code error:", err);
-      res.status(500).json({ error: "Не удалось отправить код" });
-    }
-  });
-
-  // Step 2: Verify OTP code
-  app.post("/api/sync/verify-code", auth, async (req, res) => {
-    const { email, code } = req.body ?? {};
-
-    if (!email || !code) {
-      res.status(400).json({ error: "Email и код обязательны" });
-      return;
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-
-    const result = verifyOtp(normalizedEmail, "sync", code.trim());
-    if ("error" in result) {
-      res.status(400).json({ error: result.error });
-      return;
-    }
-
-    try {
-      const existingUser = await getUserByEmail(normalizedEmail);
-      const needsPassword = !existingUser;
-
-      res.json({
-        verified: true,
-        verifyToken: result.verifyToken,
-        mode: needsPassword ? "register" : "login",
-      });
-    } catch (err) {
-      console.error("Sync verify-code error:", err);
-      res.status(500).json({ error: "Внутренняя ошибка" });
-    }
-  });
-
-  // Step 3a: Set password (registration — email not in DB)
-  app.post("/api/sync/register", auth, async (req, res) => {
-    const tg = getTgUser(req);
-    const { email, password, verifyToken } = req.body ?? {};
-
-    if (!email || !password || !verifyToken) {
-      res.status(400).json({ error: "Все поля обязательны" });
-      return;
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      res.status(400).json({
-        error: `Пароль должен быть минимум ${MIN_PASSWORD_LENGTH} символов`,
-      });
-      return;
-    }
-    if (password.length > 128) {
-      res.status(400).json({ error: "Пароль слишком длинный" });
-      return;
-    }
-
-    try {
-      const existing = await getUserByEmail(normalizedEmail);
+      const existing = await getUserByLogin(normalizedLogin);
       if (existing) {
-        res.status(409).json({ error: "Этот email уже зарегистрирован" });
+        res.status(409).json({ error: "Этот логин уже занят" });
         return;
       }
 
       await createTelegramUserIfMissing(tg.id, tg.username ?? null);
 
       const hash = await bcrypt.hash(password, SALT_ROUNDS);
-      const user = await linkEmailToTelegramUser(tg.id, normalizedEmail, hash);
+      const user = await linkLoginToTelegramUser(tg.id, normalizedLogin, hash);
 
       if (!user) {
         res.status(404).json({ error: "Telegram-аккаунт не найден" });
-        return;
-      }
-
-      if (!consumeVerifyToken(normalizedEmail, "sync", verifyToken)) {
-        res.status(403).json({ error: "Токен недействителен. Пройдите верификацию заново" });
         return;
       }
 
@@ -184,32 +122,34 @@ export function mountSyncRoutes(
     }
   });
 
-  // Step 3b: Login (email exists in DB — enter web password to merge)
-  app.post("/api/sync/login", auth, async (req, res) => {
+  // Привязка существующего веб-аккаунта к текущему Telegram-юзеру.
+  // Знание пароля = доказательство владения веб-аккаунтом, initData = доказательство TG.
+  app.post("/api/sync/link", auth, async (req, res) => {
     const tg = getTgUser(req);
-    const { email, password, verifyToken } = req.body ?? {};
+    const { login, password } = req.body ?? {};
 
-    if (!email || !password || !verifyToken) {
-      res.status(400).json({ error: "Все поля обязательны" });
+    if (!login || !password) {
+      res.status(400).json({ error: "Логин и пароль обязательны" });
       return;
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
+    const normalizedLogin = normalizeLogin(login);
 
     try {
-      const webUser = await getUserByEmail(normalizedEmail);
+      const webUser = await getUserByLogin(normalizedLogin);
       if (!webUser || !webUser.password_hash) {
-        res.status(401).json({ error: "Неверный email или пароль" });
+        res.status(401).json({ error: "Неверный логин или пароль" });
         return;
       }
 
       if (webUser.telegram_id && webUser.telegram_id !== tg.id) {
         res.status(409).json({
-          error: "Этот email уже привязан к другому Telegram-аккаунту",
+          error: "Этот логин уже привязан к другому Telegram-аккаунту",
         });
         return;
       }
 
+      // Уже привязан к этому же TG — просто отдаём токены.
       if (webUser.telegram_id === tg.id) {
         const tokens = generateTokens(webUser.id);
         res.json({ ok: true, ...tokens });
@@ -223,12 +163,8 @@ export function mountSyncRoutes(
       }
 
       const tgUser = await getUserByTelegramId(tg.id);
-      const ensuredTgUser = tgUser ?? await createTelegramUserIfMissing(tg.id, tg.username ?? null);
-
-      if (!consumeVerifyToken(normalizedEmail, "sync", verifyToken)) {
-        res.status(403).json({ error: "Токен недействителен. Пройдите верификацию заново" });
-        return;
-      }
+      const ensuredTgUser =
+        tgUser ?? (await createTelegramUserIfMissing(tg.id, tg.username ?? null));
 
       const merged = await mergeAccounts(
         ensuredTgUser.id,
@@ -240,8 +176,49 @@ export function mountSyncRoutes(
       const tokens = generateTokens(merged.id);
       res.json({ ok: true, ...tokens });
     } catch (err) {
-      console.error("Sync login error:", err);
+      console.error("Sync link error:", err);
       res.status(500).json({ error: "Не удалось завершить привязку" });
+    }
+  });
+
+  // Установка/смена пароля для уже привязанного веб-аккаунта изнутри Mini App.
+  // Это и «сменить пароль», и «забыл пароль» — initData служит доказательством владения.
+  app.post("/api/sync/set-password", auth, async (req, res) => {
+    const tg = getTgUser(req);
+    const { password } = req.body ?? {};
+
+    if (!password) {
+      res.status(400).json({ error: "Пароль обязателен" });
+      return;
+    }
+
+    const pwErr = validatePassword(password);
+    if (pwErr) {
+      res.status(400).json({ error: pwErr });
+      return;
+    }
+
+    try {
+      const user = await getUserByTelegramId(tg.id);
+      if (!user) {
+        res.status(404).json({ error: "Telegram-аккаунт не найден" });
+        return;
+      }
+      if (!user.login) {
+        res.status(400).json({
+          error: "Сначала привяжите логин — введите его при регистрации в разделе синхронизации",
+        });
+        return;
+      }
+
+      const hash = await bcrypt.hash(password, SALT_ROUNDS);
+      await updatePasswordHash(user.id, hash);
+
+      const tokens = generateTokens(user.id);
+      res.json({ ok: true, ...tokens });
+    } catch (err) {
+      console.error("Sync set-password error:", err);
+      res.status(500).json({ error: "Не удалось обновить пароль" });
     }
   });
 }

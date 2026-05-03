@@ -31,8 +31,12 @@ import {
   createTelegramUserIfMissing,
   generatePromoCodes,
   getUserById,
+  getUserByLogin,
   redeemPromoCode,
+  updatePasswordHash,
 } from "./db";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 import { sendGiftPromoAdminNotification } from "./promo-notifications";
 import { scheduleSubscriptionExpiryReminders } from "./subscription-reminders";
@@ -177,6 +181,55 @@ bot.command("promocode", async (ctx) => {
   } catch (err) {
     console.error("Ошибка генерации промокодов:", err);
     await ctx.reply("⚠️ Не удалось сгенерировать промокоды. Попробуй позже.");
+  }
+});
+
+// ────────────────── /reset_password <login> (только из админ-чата) ──────────────────
+
+bot.command("reset_password", async (ctx) => {
+  const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
+  if (!rawBuyChat) return;
+
+  const { chatId } = resolveAdminChat(rawBuyChat);
+  if (ctx.chat.id.toString() !== chatId) return;
+
+  const login = (ctx.match ?? "").trim();
+  if (!login) {
+    await ctx.reply(
+      "Использование: <code>/reset_password &lt;login&gt;</code>\n\n" +
+        "Сгенерирует временный пароль для пользователя и пришлёт его сюда. " +
+        "Передайте его пользователю через канал поддержки.",
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  try {
+    const user = await getUserByLogin(login);
+    if (!user) {
+      await ctx.reply(
+        `❌ Пользователь с логином <code>${escapeHtml(login)}</code> не найден.`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    // Криптостойкий случайный пароль (16 символов из URL-safe-алфавита).
+    const tempPassword = crypto.randomBytes(12).toString("base64url").slice(0, 16);
+    const hash = await bcrypt.hash(tempPassword, 10);
+    await updatePasswordHash(user.id, hash);
+
+    await ctx.reply(
+      `🔑 <b>Временный пароль выдан</b>\n\n` +
+        `👤 login: <code>${escapeHtml(user.login ?? "—")}</code>\n` +
+        `🆔 <code>${user.id}</code>\n\n` +
+        `Передайте пользователю:\n<code>${escapeHtml(tempPassword)}</code>\n\n` +
+        `<i>Рекомендуйте сменить пароль после входа.</i>`,
+      { parse_mode: "HTML" },
+    );
+  } catch (err) {
+    console.error("Admin reset password error:", err);
+    await ctx.reply("⚠️ Не удалось сбросить пароль. Подробности в логах.");
   }
 });
 

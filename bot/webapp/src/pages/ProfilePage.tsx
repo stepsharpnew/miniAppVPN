@@ -61,7 +61,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const [showSyncInfo, setShowSyncInfo] = useState(false);
   const [syncChecked, setSyncChecked] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
-  const [syncedEmail, setSyncedEmail] = useState<string | null>(null);
+  const [syncedLogin, setSyncedLogin] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -97,7 +97,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
       .then((data) => {
         if (!alive) return;
         setIsSynced(Boolean(data?.synced));
-        setSyncedEmail(data?.email ?? null);
+        setSyncedLogin(data?.login ?? null);
         setSyncChecked(true);
       })
       .catch(() => {
@@ -312,9 +312,9 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
           ) : isSynced ? (
             <>
               <div className={styles.syncStatusOk}>✓ Аккаунт синхронизирован</div>
-              {syncedEmail && (
+              {syncedLogin && (
                 <div className={styles.syncStatusText}>
-                  Вход в веб-кабинет: <b>{syncedEmail}</b>
+                  Вход в веб-кабинет: <b>{syncedLogin}</b>
                 </div>
               )}
             </>

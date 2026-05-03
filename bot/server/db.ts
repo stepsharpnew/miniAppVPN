@@ -29,7 +29,7 @@ export async function closeDb(): Promise<void> {
 export interface UserRow {
   id: string;
   telegram_id: number | null;
-  email: string | null;
+  login: string | null;
   password_hash: string | null;
   auth_source: string;
   is_blocked: boolean;
@@ -73,7 +73,7 @@ export interface ApplyReferralCodeResult {
 export interface ReferralRewardParty {
   userId: string;
   telegramId: number | null;
-  email: string | null;
+  login: string | null;
   referralCode: string | null;
 }
 
@@ -322,7 +322,7 @@ export async function markExpiryCancelledSent(userId: string): Promise<void> {
   );
 }
 
-// ── Web-flow (для сайта — работа по UUID id / email) ──
+// ── Web-flow (для сайта — работа по UUID id / login) ──
 
 export async function getUserById(
   id: string,
@@ -334,25 +334,25 @@ export async function getUserById(
   return rows[0] ?? null;
 }
 
-export async function getUserByEmail(
-  email: string,
+export async function getUserByLogin(
+  login: string,
 ): Promise<UserRow | null> {
   const { rows } = await getPool().query<UserRow>(
-    "SELECT * FROM users WHERE email = $1",
-    [email],
+    "SELECT * FROM users WHERE LOWER(login) = LOWER($1)",
+    [login],
   );
   return rows[0] ?? null;
 }
 
 export async function createWebUser(
-  email: string,
+  login: string,
   passwordHash: string,
 ): Promise<UserRow> {
   const { rows } = await getPool().query<UserRow>(
-    `INSERT INTO users (email, password_hash, auth_source)
+    `INSERT INTO users (login, password_hash, auth_source)
      VALUES ($1, $2, 'web')
      RETURNING *`,
-    [email, passwordHash],
+    [login, passwordHash],
   );
   return rows[0];
 }
@@ -427,11 +427,11 @@ export async function createTelegramUserIfMissing(
   throw new Error(`Failed to create or load telegram user ${telegramId}`);
 }
 
-// ── Sync: link email to existing telegram user (new registration) ──
+// ── Sync: link login/password to existing telegram user (new registration) ──
 
-export async function linkEmailToTelegramUser(
+export async function linkLoginToTelegramUser(
   telegramId: number,
-  email: string,
+  login: string,
   passwordHash: string,
 ): Promise<UserRow> {
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -439,13 +439,13 @@ export async function linkEmailToTelegramUser(
     try {
       const { rows } = await getPool().query<UserRow>(
         `UPDATE users
-         SET email = $2,
+         SET login = $2,
              password_hash = $3,
              auth_source = 'both',
              referral_code = COALESCE(referral_code, $4)
          WHERE telegram_id = $1
          RETURNING *`,
-        [telegramId, email, passwordHash, referralCode],
+        [telegramId, login, passwordHash, referralCode],
       );
       return rows[0];
     } catch (error) {
@@ -454,7 +454,7 @@ export async function linkEmailToTelegramUser(
     }
   }
 
-  throw new Error(`Failed to link email ${email} to telegram user ${telegramId}`);
+  throw new Error(`Failed to link login ${login} to telegram user ${telegramId}`);
 }
 
 export async function updateUserVpnConfig(
@@ -758,12 +758,12 @@ async function extendSubscriptionWithClient(
 }
 
 function mapReferralParty(
-  user: Pick<UserRow, "id" | "telegram_id" | "email" | "referral_code">,
+  user: Pick<UserRow, "id" | "telegram_id" | "login" | "referral_code">,
 ): ReferralRewardParty {
   return {
     userId: user.id,
     telegramId: user.telegram_id,
-    email: user.email,
+    login: user.login,
     referralCode: user.referral_code,
   };
 }

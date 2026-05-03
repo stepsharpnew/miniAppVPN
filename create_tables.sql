@@ -4,7 +4,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS users (
     id              UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
     telegram_id     BIGINT          UNIQUE,
-    email           TEXT            UNIQUE,
+    login           TEXT            UNIQUE,
     password_hash   TEXT,
     auth_source     TEXT            NOT NULL DEFAULT 'telegram',
     is_blocked      BOOLEAN         NOT NULL DEFAULT FALSE,
@@ -19,11 +19,28 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS vpn_config TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_nickname VARCHAR(255);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS login TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_source TEXT DEFAULT 'telegram';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code CHAR(8);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by_user_id UUID;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_applied_at TIMESTAMPTZ;
+
+-- ── Миграция: переезд с email на login (исключаем ПД) ──
+-- 1) Backfill login из email для существующих веб-пользователей.
+UPDATE users SET login = LOWER(email) WHERE login IS NULL AND email IS NOT NULL;
+
+-- 2) Снимаем уникальное ограничение и колонку email — больше не используем.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'users_email_unique'
+  ) THEN
+    ALTER TABLE users DROP CONSTRAINT users_email_unique;
+  END IF;
+END $$;
+
+ALTER TABLE users DROP COLUMN IF EXISTS email;
 
 DO $$
 BEGIN
@@ -56,13 +73,14 @@ BEGIN
   END IF;
 END $$;
 
--- Уникальное ограничение на email (если отсутствует)
+-- Уникальное ограничение на login (case-insensitive, NULL допустим для TG-only)
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'users_email_unique'
+    SELECT 1 FROM pg_indexes
+    WHERE schemaname = 'public' AND indexname = 'users_login_unique'
   ) THEN
-    ALTER TABLE users ADD CONSTRAINT users_email_unique UNIQUE (email);
+    CREATE UNIQUE INDEX users_login_unique ON users (LOWER(login));
   END IF;
 END $$;
 

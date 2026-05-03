@@ -10,8 +10,8 @@ function formatPartyIdentity(party: ReferralRewardParty | null): string {
   if (party.telegramId) {
     parts.push(`tg: <code>${party.telegramId}</code>`);
   }
-  if (party.email) {
-    parts.push(`email: <code>${escapeHtml(party.email)}</code>`);
+  if (party.login) {
+    parts.push(`login: <code>${escapeHtml(party.login)}</code>`);
   }
   return parts.join(" | ");
 }

@@ -1,29 +1,30 @@
 import WebApp from "@twa-dev/sdk";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import styles from "./SyncPage.module.css";
 
-type Step = "email" | "code" | "password";
-type SyncMode = "register" | "login" | null;
+type SyncMode = "register" | "link";
 
 interface SyncPageProps {
   onBack: () => void;
 }
 
 export function SyncPage({ onBack }: SyncPageProps) {
-  const [step, setStep] = useState<Step>("email");
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
+  const [mode, setMode] = useState<SyncMode>("register");
+  const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [verifyToken, setVerifyToken] = useState("");
-  const [syncMode, setSyncMode] = useState<SyncMode>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [synced, setSynced] = useState(false);
-  const [syncedEmail, setSyncedEmail] = useState<string | null>(null);
+  const [syncedLogin, setSyncedLogin] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [checkingStatus, setCheckingStatus] = useState(true);
-  const codeInputRef = useRef<HTMLInputElement>(null);
+
+  // Set/change password (для уже привязанного аккаунта).
+  const [showSetPassword, setShowSetPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
+  const [setPasswordSuccess, setSetPasswordSuccess] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -35,78 +36,23 @@ export function SyncPage({ onBack }: SyncPageProps) {
         if (!alive) return;
         if (data?.synced) {
           setSynced(true);
-          setSyncedEmail(data.email);
+          setSyncedLogin(data.login ?? null);
         }
         setCheckingStatus(false);
       })
       .catch(() => {
         if (alive) setCheckingStatus(false);
       });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
-  const handleSendCode = useCallback(async () => {
-    if (!email.trim() || loading) return;
-    setError("");
-    setLoading(true);
-
-    try {
-      const res = await fetch("/api/sync/send-code", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Telegram-Init-Data": WebApp.initData,
-        },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Ошибка отправки");
-        return;
-      }
-      setStep("code");
-      setTimeout(() => codeInputRef.current?.focus(), 100);
-    } catch {
-      setError("Ошибка соединения");
-    } finally {
-      setLoading(false);
-    }
-  }, [email, loading]);
-
-  const handleVerifyCode = useCallback(async () => {
-    if (!code.trim() || loading) return;
-    setError("");
-    setLoading(true);
-
-    try {
-      const res = await fetch("/api/sync/verify-code", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Telegram-Init-Data": WebApp.initData,
-        },
-        body: JSON.stringify({ email: email.trim(), code: code.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Ошибка верификации");
-        return;
-      }
-      setVerifyToken(data.verifyToken);
-      setSyncMode(data.mode);
-      setStep("password");
-    } catch {
-      setError("Ошибка соединения");
-    } finally {
-      setLoading(false);
-    }
-  }, [email, code, loading]);
-
-  const handleSubmitPassword = useCallback(async () => {
-    if (!password || loading) return;
+  const handleSubmit = useCallback(async () => {
+    if (!login.trim() || !password || loading) return;
     setError("");
 
-    if (syncMode === "register" && password !== confirmPassword) {
+    if (mode === "register" && password !== confirmPassword) {
       setError("Пароли не совпадают");
       return;
     }
@@ -116,7 +62,7 @@ export function SyncPage({ onBack }: SyncPageProps) {
     }
 
     setLoading(true);
-    const endpoint = syncMode === "register" ? "/api/sync/register" : "/api/sync/login";
+    const endpoint = mode === "register" ? "/api/sync/register" : "/api/sync/link";
 
     try {
       const res = await fetch(endpoint, {
@@ -126,9 +72,8 @@ export function SyncPage({ onBack }: SyncPageProps) {
           "X-Telegram-Init-Data": WebApp.initData,
         },
         body: JSON.stringify({
-          email: email.trim(),
+          login: login.trim(),
           password,
-          verifyToken,
         }),
       });
       const data = await res.json();
@@ -142,7 +87,45 @@ export function SyncPage({ onBack }: SyncPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [password, confirmPassword, syncMode, email, verifyToken, loading]);
+  }, [login, password, confirmPassword, mode, loading]);
+
+  const handleSetPassword = useCallback(async () => {
+    if (!newPassword || loading) return;
+    setError("");
+
+    if (newPassword !== newPasswordConfirm) {
+      setError("Пароли не совпадают");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setError("Пароль должен быть минимум 8 символов");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/sync/set-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": WebApp.initData,
+        },
+        body: JSON.stringify({ password: newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Ошибка");
+        return;
+      }
+      setSetPasswordSuccess(true);
+      setNewPassword("");
+      setNewPasswordConfirm("");
+    } catch {
+      setError("Ошибка соединения");
+    } finally {
+      setLoading(false);
+    }
+  }, [newPassword, newPasswordConfirm, loading]);
 
   if (checkingStatus) {
     return (
@@ -162,7 +145,7 @@ export function SyncPage({ onBack }: SyncPageProps) {
           <div className={styles.successIcon}>✓</div>
           <div className={styles.title}>Аккаунт привязан!</div>
           <p className={styles.subtitle}>
-            Теперь вы можете входить на сайт с помощью <b>{email}</b> и пароля.
+            Теперь вы можете входить на сайт по логину <b>{login.trim()}</b> и паролю.
           </p>
           <button className={styles.primaryBtn} onClick={onBack}>
             Вернуться в профиль
@@ -180,12 +163,79 @@ export function SyncPage({ onBack }: SyncPageProps) {
           <div className={styles.syncedIcon}>🔗</div>
           <div className={styles.title}>Аккаунт уже привязан</div>
           <p className={styles.subtitle}>
-            Ваш Telegram привязан к <b>{syncedEmail}</b>.
-            Используйте этот email и пароль для входа на сайт.
+            Ваш Telegram привязан к логину <b>{syncedLogin}</b>.
+            Используйте его для входа на сайт.
           </p>
-          <button className={styles.primaryBtn} onClick={onBack}>
-            Назад
-          </button>
+
+          {!showSetPassword ? (
+            <>
+              <button
+                className={styles.primaryBtn}
+                onClick={() => {
+                  setShowSetPassword(true);
+                  setError("");
+                  setSetPasswordSuccess(false);
+                }}
+              >
+                Сменить пароль
+              </button>
+              <button className={styles.linkBtn} onClick={onBack}>
+                Назад
+              </button>
+            </>
+          ) : setPasswordSuccess ? (
+            <>
+              <div className={styles.successIcon}>✓</div>
+              <p className={styles.subtitle}>Пароль обновлён.</p>
+              <button className={styles.primaryBtn} onClick={onBack}>
+                Готово
+              </button>
+            </>
+          ) : (
+            <>
+              <p className={styles.subtitle}>
+                Задайте новый пароль для входа на сайт. Старый пароль не нужен —
+                подтверждение через ваш Telegram-аккаунт.
+              </p>
+              <input
+                type="password"
+                className={styles.input}
+                placeholder="Новый пароль"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                autoComplete="new-password"
+                minLength={8}
+                autoFocus
+              />
+              <input
+                type="password"
+                className={styles.input}
+                placeholder="Повторите пароль"
+                value={newPasswordConfirm}
+                onChange={(e) => setNewPasswordConfirm(e.target.value)}
+                autoComplete="new-password"
+                minLength={8}
+                onKeyDown={(e) => e.key === "Enter" && handleSetPassword()}
+              />
+              {error && <div className={styles.error}>{error}</div>}
+              <button
+                className={styles.primaryBtn}
+                onClick={handleSetPassword}
+                disabled={!newPassword || loading}
+              >
+                {loading ? "Сохраняем..." : "Сохранить пароль"}
+              </button>
+              <button
+                className={styles.linkBtn}
+                onClick={() => {
+                  setShowSetPassword(false);
+                  setError("");
+                }}
+              >
+                Отмена
+              </button>
+            </>
+          )}
         </div>
       </div>
     );
@@ -196,136 +246,84 @@ export function SyncPage({ onBack }: SyncPageProps) {
       <button className={styles.backBtn} onClick={onBack}>← Назад</button>
 
       <div className={styles.card}>
-        <div className={styles.stepIndicator}>
-          <div className={`${styles.dot} ${step === "email" ? styles.dotActive : styles.dotDone}`} />
-          <div className={styles.line} />
-          <div className={`${styles.dot} ${step === "code" ? styles.dotActive : step === "password" ? styles.dotDone : ""}`} />
-          <div className={styles.line} />
-          <div className={`${styles.dot} ${step === "password" ? styles.dotActive : ""}`} />
+        <div className={styles.title}>
+          {mode === "register" ? "Создать веб-аккаунт" : "Привязать веб-аккаунт"}
         </div>
 
-        {step === "email" && (
-          <>
-            <div className={styles.title}>Привязка аккаунта</div>
-            <div className={styles.infoBox}>
-              <span className={styles.infoIcon}>i</span>
-              <span>
-                Бета-тестирование: функционал синхронизации может работать нестабильно.
-              </span>
-            </div>
-            <p className={styles.subtitle}>
-              Введите email, на который придёт код подтверждения.
-              После привязки вы сможете входить на сайт с помощью email и пароля.
-            </p>
-            <input
-              type="email"
-              className={styles.input}
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-              autoFocus
-              onKeyDown={(e) => e.key === "Enter" && handleSendCode()}
-            />
-            {error && <div className={styles.error}>{error}</div>}
-            <button
-              className={styles.primaryBtn}
-              onClick={handleSendCode}
-              disabled={!email.trim() || loading}
-            >
-              {loading ? "Отправляем..." : "Получить код"}
-            </button>
-          </>
-        )}
+        <div className={styles.modeTabs}>
+          <button
+            className={`${styles.modeTab} ${mode === "register" ? styles.modeTabActive : ""}`}
+            onClick={() => {
+              setMode("register");
+              setError("");
+            }}
+          >
+            Новый
+          </button>
+          <button
+            className={`${styles.modeTab} ${mode === "link" ? styles.modeTabActive : ""}`}
+            onClick={() => {
+              setMode("link");
+              setError("");
+            }}
+          >
+            Уже есть
+          </button>
+        </div>
 
-        {step === "code" && (
-          <>
-            <div className={styles.title}>Введите код</div>
-            <p className={styles.subtitle}>
-              Код отправлен на <b>{email}</b>
-            </p>
-            <input
-              ref={codeInputRef}
-              type="text"
-              inputMode="numeric"
-              className={`${styles.input} ${styles.codeInput}`}
-              placeholder="Код из письма"
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 5))}
-              maxLength={5}
-              autoComplete="one-time-code"
-              onKeyDown={(e) => e.key === "Enter" && handleVerifyCode()}
-            />
-            {error && <div className={styles.error}>{error}</div>}
-            <button
-              className={styles.primaryBtn}
-              onClick={handleVerifyCode}
-              disabled={code.length < 5 || loading}
-            >
-              {loading ? "Проверяем..." : "Подтвердить"}
-            </button>
-            <button
-              className={styles.linkBtn}
-              onClick={() => {
-                setStep("email");
-                setCode("");
-                setError("");
-              }}
-            >
-              Изменить email
-            </button>
-          </>
-        )}
+        <p className={styles.subtitle}>
+          {mode === "register"
+            ? "Придумайте логин и пароль — они будут использоваться для входа на сайт."
+            : "Введите логин и пароль от вашего веб-аккаунта, чтобы привязать его к Telegram."}
+        </p>
 
-        {step === "password" && (
-          <>
-            <div className={styles.title}>
-              {syncMode === "register" ? "Задайте пароль" : "Введите пароль"}
-            </div>
-            <p className={styles.subtitle}>
-              {syncMode === "register"
-                ? "Этот пароль будет использоваться для входа на сайт"
-                : "Введите пароль от вашего аккаунта на сайте"}
-            </p>
-            <input
-              type="password"
-              className={styles.input}
-              placeholder="Пароль"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete={syncMode === "register" ? "new-password" : "current-password"}
-              minLength={8}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && syncMode === "login") handleSubmitPassword();
-              }}
-            />
-            {syncMode === "register" && (
-              <input
-                type="password"
-                className={styles.input}
-                placeholder="Повторите пароль"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                autoComplete="new-password"
-                minLength={8}
-                onKeyDown={(e) => e.key === "Enter" && handleSubmitPassword()}
-              />
-            )}
-            {error && <div className={styles.error}>{error}</div>}
-            <button
-              className={styles.primaryBtn}
-              onClick={handleSubmitPassword}
-              disabled={!password || loading}
-            >
-              {loading
-                ? "Загрузка..."
-                : syncMode === "register"
-                  ? "Привязать аккаунт"
-                  : "Войти и привязать"}
-            </button>
-          </>
+        <input
+          type="text"
+          className={styles.input}
+          placeholder="Логин"
+          value={login}
+          onChange={(e) => setLogin(e.target.value)}
+          autoComplete="username"
+          minLength={3}
+          maxLength={64}
+          autoFocus
+        />
+        <input
+          type="password"
+          className={styles.input}
+          placeholder="Пароль"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete={mode === "register" ? "new-password" : "current-password"}
+          minLength={8}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && mode === "link") handleSubmit();
+          }}
+        />
+        {mode === "register" && (
+          <input
+            type="password"
+            className={styles.input}
+            placeholder="Повторите пароль"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
+            minLength={8}
+            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+          />
         )}
+        {error && <div className={styles.error}>{error}</div>}
+        <button
+          className={styles.primaryBtn}
+          onClick={handleSubmit}
+          disabled={!login.trim() || !password || loading}
+        >
+          {loading
+            ? "Загрузка..."
+            : mode === "register"
+              ? "Создать и привязать"
+              : "Войти и привязать"}
+        </button>
       </div>
     </div>
   );

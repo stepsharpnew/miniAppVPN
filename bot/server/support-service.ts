@@ -18,9 +18,9 @@ export interface SupportActor {
 }
 
 /**
- * Labels aligned with Mini App: first line bold ≈ имя, second · @username or email.
+ * Labels aligned with Mini App: first line bold ≈ имя, second · @username or login.
  * Uses DB telegram_nickname when set; otherwise same shape as /api/support/send
- * (first_name + @username) via getChat when possible, then email fallback.
+ * (first_name + @username) via getChat when possible, then login fallback.
  */
 export function supportActorFromUserRow(user: UserRow): SupportActor | null {
   const tgId = user.telegram_id;
@@ -36,17 +36,17 @@ export function supportActorFromUserRow(user: UserRow): SupportActor | null {
     };
   }
 
-  const email = user.email?.trim() ?? "";
+  const login = user.login?.trim() ?? "";
   return {
     dialogUserId: tgId,
-    userName: email ? email.split("@")[0] : "Веб-пользователь",
-    userTag: email || "без email",
+    userName: login || "Веб-пользователь",
+    userTag: login || "без логина",
   };
 }
 
 /**
  * Same labels as Mini App `/api/support/send`: first_name + @username from Telegram
- * when the Bot API can resolve the private chat; otherwise DB nickname or email.
+ * when the Bot API can resolve the private chat; otherwise DB nickname or login.
  */
 export async function resolveSupportActor(
   api: Api,

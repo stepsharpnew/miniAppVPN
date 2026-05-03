@@ -6,7 +6,7 @@ import { type Api } from "grammy";
 import {
   applyReferralCode,
   applyReferralRewardsForPayment,
-  getUserByEmail,
+  getUserByLogin,
   getUserById,
   createWebUser,
   getPool,
@@ -18,7 +18,6 @@ import {
   incrementServerUserCount,
   isPaymentProcessed,
   markPaymentProcessed,
-  updatePasswordHash,
   type UserRow,
   type ServerRow,
 } from "./db";
@@ -38,8 +37,6 @@ import {
 import { PRICING, type PaymentMetadata } from "../shared/plans";
 import { BRAND_NAME, PAYMENT_ADMIN_NOTIFY } from "../shared/texts";
 import { resolveAdminChat } from "./store";
-import { sendPasswordResetEmail } from "./email-service";
-import { createOtp, verifyOtp, consumeVerifyToken } from "./otp-store";
 import { sendReferralRewardNotifications } from "./referral-notifications";
 import { sendGiftPromoAdminNotification } from "./promo-notifications";
 import { getWebClientName, syncVpnForPromoRedemption } from "./promo-vpn";
@@ -47,6 +44,11 @@ import { getWebClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "30d";
 const SALT_ROUNDS = 10;
+
+// Логин: case-insensitive, 3–64 символа, латиница/цифры/точка/подчёркивание/дефис/собака.
+// `@` оставляем разрешённым, чтобы не отбраковать существующих пользователей,
+// у которых login = их прежний email.
+const LOGIN_REGEX = /^[A-Za-z0-9._@-]{3,64}$/;
 
 function getSecrets() {
   const secret = process.env.JWT_SECRET || "dev-jwt-secret-change-me";
@@ -104,8 +106,15 @@ export function getWebUserId(req: express.Request): string {
   return (req as any).webUserId;
 }
 
-function validateEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+export function validateLogin(login: string): string | null {
+  if (!LOGIN_REGEX.test(login)) {
+    return "Логин: 3–64 символа, латиница/цифры и . _ - @";
+  }
+  return null;
+}
+
+export function normalizeLogin(login: string): string {
+  return login.trim().toLowerCase();
 }
 
 function validatePassword(password: string): string | null {
@@ -148,11 +157,6 @@ function mapPromoRedeemError(error?: string): { status: number; message: string 
   }
 }
 
-async function isTelegramSyncedWebUser(userId: string): Promise<boolean> {
-  const user = await getUserById(userId);
-  return Boolean(user?.telegram_id);
-}
-
 // ── Web payment processing (shared between polling and webhook) ──
 
 export async function processWebPaymentFromWebhook(paymentId: string, api?: Api): Promise<void> {
@@ -170,7 +174,7 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
 
   const userId = pending.userId as string;
   const user = await getUserById(userId);
-  const clientName = user?.email?.replace(/[^a-zA-Z0-9_-]/g, "_") ?? `web_${userId.slice(0, 8)}`;
+  const clientName = user ? getWebClientName(user) : `web_${userId.slice(0, 8)}`;
 
   let config = pending.config ?? getConfig(userId) ?? undefined;
   let provisionOk = !!config;
@@ -231,8 +235,8 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
   const plan = PRICING.find((p) => p.months === pending.months);
   const planLabel = plan?.label ?? `${pending.months} мес.`;
   const amountStr = `${pending.amount.toFixed(0)}₽`;
-  const userName = user?.email ?? pending.firstName ?? "Веб-пользователь";
-  const userTag = user?.email ? `email:${user.email}` : "без email";
+  const userName = user?.login ?? pending.firstName ?? "Веб-пользователь";
+  const userTag = user?.login ? `login:${user.login}` : "без логина";
   const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
   if (api && rawBuyChat) {
     const admin = resolveAdminChat(rawBuyChat);
@@ -275,13 +279,14 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
   // ════════════════════════════════════════════════════════════
 
   app.post("/api/web/register", async (req, res) => {
-    const { email, password } = req.body ?? {};
-    if (!email || !password) {
-      res.status(400).json({ error: "Email и пароль обязательны" });
+    const { login, password } = req.body ?? {};
+    if (!login || !password) {
+      res.status(400).json({ error: "Логин и пароль обязательны" });
       return;
     }
-    if (!validateEmail(email)) {
-      res.status(400).json({ error: "Некорректный email" });
+    const loginErr = validateLogin(login);
+    if (loginErr) {
+      res.status(400).json({ error: loginErr });
       return;
     }
     const pwErr = validatePassword(password);
@@ -290,35 +295,36 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       return;
     }
 
-    const existing = await getUserByEmail(email.toLowerCase().trim());
+    const normalizedLogin = normalizeLogin(login);
+    const existing = await getUserByLogin(normalizedLogin);
     if (existing) {
-      res.status(409).json({ error: "Пользователь с таким email уже существует" });
+      res.status(409).json({ error: "Пользователь с таким логином уже существует" });
       return;
     }
 
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
-    const user = await createWebUser(email.toLowerCase().trim(), hash);
+    const user = await createWebUser(normalizedLogin, hash);
     const tokens = generateTokens(user.id);
 
     res.json({ user: sanitizeUser(user), ...tokens });
   });
 
   app.post("/api/web/login", async (req, res) => {
-    const { email, password } = req.body ?? {};
-    if (!email || !password) {
-      res.status(400).json({ error: "Email и пароль обязательны" });
+    const { login, password } = req.body ?? {};
+    if (!login || !password) {
+      res.status(400).json({ error: "Логин и пароль обязательны" });
       return;
     }
 
-    const user = await getUserByEmail(email.toLowerCase().trim());
+    const user = await getUserByLogin(normalizeLogin(login));
     if (!user || !user.password_hash) {
-      res.status(401).json({ error: "Неверный email или пароль" });
+      res.status(401).json({ error: "Неверный логин или пароль" });
       return;
     }
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
-      res.status(401).json({ error: "Неверный email или пароль" });
+      res.status(401).json({ error: "Неверный логин или пароль" });
       return;
     }
 
@@ -408,7 +414,7 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       is_blocked: user.is_blocked,
       config: active ? user.vpn_config : null,
       created_at: user.created_at,
-      email: user.email,
+      login: user.login,
       referred_by_applied: referralInfo.referred_by_applied,
       referred_by_code: referralInfo.referred_by_code,
       referral_message: referralInfo.referral_message,
@@ -459,11 +465,11 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
         userRow = await getUserById(user.id);
         if (!userRow) throw new Error(`User missing after VPN promo sync: ${user.id}`);
         if (api && promo.newExpiredAt != null) {
-          const userName = userRow.email ?? "Веб-пользователь";
+          const userName = userRow.login ?? "Веб-пользователь";
           const userTag = userRow.telegram_nickname
             ? `@${userRow.telegram_nickname}`
-            : userRow.email
-              ? `email: ${userRow.email}`
+            : userRow.login
+              ? `login: ${userRow.login}`
               : "без контакта";
           await sendGiftPromoAdminNotification(api, {
             userName,
@@ -488,7 +494,7 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
             expired_at: userRow.expired_at,
             is_blocked: userRow.is_blocked,
             config: active ? (userRow.vpn_config ?? config ?? null) : null,
-            email: userRow.email,
+            login: userRow.login,
             referred_by_applied: referralInfo.referred_by_applied,
             referred_by_code: referralInfo.referred_by_code,
             referral_message: referralInfo.referral_message,
@@ -577,8 +583,8 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
 
     const metadata: PaymentMetadata = {
       telegram_user_id: userId,
-      username: user.email ?? "",
-      first_name: user.email ?? "Веб-пользователь",
+      username: user.login ?? "",
+      first_name: user.login ?? "Веб-пользователь",
       months: String(plan.months),
       duration_code: plan.durationCode,
       is_renewal: isRenewal ? "1" : "0",
@@ -630,8 +636,8 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       savePendingPayment({
         paymentId: payment.id,
         userId,
-        username: user.email ?? "",
-        firstName: user.email ?? "Веб-пользователь",
+        username: user.login ?? "",
+        firstName: user.login ?? "Веб-пользователь",
         months: plan.months,
         durationCode: plan.durationCode,
         amount: plan.price,
@@ -690,96 +696,6 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       status: updated?.status ?? pending.status,
       config: updated?.config ?? pending.config ?? null,
     });
-  });
-
-  // ════════════════════════════════════════════════════════════
-  //  Password reset (forgot password)
-  // ════════════════════════════════════════════════════════════
-
-  app.post("/api/web/forgot-password", async (req, res) => {
-    const { email } = req.body ?? {};
-    if (!email || !validateEmail(email)) {
-      res.status(400).json({ error: "Некорректный email" });
-      return;
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-
-    try {
-      const user = await getUserByEmail(normalizedEmail);
-      if (!user) {
-        res.json({ ok: true });
-        return;
-      }
-
-      const result = createOtp(normalizedEmail, "reset");
-      if ("error" in result) {
-        res.status(429).json({ error: result.error });
-        return;
-      }
-
-      await sendPasswordResetEmail(normalizedEmail, result.code);
-      res.json({ ok: true });
-    } catch (err) {
-      console.error("Forgot password error:", err);
-      res.status(500).json({ error: "Не удалось отправить код" });
-    }
-  });
-
-  app.post("/api/web/verify-reset-code", async (req, res) => {
-    const { email, code } = req.body ?? {};
-    if (!email || !code) {
-      res.status(400).json({ error: "Email и код обязательны" });
-      return;
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-    const result = verifyOtp(normalizedEmail, "reset", code.trim());
-
-    if ("error" in result) {
-      res.status(400).json({ error: result.error });
-      return;
-    }
-
-    res.json({ verified: true, verifyToken: result.verifyToken });
-  });
-
-  app.post("/api/web/reset-password", async (req, res) => {
-    const { email, verifyToken, newPassword } = req.body ?? {};
-    if (!email || !verifyToken || !newPassword) {
-      res.status(400).json({ error: "Все поля обязательны" });
-      return;
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-
-    const pwErr = validatePassword(newPassword);
-    if (pwErr) {
-      res.status(400).json({ error: pwErr });
-      return;
-    }
-
-    if (!consumeVerifyToken(normalizedEmail, "reset", verifyToken)) {
-      res.status(403).json({ error: "Токен недействителен. Пройдите верификацию заново" });
-      return;
-    }
-
-    try {
-      const user = await getUserByEmail(normalizedEmail);
-      if (!user) {
-        res.status(404).json({ error: "Пользователь не найден" });
-        return;
-      }
-
-      const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-      await updatePasswordHash(user.id, hash);
-
-      const tokens = generateTokens(user.id);
-      res.json({ ok: true, ...tokens });
-    } catch (err) {
-      console.error("Reset password error:", err);
-      res.status(500).json({ error: "Не удалось сбросить пароль" });
-    }
   });
 
   // ════════════════════════════════════════════════════════════
@@ -848,7 +764,7 @@ function sanitizeUser(user: UserRow) {
   const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
   return {
     id: user.id,
-    email: user.email,
+    login: user.login,
     auth_source: user.auth_source,
     active,
     expired_at: user.expired_at,

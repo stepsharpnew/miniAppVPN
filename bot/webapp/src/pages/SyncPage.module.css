@@ -171,6 +171,32 @@
   margin-top: 2px;
 }
 
+.modeTabs {
+  display: flex;
+  width: 100%;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 4px;
+  gap: 4px;
+}
+
+.modeTab {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.2s, color 0.2s;
+}
+
+.modeTabActive {
+  background: var(--accent-blue);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(77, 139, 255, 0.35);
+}
+
 .successIcon {
   width: 56px;
   height: 56px;

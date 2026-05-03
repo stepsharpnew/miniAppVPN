@@ -3,7 +3,7 @@ import { apiFetch, clearTokens, getAccessToken } from "../utils/api";
 
 export interface WebUser {
   id: string;
-  email: string | null;
+  login: string | null;
   auth_source: string;
   active: boolean;
   expired_at: string | null;
