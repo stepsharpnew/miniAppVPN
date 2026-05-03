@@ -80,13 +80,18 @@ jobs:
             cd ~/meme_bot
 
             # ── Освободить 80/443 под edge-nginx ──
-            # 1) Хостовые сервисы (типичные кандидаты).
+            # 1) Хостовые сервисы (типичные кандидаты): stop + disable + mask, чтобы
+            #    они не воскресали (Restart=, cron, watchdog и т. п.).
             if command -v systemctl >/dev/null 2>&1; then
               for svc in nginx apache2 httpd caddy traefik lighttpd haproxy; do
-                if systemctl is-active --quiet "$svc" 2>/dev/null; then
-                  echo "Stopping host $svc (releases ports for Docker edge-nginx)"
-                  sudo systemctl stop "$svc" || true
+                # Юнит вообще существует на этом хосте?
+                if ! systemctl list-unit-files --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "${svc}.service"; then
+                  continue
                 fi
+                echo "Disabling+masking host service ${svc} (frees ports for Docker edge-nginx)"
+                sudo systemctl stop "$svc" 2>/dev/null || true
+                sudo systemctl disable "$svc" 2>/dev/null || true
+                sudo systemctl mask "$svc" 2>/dev/null || true
               done
             fi
 
