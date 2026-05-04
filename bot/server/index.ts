@@ -601,6 +601,7 @@ void (async () => {
 
   const url = resolvedMiniAppUrl();
   if (url) {
+    console.log(`Mini App URL: ${url}`);
     try {
       await bot.api.setChatMenuButton({
         menu_button: {
@@ -621,6 +622,13 @@ void (async () => {
     ]);
   } catch (e) {
     console.warn("Не удалось установить команды бота:", e);
+  }
+
+  try {
+    // Бот работает через long polling, поэтому старый webhook блокирует получение /start.
+    await bot.api.deleteWebhook({ drop_pending_updates: false });
+  } catch (e) {
+    console.warn("Не удалось сбросить webhook перед запуском polling:", e);
   }
 
   const subscriptionReminderTask = scheduleSubscriptionExpiryReminders(
