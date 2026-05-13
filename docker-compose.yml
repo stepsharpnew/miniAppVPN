@@ -51,7 +51,11 @@ services:
     container_name: meme-bot-preprod
     restart: unless-stopped
     env_file:
-      - .env.preprod
+      # required: false — чтобы prod-деплой (push в main) не падал на валидации,
+      # когда на сервере ещё нет .env.preprod. Реальный запуск bot-preprod
+      # происходит только из preprod-job, который этот файл предварительно создаёт.
+      - path: .env.preprod
+        required: false
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-meme}:${POSTGRES_PASSWORD:-meme_secret}@postgres:5432/${POSTGRES_DB:-meme_db}"
     expose:
@@ -82,8 +86,9 @@ services:
       # Certbot на хосте: certonly --webroot -w /var/www/certbot (см. nginx.conf /.well-known)
       - /var/www/certbot:/var/www/certbot:ro
     depends_on:
+      # Только prod-bot. bot-preprod поднимается отдельно из preprod-job; nginx
+      # маршрутизирует на него через docker-DNS (resolver 127.0.0.11) при запросе.
       - bot
-      - bot-preprod
     networks:
       - meme-net
 
