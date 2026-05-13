@@ -4,9 +4,10 @@ on:
   push:
     branches:
       - main
+      - dev
 
 jobs:
-  # ── 1. Lint & type-check bot ────────────────────────────────
+  # ── 1. Lint & type-check bot (общий для prod и preprod) ─────
   check-bot:
     runs-on: ubuntu-latest
     steps:
@@ -26,12 +27,36 @@ jobs:
         run: npm run bot:check
         working-directory: bot
 
-  # ── 2. Build & deploy everything via docker-compose ─────────
-  deploy:
+  # ── 2a. PROD: деплой при push в main → app.memeinternet.site ─
+  deploy-prod:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     needs: check-bot
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed paths
+        id: changes
+        run: |
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          else
+            CHANGED="ALL"
+          fi
+          echo "Changed files:"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '^(nginx\.conf|nginx/|bot/webapp/|website/)'; then
+            echo "rebuild_nginx=true" >> $GITHUB_OUTPUT
+          else
+            echo "rebuild_nginx=false" >> $GITHUB_OUTPUT
+          fi
+          if echo "$CHANGED" | grep -qE '^create_tables\.sql$'; then
+            echo "run_migrator=true" >> $GITHUB_OUTPUT
+          else
+            echo "run_migrator=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Set up SSH
         uses: webfactory/ssh-agent@v0.9.0
@@ -57,6 +82,7 @@ jobs:
             --exclude=".git" \
             --exclude="node_modules" \
             --exclude=".env" \
+            --exclude=".env.preprod" \
             --exclude=".vercel" \
             --exclude="__pycache__" \
             ./ ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }}:~/meme_bot/
@@ -73,40 +99,34 @@ jobs:
           printf '%s\n' "$DOTENV_CONTENT" | ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
             "tee ~/meme_bot/.env ~/meme_bot/bot/.env > /dev/null"
 
-      - name: Build and restart services
+      - name: Ensure ports 80/443 are free (first-run / drift guard)
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
             set -euo pipefail
-            cd ~/meme_bot
-
-            # ── Освободить 80/443 под edge-nginx ──
-            # 1) Хостовые сервисы: stop + disable + mask.
-            #    Не полагаемся на list-unit-files (формат/локаль отличаются) — проверяем через systemctl cat.
+            # Если edge-nginx уже работает — порты заняты ИМ, ничего не освобождаем.
+            if docker ps --format '{{.Names}}' | grep -q '^edge-nginx$'; then
+              echo "edge-nginx already running — skipping host port cleanup"
+              exit 0
+            fi
             if command -v systemctl >/dev/null 2>&1; then
               for svc in nginx apache2 httpd caddy traefik lighttpd haproxy; do
                 if ! systemctl cat "${svc}.service" >/dev/null 2>&1; then
                   continue
                 fi
-                echo "Disabling+masking host service ${svc} (frees ports for Docker edge-nginx)"
+                echo "Disabling+masking host service ${svc}"
                 sudo systemctl stop "${svc}.service" 2>/dev/null || true
                 sudo systemctl disable "${svc}.service" 2>/dev/null || true
                 sudo systemctl mask "${svc}.service" 2>/dev/null || true
               done
             fi
-
-            # 2) Осиротевшие docker-контейнеры с publish 80/443 (не host-network).
             for port in 80 443; do
               conflicting=$(docker ps --filter "publish=${port}" --format '{{.ID}} {{.Names}}' || true)
               if [ -n "$conflicting" ]; then
                 echo "Containers holding host port ${port}:"
                 echo "$conflicting"
-                # shellcheck disable=SC2086
                 docker stop $(echo "$conflicting" | awk '{print $1}') || true
               fi
             done
-
-            # 3) Жёстко освободить порты: nginx, запущенный вне systemd, host-network контейнеры и т. п.
-            #    fuser есть в пакете psmisc на Debian/Ubuntu; если нет — добиваем по PID из ss.
             for port in 80 443; do
               if command -v fuser >/dev/null 2>&1; then
                 sudo fuser -k "${port}/tcp" 2>/dev/null || true
@@ -123,8 +143,6 @@ jobs:
               fi
             done
             sleep 2
-
-            # 4) Финальная проверка
             for port in 80 443; do
               if command -v ss >/dev/null 2>&1; then
                 holder=$(sudo ss -ltnp "( sport = :${port} )" 2>/dev/null | awk 'NR>1')
@@ -134,41 +152,148 @@ jobs:
               if [ -n "$holder" ]; then
                 echo "::error::Host port ${port} is still occupied by:"
                 echo "$holder"
-                echo "Освободите порт вручную или задайте EDGE_HTTP_PORT/EDGE_HTTPS_PORT в .env."
                 exit 1
               fi
             done
+          ENDSSH
+
+      - name: Build and (re)start services — minimal downtime
+        env:
+          REBUILD_NGINX: ${{ steps.changes.outputs.rebuild_nginx }}
+          RUN_MIGRATOR: ${{ steps.changes.outputs.run_migrator }}
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
+            REBUILD_NGINX="${REBUILD_NGINX}" RUN_MIGRATOR="${RUN_MIGRATOR}" bash << 'ENDSSH'
+            set -euo pipefail
+            cd ~/meme_bot
 
             docker compose --env-file .env config > /dev/null
-            docker compose pull postgres
-            docker compose build --no-cache bot nginx
-            docker compose up -d --remove-orphans
+
+            # Postgres — поднять, если ещё не запущен. up -d идемпотентен.
+            docker compose --env-file .env up -d postgres
             for i in {1..30}; do
               if docker compose exec -T postgres pg_isready -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" > /dev/null 2>&1; then
-                echo "Postgres is ready"
                 break
               fi
-              if [ "$i" -eq 30 ]; then
-                echo "Postgres failed to become ready in time"
-                exit 1
-              fi
+              [ "$i" -eq 30 ] && { echo "Postgres failed to become ready"; exit 1; }
               sleep 2
             done
-            docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" < create_tables.sql
+
+            # Миграции — только если поменялся create_tables.sql.
+            if [ "${RUN_MIGRATOR}" = "true" ]; then
+              echo "Running create_tables.sql"
+              docker compose exec -T postgres psql -v ON_ERROR_STOP=1 \
+                -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" < create_tables.sql
+            fi
+
+            # Bot (prod) — ребилд с layer cache, перезапуск только этого сервиса.
+            docker compose --env-file .env build bot
+            docker compose --env-file .env up -d --no-deps bot
+
+            # Nginx — пересобирать только при изменениях фронта/конфига или если ещё не запущен.
+            if [ "${REBUILD_NGINX}" = "true" ] || ! docker ps --format '{{.Names}}' | grep -q '^edge-nginx$'; then
+              echo "Rebuilding nginx (REBUILD_NGINX=${REBUILD_NGINX})"
+              docker compose --env-file .env build nginx
+              docker compose --env-file .env up -d --no-deps nginx
+            else
+              echo "Skipping nginx rebuild — no relevant changes"
+            fi
+
             docker compose ps
           ENDSSH
 
       - name: Health check
         run: |
-          sleep 15
+          sleep 10
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
             cd ~/meme_bot
             echo "=== Container status ==="
             docker compose ps
             echo ""
-            echo "=== Postgres health ==="
-            docker compose exec -T postgres pg_isready -U ${POSTGRES_USER:-meme} || echo "Postgres not ready yet"
-            echo ""
-            echo "=== Bot logs (last 10 lines) ==="
+            echo "=== Bot (prod) logs ==="
             docker compose logs --tail=10 bot
+          ENDSSH
+
+  # ── 2b. PREPROD: деплой при push в dev → test.memeinternet.site
+  # Запускается только для ветки dev. НЕ трогает prod-сервисы (bot, nginx),
+  # пересобирает и перезапускает только bot-preprod.
+  deploy-preprod:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    needs: check-bot
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Deploy project files to server
+        # Тот же ~/meme_bot/. Прод-овский .env остаётся на сервере (excluded).
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
+            "mkdir -p ~/meme_bot"
+          rsync -avz --delete \
+            --exclude=".git" \
+            --exclude="node_modules" \
+            --exclude=".env" \
+            --exclude=".env.preprod" \
+            --exclude=".vercel" \
+            --exclude="__pycache__" \
+            ./ ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }}:~/meme_bot/
+
+      - name: Create .env.preprod on server
+        env:
+          DOTENV_CONTENT: ${{ secrets.DOTENV_PREPROD }}
+        run: |
+          if [ -z "${DOTENV_CONTENT}" ]; then
+            echo "::error::Secret DOTENV_PREPROD is empty or not set."
+            exit 1
+          fi
+          printf '%s\n' "$DOTENV_CONTENT" | ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
+            "tee ~/meme_bot/.env.preprod ~/meme_bot/bot/.env.preprod > /dev/null"
+
+      - name: Build and (re)start bot-preprod
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
+            set -euo pipefail
+            cd ~/meme_bot
+
+            # Прод-овский .env обязателен — иначе docker compose упадёт на интерполяции переменных.
+            if [ ! -f .env ]; then
+              echo "::error::~/meme_bot/.env (prod) отсутствует. Сначала задеплой prod (push в main)."
+              exit 1
+            fi
+
+            docker compose --env-file .env config > /dev/null
+
+            # Пересобираем и перезапускаем ТОЛЬКО bot-preprod. bot/nginx/postgres не трогаем.
+            docker compose --env-file .env build bot-preprod
+            docker compose --env-file .env up -d --no-deps bot-preprod
+
+            # Если nginx уже работает — релоадим конфиг (nginx.conf смонтирован volume'ом).
+            # При первом добавлении test.memeinternet.site nginx должен подхватить новый server-блок.
+            if docker ps --format '{{.Names}}' | grep -q '^edge-nginx$'; then
+              if ! docker exec edge-nginx nginx -t; then
+                echo "::error::nginx -t failed. Возможно отсутствует SSL-сертификат для test.memeinternet.site."
+                echo "На хосте выполни: sudo certbot certonly --webroot -w /var/www/certbot -d test.memeinternet.site"
+                exit 1
+              fi
+              docker exec edge-nginx nginx -s reload
+            fi
+
+            docker compose ps bot-preprod
+          ENDSSH
+
+      - name: Health check (preprod)
+        run: |
+          sleep 5
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
+            cd ~/meme_bot
+            echo "=== bot-preprod status ==="
+            docker compose ps bot-preprod
+            echo ""
+            echo "=== bot-preprod logs ==="
+            docker compose logs --tail=15 bot-preprod
           ENDSSH

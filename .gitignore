@@ -5,7 +5,8 @@ __pycache__/
 
 # Environment
 .env
-
+.env.preprod
+.dev.env
 # Build artifacts
 dist/
 webapp/dist/

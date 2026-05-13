@@ -20,7 +20,7 @@ services:
     networks:
       - meme-net
 
-  # ── Telegram Bot ──────────────────────────────────────────────
+  # ── Telegram Bot (prod, app.memeinternet.site) ───────────────
   bot:
     build:
       context: ./bot
@@ -29,6 +29,29 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-meme}:${POSTGRES_PASSWORD:-meme_secret}@postgres:5432/${POSTGRES_DB:-meme_db}"
+    expose:
+      - "3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-migrator:
+        condition: service_completed_successfully
+    networks:
+      - meme-net
+
+  # ── Telegram Bot (preprod, test.memeinternet.site) ───────────
+  # Тот же образ и общая БД с prod. Отличается env-файлом (свой
+  # BOT_TOKEN и WEBAPP_URL=https://test.memeinternet.site).
+  bot-preprod:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    container_name: meme-bot-preprod
+    restart: unless-stopped
+    env_file:
+      - .env.preprod
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-meme}:${POSTGRES_PASSWORD:-meme_secret}@postgres:5432/${POSTGRES_DB:-meme_db}"
     expose:
@@ -60,6 +83,7 @@ services:
       - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       - bot
+      - bot-preprod
     networks:
       - meme-net
 
