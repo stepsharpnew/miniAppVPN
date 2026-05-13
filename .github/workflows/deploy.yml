@@ -191,10 +191,13 @@ jobs:
             docker compose --env-file .env up -d --no-deps bot
 
             # Nginx — пересобирать только при изменениях фронта/конфига или если ещё не запущен.
+            # --force-recreate обязателен: nginx.conf смонтирован как single-file bind-mount,
+            # после rsync на хосте у файла новый inode, а контейнер держит старый. Пересоздание
+            # контейнера перепривязывает маунт к актуальному inode.
             if [ "${REBUILD_NGINX}" = "true" ] || ! docker ps --format '{{.Names}}' | grep -q '^edge-nginx$'; then
               echo "Rebuilding nginx (REBUILD_NGINX=${REBUILD_NGINX})"
               docker compose --env-file .env build nginx
-              docker compose --env-file .env up -d --no-deps nginx
+              docker compose --env-file .env up -d --no-deps --force-recreate nginx
             else
               echo "Skipping nginx rebuild — no relevant changes"
             fi
@@ -223,6 +226,24 @@ jobs:
     needs: check-bot
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed paths
+        id: changes
+        run: |
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          else
+            CHANGED="ALL"
+          fi
+          echo "Changed files:"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '^(nginx\.conf|nginx/|bot/webapp/|website/)'; then
+            echo "recreate_nginx=true" >> $GITHUB_OUTPUT
+          else
+            echo "recreate_nginx=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Set up SSH
         uses: webfactory/ssh-agent@v0.9.0
@@ -255,8 +276,11 @@ jobs:
             "tee ~/meme_bot/.env.preprod ~/meme_bot/bot/.env.preprod > /dev/null"
 
       - name: Build and (re)start bot-preprod
+        env:
+          RECREATE_NGINX: ${{ steps.changes.outputs.recreate_nginx }}
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
+            RECREATE_NGINX="${RECREATE_NGINX}" bash << 'ENDSSH'
             set -euo pipefail
             cd ~/meme_bot
 
@@ -272,15 +296,25 @@ jobs:
             docker compose --env-file .env build bot-preprod
             docker compose --env-file .env up -d --no-deps bot-preprod
 
-            # Если nginx уже работает — релоадим конфиг (nginx.conf смонтирован volume'ом).
-            # При первом добавлении test.memeinternet.site nginx должен подхватить новый server-блок.
-            if docker ps --format '{{.Names}}' | grep -q '^edge-nginx$'; then
-              if ! docker exec edge-nginx nginx -t; then
-                echo "::error::nginx -t failed. Возможно отсутствует SSL-сертификат для test.memeinternet.site."
-                echo "На хосте выполни: sudo certbot certonly --webroot -w /var/www/certbot -d test.memeinternet.site"
+            # Nginx: если изменился nginx.conf/фронт — force-recreate (reload не подойдёт,
+            # т.к. single-file bind-mount держит старый inode после rsync). Иначе не трогаем.
+            if [ "${RECREATE_NGINX}" = "true" ]; then
+              echo "Recreating nginx (nginx.conf/frontend changed)"
+              if ! docker run --rm -v "$(pwd)/nginx.conf:/etc/nginx/nginx.conf:ro" nginx:stable-alpine nginx -t -c /etc/nginx/nginx.conf 2>/dev/null; then
+                echo "Warning: pre-check skipped (image may not match prod nginx)"
+              fi
+              docker compose --env-file .env up -d --no-deps --force-recreate nginx
+              # Дать nginx стартануть и проверить, что не падает на SSL.
+              sleep 2
+              if ! docker ps --format '{{.Names}}' | grep -q '^edge-nginx$'; then
+                echo "::error::edge-nginx не запустился после recreate. Проверь логи:"
+                docker compose logs --tail=30 nginx || true
+                echo "Частая причина: нет SSL-серта для test.memeinternet.site."
+                echo "На хосте: sudo certbot certonly --webroot -w /var/www/certbot -d test.memeinternet.site"
                 exit 1
               fi
-              docker exec edge-nginx nginx -s reload
+            else
+              echo "nginx config unchanged — skipping recreate"
             fi
 
             docker compose ps bot-preprod
