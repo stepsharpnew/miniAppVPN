@@ -36,6 +36,51 @@ class AmneziaApp {
             });
         }
 
+        const serverProtocol = this.getElement('serverProtocol');
+        if (serverProtocol) {
+            serverProtocol.addEventListener('change', (e) => {
+                this.toggleProtocolFields(e.target.value);
+            });
+            this.toggleProtocolFields(serverProtocol.value || 'wireguard');
+        }
+
+        const genVlessPathBtn = this.getElement('genVlessPathBtn');
+        if (genVlessPathBtn) {
+            genVlessPathBtn.addEventListener('click', () => {
+                this.generateVlessPath();
+            });
+        }
+
+        const loadSniPresetsBtn = this.getElement('loadSniPresetsBtn');
+        if (loadSniPresetsBtn) {
+            loadSniPresetsBtn.addEventListener('click', () => {
+                this.toggleSniPresetsPanel();
+            });
+        }
+
+        const testAllSniBtn = this.getElement('testAllSniBtn');
+        if (testAllSniBtn) {
+            testAllSniBtn.addEventListener('click', () => {
+                this.testAllSni();
+            });
+        }
+
+        // Auto-fill the flag field from the country code as the operator types.
+        const ccInput = this.getElement('vlessCountryCode');
+        const flagInput = this.getElement('vlessFlagEmoji');
+        if (ccInput && flagInput) {
+            ccInput.addEventListener('input', () => {
+                const cc = (ccInput.value || '').trim().toUpperCase();
+                ccInput.value = cc;
+                if (cc.length === 2 && /^[A-Z]{2}$/.test(cc)) {
+                    // Regional indicator emoji: 0x1F1E6 == 🇦
+                    const flag = String.fromCodePoint(0x1F1E6 + cc.charCodeAt(0) - 65)
+                               + String.fromCodePoint(0x1F1E6 + cc.charCodeAt(1) - 65);
+                    flagInput.value = flag;
+                }
+            });
+        }
+
         // Test create button
         const testCreateBtn = this.getElement('testCreateBtn');
         if (testCreateBtn) {
@@ -154,6 +199,134 @@ class AmneziaApp {
         const errorElement = this.getElement(errorId);
         if (errorElement) {
             errorElement.classList.add('hidden');
+        }
+    }
+
+    toggleProtocolFields(protocol) {
+        const selected = (protocol || 'wireguard').toLowerCase();
+        const vlessFields = this.getElement('vlessFields');
+        const wgFields = this.getElement('wireguardFields');
+        const vlessHint = this.getElement('vlessSubscriptionHint');
+
+        const isVless = selected === 'vless';
+        if (vlessFields) vlessFields.classList.toggle('hidden', !isVless);
+        if (wgFields) wgFields.classList.toggle('hidden', isVless);
+        if (vlessHint) vlessHint.classList.toggle('hidden', !isVless);
+
+        const wgPortGroup = this.getElement('wgServerPortGroup');
+        if (wgPortGroup) wgPortGroup.classList.toggle('hidden', isVless);
+
+        // Adjust defaults for convenience.
+        const portInput = this.getElement('serverPort');
+        if (portInput && !isVless) {
+            portInput.value = portInput.value || '51820';
+        }
+    }
+
+    generateVlessPath() {
+        const pathInput = this.getElement('vlessPath');
+        if (!pathInput) return;
+        const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        let token = '';
+        for (let i = 0; i < 20; i++) {
+            token += alphabet[Math.floor(Math.random() * alphabet.length)];
+        }
+        pathInput.value = `/secret-${token}`;
+        this.hideError('vlessPathError');
+    }
+
+    async toggleSniPresetsPanel() {
+        const panel = this.getElement('sniPresetsPanel');
+        if (!panel) return;
+        if (!panel.classList.contains('hidden')) {
+            panel.classList.add('hidden');
+            return;
+        }
+        await this.loadSniPresets();
+        panel.classList.remove('hidden');
+    }
+
+    async loadSniPresets() {
+        const listEl = this.getElement('sniPresetsList');
+        const datalist = this.getElement('sniPresetList');
+        if (!listEl) return;
+        if (listEl.dataset.loaded === '1') return;
+        try {
+            const resp = await fetch('/api/vless/sni-presets');
+            if (!resp.ok) return;
+            const presets = await resp.json();
+            listEl.innerHTML = '';
+            if (datalist) datalist.innerHTML = '';
+            presets.forEach(p => {
+                // Clickable preset button. Add a status badge slot so the
+                // "Test all SNI" button can mark it ✅/❌ later without
+                // re-rendering the whole list.
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'text-left p-2 rounded hover:bg-indigo-100 border border-indigo-100 cursor-pointer';
+                btn.dataset.host = p.host;
+                btn.innerHTML = `
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="font-mono text-indigo-700">${p.host}</span>
+                        <span class="sni-status text-xs text-gray-400">⚪</span>
+                    </div>
+                    <span class="text-gray-500">${p.desc}</span>`;
+                btn.addEventListener('click', () => {
+                    const destInput = this.getElement('vlessRealityDest');
+                    if (destInput) destInput.value = p.host;
+                    const panel = this.getElement('sniPresetsPanel');
+                    if (panel) panel.classList.add('hidden');
+                });
+                listEl.appendChild(btn);
+                if (datalist) {
+                    const opt = document.createElement('option');
+                    opt.value = p.host;
+                    opt.label = p.desc;
+                    datalist.appendChild(opt);
+                }
+            });
+            listEl.dataset.loaded = '1';
+        } catch (e) {
+            console.error('Failed to load SNI presets', e);
+        }
+    }
+
+    async testAllSni() {
+        const status = this.getElement('sniTestStatus');
+        const list = this.getElement('sniPresetsList');
+        const btn = this.getElement('testAllSniBtn');
+        if (!list) return;
+        if (status) {
+            status.classList.remove('hidden');
+            status.textContent = 'Testing — это займёт ~10 секунд (TLS handshake к каждому домену)…';
+        }
+        if (btn) btn.disabled = true;
+        try {
+            const r = await fetch('/api/vless/test-sni?all=1', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+            const data = await r.json();
+            const results = data.results || [];
+            const byHost = Object.fromEntries(results.map(x => [x.host, x]));
+            list.querySelectorAll('button[data-host]').forEach(b => {
+                const res = byHost[b.dataset.host];
+                const slot = b.querySelector('.sni-status');
+                if (!slot || !res) return;
+                if (res.ok) {
+                    slot.textContent = `✅ ${res.tls_version} ${res.latency_ms}ms`;
+                    slot.className = 'sni-status text-xs text-green-700 font-mono';
+                    b.classList.remove('opacity-50');
+                } else {
+                    slot.textContent = `❌ ${(res.error || '').split(':')[0]}`;
+                    slot.className = 'sni-status text-xs text-red-600 font-mono';
+                    b.classList.add('opacity-50');
+                }
+            });
+            if (status) {
+                status.textContent = `Готово. ✅ ${data.summary.ok} рабочих / ❌ ${data.summary.fail} недоступных. Тестировалось с ${data.summary.tested_from}.`;
+            }
+        } catch (e) {
+            if (status) status.textContent = 'Ошибка: ' + e.message;
+        } finally {
+            if (btn) btn.disabled = false;
         }
     }
 
@@ -430,10 +603,15 @@ class AmneziaApp {
         this.hideError('subnetError');
         this.hideError('mtuError');
         this.hideError('dnsError');
+        this.hideError('vlessDomainError');
+        this.hideError('vlessPathError');
+        this.hideError('vlessRealityDestError');
         this.hideError('upstreamEndpointError');
         this.hideError('upstreamPublicKeyError');
         this.hideError('upstreamLocalAddressError');
         this.hideError('upstreamImportError');
+
+        const protocol = (this.getElement('serverProtocol')?.value || 'wireguard').toLowerCase();
 
         // Validate name
         const nameElement = this.getElement('serverName');
@@ -443,12 +621,34 @@ class AmneziaApp {
             isValid = false;
         }
 
-        // Validate port
-        const portElement = this.getElement('serverPort');
-        const port = portElement ? parseInt(portElement.value) : 0;
-        if (!port || port < 1 || port > 65535) {
-            this.showError('portError', 'Port must be between 1 and 65535');
-            isValid = false;
+        if (protocol !== 'vless') {
+            const portElement = this.getElement('serverPort');
+            const port = portElement ? parseInt(portElement.value) : 0;
+            if (!port || port < 1 || port > 65535) {
+                this.showError('portError', 'Port must be between 1 and 65535');
+                isValid = false;
+            }
+        }
+
+        if (protocol === 'vless') {
+            const domain = (this.getElement('vlessDomain')?.value || '').trim();
+            const path = (this.getElement('vlessPath')?.value || '').trim();
+            const realityDest = (this.getElement('vlessRealityDest')?.value || '').trim();
+
+            if (!domain) {
+                this.showError('vlessDomainError', 'Domain is required (must resolve to this server)');
+                isValid = false;
+            }
+            if (!path || !path.startsWith('/')) {
+                this.showError('vlessPathError', "Path is required and must start with '/'");
+                isValid = false;
+            }
+            if (realityDest && !/^[a-z0-9.-]+(?::\d+)?$/i.test(realityDest)) {
+                this.showError('vlessRealityDestError', 'REALITY dest: use host or host:port (e.g. www.microsoft.com:443)');
+                isValid = false;
+            }
+
+            return isValid;
         }
 
         // Validate subnet
@@ -598,21 +798,43 @@ class AmneziaApp {
         const splitRuLocalElement = this.getElement('splitRuLocal');
 
         const bandwidthTierElement = this.getElement('bandwidthTier');
+        const protocol = (this.getElement('serverProtocol')?.value || 'wireguard').toLowerCase();
         const mode = modeElement ? modeElement.value : 'standalone';
         
-        const formData = {
-            name: nameElement ? nameElement.value.trim() : 'New Server',
-            port: portElement ? parseInt(portElement.value) : 51820,
-            subnet: subnetElement ? subnetElement.value : '10.0.0.0/24',
-            mtu: mtuElement ? parseInt(mtuElement.value) : 1420,
-            dns: dnsElement ? dnsElement.value.trim() : '8.8.8.8,1.1.1.1',
-            bandwidth_tier: bandwidthTierElement ? bandwidthTierElement.value : 'free',
-            obfuscation: mode === 'edge_linked' ? true : (obfuscationElement ? obfuscationElement.checked : true),
-            auto_start: autoStartElement ? autoStartElement.checked : true,
-            mode: mode
-        };
+        let formData;
+        if (protocol === 'vless') {
+            const vlessDomainVal = (this.getElement('vlessDomain')?.value || '').trim();
+            formData = {
+                protocol: 'vless',
+                name: nameElement ? nameElement.value.trim() : 'New VLESS Server',
+                domain: vlessDomainVal,
+                host: vlessDomainVal,
+                path: (this.getElement('vlessPath')?.value || '').trim(),
+                xhttp_mode: (this.getElement('vlessXhttpMode')?.value || 'auto').trim(),
+                reality_dest: (this.getElement('vlessRealityDest')?.value || '').trim(),
+                fingerprint: (this.getElement('vlessFingerprint')?.value || 'chrome').trim(),
+                use_stream: this.getElement('vlessUseStream')?.checked ?? true,
+                // MemeVPN multi-server subscription metadata.
+                country_code: (this.getElement('vlessCountryCode')?.value || '').trim().toUpperCase(),
+                flag_emoji: (this.getElement('vlessFlagEmoji')?.value || '').trim(),
+                display_location: (this.getElement('vlessDisplayLocation')?.value || '').trim(),
+            };
+        } else {
+            formData = {
+                protocol: 'wireguard',
+                name: nameElement ? nameElement.value.trim() : 'New Server',
+                port: portElement ? parseInt(portElement.value) : 51820,
+                subnet: subnetElement ? subnetElement.value : '10.0.0.0/24',
+                mtu: mtuElement ? parseInt(mtuElement.value) : 1420,
+                dns: dnsElement ? dnsElement.value.trim() : '8.8.8.8,1.1.1.1',
+                bandwidth_tier: bandwidthTierElement ? bandwidthTierElement.value : 'free',
+                obfuscation: mode === 'edge_linked' ? true : (obfuscationElement ? obfuscationElement.checked : true),
+                auto_start: autoStartElement ? autoStartElement.checked : true,
+                mode: mode
+            };
+        }
 
-        if (mode === 'edge_linked') {
+        if (protocol !== 'vless' && mode === 'edge_linked') {
             formData.upstream = {
                 import_config: upstreamImportConfigElement ? upstreamImportConfigElement.value.trim() : '',
                 failover_mode: upstreamFailoverModeElement ? upstreamFailoverModeElement.value : 'fail_close',
@@ -623,7 +845,7 @@ class AmneziaApp {
         console.log("Form data:", formData);
 
         // Add manual obfuscation parameters only for standalone mode
-        if (mode !== 'edge_linked' && formData.obfuscation) {
+        if (protocol !== 'vless' && mode !== 'edge_linked' && formData.obfuscation) {
             formData.obfuscation_params = {
                 Jc: parseInt(this.getElement('paramJc')?.value || '8'),
                 Jmin: parseInt(this.getElement('paramJmin')?.value || '8'),
@@ -672,8 +894,12 @@ class AmneziaApp {
             // Reset form
             const serverForm = this.getElement('serverForm');
             if (serverForm) serverForm.reset();
+            const currentProtocol = (this.getElement('serverProtocol')?.value || 'wireguard').toLowerCase();
+            this.toggleProtocolFields(currentProtocol);
             const currentMode = this.getElement('serverMode')?.value === 'edge_linked';
-            this.toggleUpstreamSettings(currentMode);
+            if (currentProtocol !== 'vless') {
+                this.toggleUpstreamSettings(currentMode);
+            }
 
             this.loadServers();
         })
@@ -789,21 +1015,39 @@ class AmneziaApp {
                     <div>
                         <h3 class="text-lg font-semibold flex items-center gap-2">
                             ${server.name}
-                            ${this.getTierBadge(server.bandwidth_tier || 'free')}
+                            ${server.protocol === 'vless' ? '<span class="text-xs px-2 py-1 rounded bg-blue-100 text-blue-800 font-medium">VLESS</span>' : this.getTierBadge(server.bandwidth_tier || 'free')}
                         </h3>
                         <p class="text-sm text-gray-600">
-                            ID: ${server.id} | Port: ${server.port} | Subnet: ${server.subnet}
-                            | Mode: ${server.mode || 'standalone'}
-                            ${server.obfuscation_enabled ? '| 🔒 Obfuscated' : ''}
+                            ${server.protocol === 'vless'
+                                ? `ID: ${server.id} | VLESS+REALITY+XHTTP | client TCP port: ${server.port}`
+                                : `ID: ${server.id} | Port: ${server.port} | Subnet: ${server.subnet} | Mode: ${server.mode || 'standalone'} ${server.obfuscation_enabled ? '| 🔒 Obfuscated' : ''}`
+                            }
                         </p>
                         <p class="text-sm text-gray-500">Public IP: ${server.public_ip}</p>
+                            ${server.protocol === 'vless' && server.vless ? `
+                            ${(server.country_code || server.flag_emoji || server.display_location) ? `
+                            <p class="text-xs text-gray-700 font-medium">
+                                ${server.flag_emoji || ''} ${server.display_location || ''}
+                                ${server.country_code ? `<span class="text-gray-400">(${server.country_code})</span>` : ''}
+                            </p>` : ''}
+                            <p class="text-xs text-gray-500">
+                                VLESS: ${server.vless.domain}:${server.vless.port} ${server.vless.path} (${server.vless.mode})
+                                ${server.vless.security === 'reality' && server.vless.reality_dest ? ` · REALITY dest ${server.vless.reality_dest}` : ''}
+                                ${server.vless.use_stream
+                                    ? `<span class="ml-1 px-1 py-0.5 rounded bg-green-100 text-green-700 font-medium">порт 443 / stream</span>`
+                                    : `<span class="ml-1 px-1 py-0.5 rounded bg-yellow-100 text-yellow-700 font-medium">прямой порт ${server.vless.inbound_port}</span>`}
+                            </p>
+                            <p class="text-xs text-gray-500">Subscription: <span class="font-mono">${this.getVlessSubscriptionUrl(server)}</span>
+                                <button onclick="amneziaApp.copyToClipboard('${btoa(this.getVlessSubscriptionUrl(server))}')" class="ml-2 text-blue-600 hover:text-blue-800 text-xs">Copy</button>
+                            </p>
+                        ` : ''}
                         ${server.mode === 'edge_linked' && server.upstream ? `<p class="text-xs text-gray-500">Upstream: ${server.upstream.endpoint} via ${server.upstream.interface}</p>` : ''}
                         ${server.mode === 'edge_linked' ? `<p class="text-xs text-gray-500">Failover: ${server.linked_failover_mode || 'fail_close'} | Routing: ${server.routing_state || 'upstream'} | Egress: ${server.egress_interface || 'eth+'}</p>` : ''}
                         ${server.mode === 'edge_linked' ? `<p class="text-xs text-gray-500">Split RU local: ${(server.upstream && server.upstream.split_ru_local !== false) ? 'enabled' : 'disabled'}</p>` : ''}
                     </div>
                     <div class="flex items-center space-x-2">
                         <span class="px-3 py-1 rounded-full text-sm ${
-                            server.status === 'running' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                            (server.status === 'running' || server.status === 'ready') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                         }">${server.status}</span>
                         <button onclick="amneziaApp.deleteServer('${server.id}')" class="text-red-500 hover:text-red-700">
                             🗑️ Delete
@@ -811,18 +1055,28 @@ class AmneziaApp {
                     </div>
                 </div>
                 <div class="space-x-2 mb-4">
+                    ${server.protocol === 'vless' ? '' : `
                     <button onclick="amneziaApp.startServer('${server.id}')" class="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600">
                         Start
                     </button>
                     <button onclick="amneziaApp.stopServer('${server.id}')" class="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600">
                         Stop
                     </button>
+                    `}
                     <button onclick="amneziaApp.addClient('${server.id}')" class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600">
                         Add Client
                     </button>
+                    ${server.protocol === 'vless' ? `
+                    <button onclick="amneziaApp.openBridgeModal('${server.id}')"
+                            class="bg-purple-600 text-white px-3 py-1 rounded hover:bg-purple-700 text-sm"
+                            title="Генерация relay-конфига через российский VPS для обхода белых списков">
+                        🔗 Цепочка (обход WL)
+                    </button>
+                    ` : `
                     <button onclick="amneziaApp.changeServerTier('${server.id}', '${server.bandwidth_tier || 'free'}')" class="bg-orange-500 text-white px-3 py-1 rounded hover:bg-orange-600">
                         Change Tier
                     </button>
+                    `}
                     ${server.mode === 'edge_linked' ? `
                     <button onclick="amneziaApp.changeFailoverMode('${server.id}', '${server.linked_failover_mode || 'fail_close'}')" class="bg-indigo-500 text-white px-3 py-1 rounded hover:bg-indigo-600">
                         Change Failover
@@ -840,8 +1094,14 @@ class AmneziaApp {
 
         // Load clients for each server
         servers.forEach(server => {
-            this.loadServerClients(server.id);
+            this.loadServerClients(server.id, server.protocol || 'wireguard');
         });
+    }
+
+    getVlessSubscriptionUrl(server) {
+        const sid = server?.vless?.subscription_id;
+        if (!sid) return '';
+        return `${window.location.origin}/api/sub/vless/${sid}`;
     }
 
     renderServerClients(serverId, clients, traffic = {}) {
@@ -871,8 +1131,8 @@ class AmneziaApp {
                             </div>
                             <div class="flex items-center space-x-2">
                                 <span class="font-medium">${client.name}</span>
-                                <span class="text-sm text-gray-600 ml-2">${client.client_ip}</span>
-                                ${this.getTierBadge(client.bandwidth_tier || 'free')}
+                                <span class="text-sm text-gray-600 ml-2">${client.client_ip ? client.client_ip : (client.uuid ? `UUID: ${client.uuid}` : '')}</span>
+                                ${client.client_ip ? this.getTierBadge(client.bandwidth_tier || 'free') : ''}
                                 <span class="text-xs ${expirationInfo.colorClass}" title="${expirationInfo.tooltip}">
                                     ${expirationInfo.text}
                                 </span>
@@ -980,11 +1240,18 @@ class AmneziaApp {
         summary.textContent = `Showing ${shownCount}/${totalCount} ${modeLabel}`;
     }
 
-    loadServerClients(serverId) {
-        Promise.all([
-            fetch(`/api/servers/${serverId}/clients`).then(res => res.json()),
-            fetch(`/api/servers/${serverId}/traffic`).then(res => res.ok ? res.json() : {})
-        ]).then(([clients, traffic]) => {
+    loadServerClients(serverId, protocol = 'wireguard') {
+        const proto = (protocol || 'wireguard').toLowerCase();
+        const requests = [
+            fetch(`/api/servers/${serverId}/clients`).then(res => res.json())
+        ];
+        if (proto !== 'vless') {
+            requests.push(fetch(`/api/servers/${serverId}/traffic`).then(res => res.ok ? res.json() : {}));
+        } else {
+            requests.push(Promise.resolve({}));
+        }
+
+        Promise.all(requests).then(([clients, traffic]) => {
             const clientsContainer = this.getElement(`clients-${serverId}`);
             if (clientsContainer) {
                 clientsContainer.innerHTML = this.renderServerClients(serverId, clients, traffic);
@@ -1460,7 +1727,7 @@ class AmneziaApp {
                             <div class="lg:w-2/5">
                                 <div class="bg-white p-6 rounded-xl border-2 border-gray-100 shadow-inner">
                                     <div id="qrcode" class="flex justify-center mb-4"></div>
-                                    <p class="text-center text-sm text-gray-500">Scan with WireGuard app</p>
+                                    <p class="text-center text-sm text-gray-500">Scan with your app (HAPP/WireGuard)</p>
                                 </div>
                                 <!-- Download QR Code button outside the box -->
                                 <div class="mt-4 text-center">
@@ -1639,13 +1906,17 @@ class AmneziaApp {
     }
 
     copyToClipboard(text) {
-        // Decode base64 text if it's the JSON data
+        // Decode base64 text if provided (e.g. Copy JSON / subscription URL)
         try {
             const decodedText = atob(text);
-            const jsonData = JSON.parse(decodedText);
-            text = jsonData.config_content || decodedText;
+            try {
+                const jsonData = JSON.parse(decodedText);
+                text = jsonData.config_content || decodedText;
+            } catch (e) {
+                text = decodedText;
+            }
         } catch (e) {
-            // If it's not base64 JSON, use the text as is
+            // If it's not base64, use the text as is
         }
 
         navigator.clipboard.writeText(text).then(() => {
@@ -1860,23 +2131,37 @@ class AmneziaApp {
     setupTabSwitching() {
         const serversTab = document.getElementById('serversTab');
         const bandwidthTab = document.getElementById('bandwidthTab');
+        const usersTab = document.getElementById('usersTab');
         const serversSection = document.getElementById('serversSection');
         const bandwidthSection = document.getElementById('bandwidthSection');
+        const usersSection = document.getElementById('usersSection');
 
-        if (serversTab && bandwidthTab && serversSection && bandwidthSection) {
-            serversTab.addEventListener('click', () => {
-                serversTab.className = 'tab-button py-2 px-1 border-b-2 border-blue-500 font-medium text-blue-600 text-sm';
-                bandwidthTab.className = 'tab-button py-2 px-1 border-b-2 border-transparent font-medium text-gray-500 hover:text-gray-700 text-sm';
-                serversSection.classList.remove('hidden');
-                bandwidthSection.classList.add('hidden');
-            });
+        const activeCls = 'tab-button py-2 px-1 border-b-2 border-blue-500 font-medium text-blue-600 text-sm';
+        const idleCls = 'tab-button py-2 px-1 border-b-2 border-transparent font-medium text-gray-500 hover:text-gray-700 text-sm';
+        const showOnly = (which) => {
+            if (serversTab) serversTab.className = which === 'servers' ? activeCls : idleCls;
+            if (bandwidthTab) bandwidthTab.className = which === 'bandwidth' ? activeCls : idleCls;
+            if (usersTab) usersTab.className = which === 'users' ? activeCls : idleCls;
+            if (serversSection) serversSection.classList.toggle('hidden', which !== 'servers');
+            if (bandwidthSection) bandwidthSection.classList.toggle('hidden', which !== 'bandwidth');
+            if (usersSection) usersSection.classList.toggle('hidden', which !== 'users');
+        };
 
+        if (serversTab && serversSection) {
+            serversTab.addEventListener('click', () => showOnly('servers'));
+        }
+        if (bandwidthTab && bandwidthSection) {
             bandwidthTab.addEventListener('click', () => {
-                bandwidthTab.className = 'tab-button py-2 px-1 border-b-2 border-blue-500 font-medium text-blue-600 text-sm';
-                serversTab.className = 'tab-button py-2 px-1 border-b-2 border-transparent font-medium text-gray-500 hover:text-gray-700 text-sm';
-                bandwidthSection.classList.remove('hidden');
-                serversSection.classList.add('hidden');
+                showOnly('bandwidth');
                 this.loadBandwidthTiers();
+            });
+        }
+        if (usersTab && usersSection) {
+            usersTab.addEventListener('click', () => {
+                showOnly('users');
+                this.loadUsers();
+                if (typeof amneziaApp.loadSatellites === 'function') amneziaApp.loadSatellites();
+                if (typeof amneziaApp.loadPromoLines === 'function') amneziaApp.loadPromoLines();
             });
         }
     }
@@ -1885,3 +2170,489 @@ class AmneziaApp {
 // Initialize the application
 const amneziaApp = new AmneziaApp();
 const app = amneziaApp; // Alias for convenience
+
+// ─── Bridge / Chain relay modal ───────────────────────────────────────────────
+
+app._bridgeConfigData = null; // holds last generated bridge result
+
+app.openBridgeModal = function(serverId) {
+    document.getElementById('bridgeServerId').value = serverId;
+    document.getElementById('bridgeError').classList.add('hidden');
+    document.getElementById('bridgeResult').classList.add('hidden');
+    document.getElementById('bridgeForm').style.display = '';
+    document.getElementById('bridgeGenBtn').disabled = false;
+    document.getElementById('bridgeGenBtn').textContent = 'Сгенерировать конфиг';
+    document.getElementById('bridgeModal').classList.remove('hidden');
+};
+
+app.closeBridgeModal = function() {
+    document.getElementById('bridgeModal').classList.add('hidden');
+    app._bridgeConfigData = null;
+};
+
+app.generateBridge = async function() {
+    const serverId = document.getElementById('bridgeServerId').value;
+    const bridgeIp = (document.getElementById('bridgeIp').value || '').trim();
+    const bridgePort = parseInt(document.getElementById('bridgePort').value || '443');
+    const bridgeRealityDest = (document.getElementById('bridgeRealityDest').value || 'vkvideo.ru:443').trim();
+    const bridgeFp = document.getElementById('bridgeFingerprint').value || 'chrome';
+
+    const errEl = document.getElementById('bridgeError');
+    errEl.classList.add('hidden');
+
+    if (!bridgeIp) {
+        errEl.textContent = 'Введите IP российского VPS.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+
+    const btn = document.getElementById('bridgeGenBtn');
+    btn.disabled = true;
+    btn.textContent = 'Генерация…';
+
+    try {
+        const resp = await fetch(`/api/servers/${serverId}/bridge`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                bridge_ip: bridgeIp,
+                bridge_port: bridgePort,
+                bridge_reality_dest: bridgeRealityDest,
+                bridge_fingerprint: bridgeFp,
+            })
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            errEl.textContent = data.error || 'Ошибка генерации.';
+            errEl.classList.remove('hidden');
+            btn.disabled = false;
+            btn.textContent = 'Сгенерировать конфиг';
+            return;
+        }
+
+        app._bridgeConfigData = data;
+
+        // Fill client link
+        document.getElementById('bridgeClientLink').value = data.client_link || '';
+
+        // Fill deploy instructions.
+        //
+        // Volume mapping note: the teddysun/xray image's CMD is
+        //   ["/usr/bin/xray", "-c", "/etc/xray/config.json"]
+        // i.e. it reads its config from /etc/xray/config.json *inside* the
+        // container. We therefore mount the host's /etc/xray to the same path.
+        // (The /etc/amnezia/xray path used by this project's main image is
+        // specific to amneziawg-web-ui's own Xray invocation and does NOT apply
+        // to the standalone teddysun image — using it makes the container fall
+        // back to its baked-in default config, which won't have our bridge
+        // inbound and produces a confusing VMess deprecation warning.)
+        const deployCmd =
+            `# 1. Установите Docker на российский VPS:\n` +
+            `#    curl -fsSL https://get.docker.com | sh\n\n` +
+            `# 2. (Рекомендуется) включите BBR — в новом конфиге xray сокет\n` +
+            `#    задаёт tcpcongestion=bbr; без BBR ядро тихо откатится на cubic.\n` +
+            `cat >> /etc/sysctl.conf <<'EOF'\n` +
+            `net.core.default_qdisc=fq\n` +
+            `net.ipv4.tcp_congestion_control=bbr\n` +
+            `net.ipv4.tcp_fastopen=3\n` +
+            `EOF\n` +
+            `sysctl -p\n\n` +
+            `# 3. Создайте директорию и сохраните config.json (кнопка "Скачать файл" ниже):\n` +
+            `mkdir -p /etc/xray\n` +
+            `# скопируйте файл bridge-config.json в /etc/xray/config.json\n\n` +
+            `# 4. Запустите Xray:\n` +
+            `docker run -d --name xray --restart unless-stopped \\\n` +
+            `  -p ${data.bridge_port}:${data.bridge_port}/tcp \\\n` +
+            `  -v /etc/xray:/etc/xray \\\n` +
+            `  teddysun/xray:26.3.27\n\n` +
+            `# 5. Убедитесь, что контейнер подхватил именно ваш конфиг:\n` +
+            `docker exec xray sh -c 'head -30 /etc/xray/config.json'\n` +
+            `#    должен показать ваш JSON с "tag": "bridge-inbound".\n` +
+            `docker logs xray --tail 20\n` +
+            `#    в логе НЕ должно быть предупреждения про VMess —\n` +
+            `#    оно означает, что Xray стартовал с дефолтным конфигом\n` +
+            `#    (обычно из-за неправильного -v volume-маппинга).\n\n` +
+            `# 6. Проверьте «белый» IP: откройте http://${data.bridge_ip} с телефона МТС/Мегафон\n` +
+            `#    без VPN — должен открыться (или вернуть ответ сервера).\n\n` +
+            `# 7. Раздайте клиентам ссылку vless:// (скопируйте выше).`;
+        document.getElementById('bridgeDeployCmd').textContent = deployCmd;
+
+        // Fill JSON
+        document.getElementById('bridgeConfigJson').value =
+            JSON.stringify(data.bridge_config, null, 2);
+
+        document.getElementById('bridgeResult').classList.remove('hidden');
+        btn.textContent = 'Перегенерировать';
+        btn.disabled = false;
+    } catch (e) {
+        errEl.textContent = 'Сетевая ошибка: ' + e.message;
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Сгенерировать конфиг';
+    }
+};
+
+app.copyBridgeLink = function() {
+    const val = document.getElementById('bridgeClientLink').value;
+    if (val) navigator.clipboard.writeText(val).catch(() => {});
+};
+
+app.copyBridgeConfig = function() {
+    const val = document.getElementById('bridgeConfigJson').value;
+    if (val) navigator.clipboard.writeText(val).catch(() => {});
+};
+
+app.downloadBridgeConfig = function() {
+    const val = document.getElementById('bridgeConfigJson').value;
+    if (!val) return;
+    const blob = new Blob([val], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'bridge-config.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+};
+
+// Close bridge modal on backdrop click.
+//
+// IMPORTANT: this script tag is loaded *before* the #bridgeModal div in
+// index.html, so at the moment this top-level code runs the modal doesn't
+// exist yet — without the DOMContentLoaded guard, getElementById returns
+// null, .addEventListener throws, and every subsequent `app.X = function`
+// statement below this line silently never executes (manifesting as
+// "amneziaApp.registerSatellite is not a function" once you click Register).
+document.addEventListener('DOMContentLoaded', function () {
+    const modal = document.getElementById('bridgeModal');
+    if (modal) {
+        modal.addEventListener('click', function (e) {
+            if (e.target === this) app.closeBridgeModal();
+        });
+    }
+});
+
+// ─── MemeVPN Users (multi-server subscription) ────────────────────────────────
+
+app.loadUsers = function() {
+    const list = document.getElementById('usersList');
+    if (!list) return;
+    list.innerHTML = '<div class="text-gray-500 text-sm">Loading…</div>';
+    fetch('/api/users')
+        .then(r => r.json())
+        .then(data => {
+            const users = (data && data.users) || [];
+            if (users.length === 0) {
+                list.innerHTML = '<div class="text-gray-500 text-sm">Нет пользователей. Создайте первого выше.</div>';
+                return;
+            }
+            list.innerHTML = users.map(u => app._renderUserCard(u)).join('');
+        })
+        .catch(err => {
+            list.innerHTML = `<div class="text-red-600 text-sm">Failed to load users: ${err}</div>`;
+        });
+};
+
+app._renderUserCard = function(u) {
+    if (!u) return '';
+    const subUrl = `${window.location.origin}${u.subscription_url_path}`;
+    const expiry = u.expires_at ? new Date(u.expires_at * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : 'forever';
+    const clientRows = (u.clients || []).map(c => {
+        const flag = c.flag_emoji || '🌍';
+        const loc = c.display_location || c.server_name || c.server_id;
+        const exp = c.expires_at ? new Date(c.expires_at * 1000).toISOString().replace('T', ' ').slice(0, 10) : 'forever';
+        const badge = c.is_expired
+            ? '<span class="px-1 py-0.5 text-xs rounded bg-red-100 text-red-700">expired (grace)</span>'
+            : '<span class="px-1 py-0.5 text-xs rounded bg-green-100 text-green-700">active</span>';
+        const scope = c.scope === 'satellite'
+            ? `<span class="px-1 py-0.5 text-xs rounded bg-purple-100 text-purple-800">satellite</span>`
+            : `<span class="px-1 py-0.5 text-xs rounded bg-gray-200 text-gray-700">local</span>`;
+        return `<li class="flex justify-between gap-2 text-xs">
+                    <span>${flag} <span class="font-medium">${loc}</span> <span class="text-gray-400">${c.server_id}</span> ${scope}</span>
+                    <span class="text-gray-500">until ${exp}</span>
+                    <span>${badge}</span>
+                </li>`;
+    }).join('');
+    const errors = (u.remote_errors || []).map(e =>
+        `<li class="text-xs text-red-600">⚠ satellite ${e.satellite_id} server ${e.server_id}: ${e.error}</li>`
+    ).join('');
+
+    return `
+    <div class="border rounded-lg p-3 bg-white">
+        <div class="flex justify-between items-start gap-2">
+            <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-semibold">${u.name || u.user_id}</span>
+                    <span class="text-xs text-gray-500">id: <code>${u.user_id}</code></span>
+                    <span class="text-xs text-gray-500">expires: ${expiry}</span>
+                    <span class="text-xs px-1 py-0.5 rounded bg-blue-100 text-blue-800">${u.client_count} server(s)</span>
+                </div>
+                <div class="mt-2">
+                    <label class="text-xs text-gray-500">Subscription URL (раздать клиенту):</label>
+                    <div class="flex gap-2 items-center">
+                        <input type="text" value="${subUrl}" readonly
+                               class="flex-1 border border-emerald-300 bg-emerald-50 rounded-md px-2 py-1 text-xs font-mono">
+                        <button onclick="amneziaApp.copyToClipboard('${btoa(subUrl)}')"
+                                class="bg-emerald-600 text-white px-2 py-1 rounded-md text-xs hover:bg-emerald-700">Copy</button>
+                    </div>
+                </div>
+                ${clientRows ? `<ul class="mt-2 space-y-0.5">${clientRows}</ul>` : '<div class="text-xs text-gray-500 mt-2">Нет активных клиентов.</div>'}
+                ${errors ? `<ul class="mt-1 space-y-0.5">${errors}</ul>` : ''}
+            </div>
+            <div class="flex flex-col gap-1">
+                <button onclick="amneziaApp.extendUser('${u.user_id}')"
+                        class="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600">Extend</button>
+                <button onclick="amneziaApp.deleteUser('${u.user_id}')"
+                        class="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600">Delete</button>
+            </div>
+        </div>
+    </div>`;
+};
+
+app.provisionUser = function() {
+    const userId = (document.getElementById('newUserId').value || '').trim();
+    const name = (document.getElementById('newUserName').value || '').trim();
+    const duration = document.getElementById('newUserDuration').value;
+    const status = document.getElementById('provisionStatus');
+    if (!userId) {
+        status.className = 'text-sm mt-2 text-red-600';
+        status.textContent = 'User ID is required';
+        status.classList.remove('hidden');
+        return;
+    }
+    status.className = 'text-sm mt-2 text-gray-600';
+    status.textContent = 'Provisioning…';
+    status.classList.remove('hidden');
+
+    fetch(`/api/users/${encodeURIComponent(userId)}/provision`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({duration: duration, name: name || undefined}),
+    })
+    .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+    .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Failed');
+        const subUrl = `${window.location.origin}${body.subscription_url_path}`;
+        status.className = 'text-sm mt-2 text-green-700';
+        status.innerHTML = `OK — provisioned on ${body.provisioned.length} server(s). Subscription: <a href="${subUrl}" target="_blank" class="underline font-mono">${subUrl}</a>`;
+        document.getElementById('newUserId').value = '';
+        document.getElementById('newUserName').value = '';
+        amneziaApp.loadUsers();
+    })
+    .catch(e => {
+        status.className = 'text-sm mt-2 text-red-600';
+        status.textContent = 'Error: ' + e.message;
+    });
+};
+
+app.extendUser = function(userId) {
+    const duration = prompt('Extend by which duration? (1m, 3m, 6m, 12m, forever)', '1m');
+    if (!duration) return;
+    fetch(`/api/users/${encodeURIComponent(userId)}/extend`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({duration: duration}),
+    })
+    .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+    .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Failed');
+        alert(`Extended ${body.extended.length} client(s)`);
+        amneziaApp.loadUsers();
+    })
+    .catch(e => alert('Error: ' + e.message));
+};
+
+app.deleteUser = function(userId) {
+    if (!confirm(`Delete user "${userId}" and all their clients on every server? This is permanent.`)) return;
+    fetch(`/api/users/${encodeURIComponent(userId)}`, {method: 'DELETE'})
+    .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+    .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Failed');
+        amneziaApp.loadUsers();
+    })
+    .catch(e => alert('Error: ' + e.message));
+};
+
+// ─── Satellites (federation) ──────────────────────────────────────────────────
+
+app.loadSatellites = function() {
+    const list = document.getElementById('satellitesList');
+    if (!list) return;
+    list.innerHTML = '<div class="text-gray-500 text-sm">Loading…</div>';
+    fetch('/api/satellites')
+        .then(r => r.json())
+        .then(data => {
+            const sats = (data && data.satellites) || [];
+            if (sats.length === 0) {
+                list.innerHTML = '<div class="text-gray-500 text-sm">Спутники не зарегистрированы.</div>';
+                return;
+            }
+            list.innerHTML = sats.map(s => {
+                const lastSync = s.last_sync_at ? new Date(s.last_sync_at * 1000).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : 'never';
+                const err = s.last_error ? `<p class="text-xs text-red-600 mt-1">⚠ Last error: ${s.last_error}</p>` : '';
+                const servers = (s.servers || []).map(sv =>
+                    `<li class="text-xs"><span>${sv.flag_emoji || '🌍'} ${sv.display_location || sv.name || sv.id} <span class="text-gray-400">(${sv.country_code || '—'})</span> · ${sv.domain || sv.public_ip}</span></li>`
+                ).join('') || '<li class="text-xs text-gray-500">Нет VLESS-серверов на спутнике.</li>';
+                return `
+                <div class="border rounded-lg p-3 bg-white">
+                    <div class="flex justify-between items-start gap-2">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-semibold">${s.label || s.id}</span>
+                                <span class="text-xs px-1 py-0.5 rounded bg-blue-100 text-blue-800">${s.server_count} server(s)</span>
+                                <span class="text-xs text-gray-500">last sync: ${lastSync}</span>
+                            </div>
+                            <p class="text-xs text-gray-600 font-mono">${s.base_url}</p>
+                            ${err}
+                            <ul class="mt-2 list-disc list-inside">${servers}</ul>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <button onclick="amneziaApp.syncSatellite('${s.id}')" class="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600">Sync</button>
+                            <button onclick="amneziaApp.deleteSatellite('${s.id}')" class="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600">Delete</button>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        })
+        .catch(err => {
+            list.innerHTML = `<div class="text-red-600 text-sm">Failed to load: ${err}</div>`;
+        });
+};
+
+app.registerSatellite = function() {
+    const label = (document.getElementById('satLabel').value || '').trim();
+    const baseUrl = (document.getElementById('satBaseUrl').value || '').trim();
+    const apiKey = (document.getElementById('satApiKey').value || '').trim();
+    const nginxUser = (document.getElementById('satNginxUser').value || '').trim();
+    const nginxPwd = (document.getElementById('satNginxPassword').value || '').trim();
+    const status = document.getElementById('satRegisterStatus');
+    if (!baseUrl || !apiKey) {
+        status.className = 'text-sm mt-2 text-red-600';
+        status.textContent = 'Base URL and API key are required';
+        status.classList.remove('hidden');
+        return;
+    }
+    status.className = 'text-sm mt-2 text-gray-600';
+    status.textContent = 'Pinging satellite…';
+    status.classList.remove('hidden');
+
+    fetch('/api/satellites', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            label: label || baseUrl,
+            base_url: baseUrl,
+            api_key: apiKey,
+            nginx_user: nginxUser || undefined,
+            nginx_password: nginxPwd || undefined,
+        }),
+    })
+    .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+    .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Failed');
+        status.className = 'text-sm mt-2 text-green-700';
+        status.textContent = `Registered: ${body.label} (${body.server_count} VLESS server(s))`;
+        document.getElementById('satLabel').value = '';
+        document.getElementById('satBaseUrl').value = '';
+        document.getElementById('satApiKey').value = '';
+        document.getElementById('satNginxUser').value = '';
+        document.getElementById('satNginxPassword').value = '';
+        amneziaApp.loadSatellites();
+    })
+    .catch(e => {
+        status.className = 'text-sm mt-2 text-red-600';
+        status.textContent = 'Error: ' + e.message;
+    });
+};
+
+app.syncSatellite = function(satId) {
+    fetch(`/api/satellites/${encodeURIComponent(satId)}/sync`, {method: 'POST'})
+    .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+    .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Failed');
+        amneziaApp.loadSatellites();
+    })
+    .catch(e => alert('Sync failed: ' + e.message));
+};
+
+app.deleteSatellite = function(satId) {
+    if (!confirm(`Удалить спутник ${satId}? Это удалит у него всех клиентов, провижененных через хаб.`)) return;
+    fetch(`/api/satellites/${encodeURIComponent(satId)}`, {method: 'DELETE'})
+    .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+    .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Failed');
+        amneziaApp.loadSatellites();
+        amneziaApp.loadUsers();
+    })
+    .catch(e => alert('Delete failed: ' + e.message));
+};
+
+// ─── Promo lines ──────────────────────────────────────────────────────────────
+
+app.loadPromoLines = function() {
+    fetch('/api/promo-lines')
+        .then(r => r.json())
+        .then(data => {
+            const ta = document.getElementById('promoLines');
+            if (ta) ta.value = (data.lines || []).join('\n');
+        })
+        .catch(() => {});
+};
+
+app.savePromoLines = function() {
+    const ta = document.getElementById('promoLines');
+    const status = document.getElementById('promoStatus');
+    const lines = (ta.value || '').split('\n').map(s => s.trim()).filter(Boolean);
+    fetch('/api/promo-lines', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({lines}),
+    })
+    .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+    .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Failed');
+        status.className = 'text-sm mt-2 text-green-700';
+        status.textContent = `Saved ${body.lines.length} line(s)`;
+        status.classList.remove('hidden');
+        if (ta) ta.value = body.lines.join('\n');
+    })
+    .catch(e => {
+        status.className = 'text-sm mt-2 text-red-600';
+        status.textContent = 'Error: ' + e.message;
+        status.classList.remove('hidden');
+    });
+};
+
+app.broadcastServer = function() {
+    const serverId = (document.getElementById('broadcastServerId').value || '').trim();
+    const duration = document.getElementById('broadcastDuration').value;
+    const status = document.getElementById('broadcastStatus');
+    if (!serverId) {
+        status.className = 'text-sm mt-2 text-red-600';
+        status.textContent = 'Server ID is required';
+        status.classList.remove('hidden');
+        return;
+    }
+    if (!confirm(`Provision server ${serverId} onto every active user with duration ${duration}?`)) return;
+    status.className = 'text-sm mt-2 text-gray-600';
+    status.textContent = 'Broadcasting…';
+    status.classList.remove('hidden');
+
+    fetch('/api/users/broadcast', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({server_id: serverId, duration: duration, only_active: true}),
+    })
+    .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+    .then(({ok, body}) => {
+        if (!ok) throw new Error(body.error || 'Failed');
+        status.className = 'text-sm mt-2 text-green-700';
+        status.textContent = `OK — added to ${body.count} user(s)`;
+        amneziaApp.loadUsers();
+    })
+    .catch(e => {
+        status.className = 'text-sm mt-2 text-red-600';
+        status.textContent = 'Error: ' + e.message;
+    });
+};

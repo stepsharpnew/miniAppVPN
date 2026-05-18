@@ -1,11 +1,22 @@
-version: '3.8'
 
 services:
-  amneziawg:
-    image: losdan/amneziawg-web-ui:latest
-    container_name: amneziawg-api
+  web-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: amneziawg-web-ui:local
+    container_name: amneziawg-web-ui
     restart: unless-stopped
-    network_mode: host  # All ports accessible directly
+    depends_on:
+      - xray
+    ports:
+      - "80:80"
+      - "443:443"
+      # WireGuard/AmneziaWG ports (example; keep/adjust as needed)
+      - "43457:43457/udp"
+      - "45297:45297/udp"
+      - "43724:43724/udp"
+      - "47295:47295/udp"
     privileged: true
     cap_add:
       - NET_ADMIN
@@ -16,15 +27,82 @@ services:
       - net.ipv4.ip_forward=1
     volumes:
       - /lib/modules:/lib/modules
-      - amneziawg-config:/etc/amneziawg
+      # Bind mounts to host so existing data from the legacy single-image
+      # deployment (which used `-v /etc/amnezia:/etc/amnezia`) is picked up
+      # as-is — clients, server keys, configs all carry over seamlessly.
+      - /etc/amnezia:/etc/amnezia
+      - /etc/letsencrypt:/etc/letsencrypt
     environment:
-      - NGINX_PORT=5000
-      - DEFAULT_PORT=51820
-      - DEFAULT_MTU=1420
-      - DEFAULT_SUBNET=10.0.0.0/24
-      - DEFAULT_DNS=8.8.8.8,1.1.1.1
+      - NGINX_PORT=443
+      - NGINX_USER=${NGINX_USER:-admin}
+      - NGINX_PASSWORD=${NGINX_PASSWORD:-changeme}
+      - SSL_EMAIL=${SSL_EMAIL:-}
+      - SSL_DOMAIN=${SSL_DOMAIN:-}
       - AUTO_START_SERVERS=true
+      - XRAY_BASE_PORT=8443
+      # Internal-only ports for stream-routed REALITY inbounds (port-443 whitelist bypass mode).
+      # nginx stream proxies from external :443 to xray:9443+ by SNI — no host-port publishing needed.
+      - XRAY_STREAM_BASE_PORT=9443
+      # MemeVPN multi-server subscription branding & cadence.
+      - MEMEVPN_BRAND=${MEMEVPN_BRAND:-MemeVPN}
+      - MEMEVPN_SUB_UPDATE_HOURS=${MEMEVPN_SUB_UPDATE_HOURS:-24}
+      # How long an expired client stays alive before the pruner deletes it
+      # (gives users a window to renew without losing their config).
+      - CLIENT_DELETE_GRACE_DAYS=${CLIENT_DELETE_GRACE_DAYS:-3}
+      # Federation: leave empty on the hub VPS; set to a long random value on
+      # satellite VPSes to enable the /api/satellite/* endpoints. Generate one with:
+      #   openssl rand -hex 32
+      - SATELLITE_API_KEY=${SATELLITE_API_KEY:-}
 
-volumes:
-  amneziawg-config:
-    driver: local
+  xray:
+    image: teddysun/xray:26.3.27
+    container_name: amneziawg-xray
+    restart: unless-stopped
+    volumes:
+      - /etc/amnezia:/etc/amnezia
+    # Auto-restart xray when config.json changes (simple watchdog).
+    # Web UI regenerates /etc/amnezia/xray/config.json after VLESS changes.
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        set -e
+        CFG="/etc/amnezia/xray/config.json"
+        echo "[xray] waiting for $$CFG ..."
+        while [ ! -f "$$CFG" ]; do sleep 1; done
+        last=""
+        while true; do
+          cur="$$(sha256sum "$$CFG" 2>/dev/null | awk '{print $$1}' || true)"
+          if [ -n "$$cur" ] && [ "$$cur" != "$$last" ]; then
+            echo "[xray] config changed, restarting xray"
+            last="$$cur"
+            # Run xray in background and restart on next change.
+            /usr/bin/xray -config "$$CFG" &
+            pid="$!"
+            # Poll until hash changes, then terminate xray.
+            while true; do
+              sleep 2
+              nxt="$$(sha256sum "$$CFG" 2>/dev/null | awk '{print $$1}' || true)"
+              if [ -n "$$nxt" ] && [ "$$nxt" != "$$last" ]; then
+                echo "[xray] change detected, stopping pid=$$pid"
+                kill "$$pid" 2>/dev/null || true
+                wait "$$pid" 2>/dev/null || true
+                break
+              fi
+              # If xray crashed, break and let outer loop restart it.
+              if ! kill -0 "$$pid" 2>/dev/null; then
+                echo "[xray] process exited, restarting"
+                break
+              fi
+            done
+          else
+            sleep 2
+          fi
+        done
+    ports:
+      # Direct VLESS+REALITY+XHTTP (no stream routing): each server listens on XRAY_BASE_PORT+N.
+      # Open these on your host firewall when use_stream=false.
+      - "8443-8642:8443-8642/tcp"
+      # Stream-routed VLESS servers (port-443 whitelist bypass) use ports 9443-9642 INTERNALLY ONLY.
+      # nginx stream in the web-ui container proxies external :443 → xray:9443+N by SNI.
+      # No host-port mapping needed for 9443-9642.
