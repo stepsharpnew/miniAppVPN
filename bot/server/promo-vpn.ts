@@ -4,6 +4,8 @@ import {
   getAllEnabledServers,
   getRandomEnabledServer,
   incrementServerUserCount,
+  type ReferralRewardParty,
+  type ReferralRewardResult,
   type ServerRow,
   type UserRow,
   updateUserVpnConfig,
@@ -87,4 +89,60 @@ export async function syncVpnForPromoRedemption(
   await incrementServerUserCount(server.server_id).catch(() => {});
 
   return { config };
+}
+
+function partyVpnClientName(party: ReferralRewardParty): string | null {
+  if (party.telegramId != null) {
+    return getTelegramClientName(party.telegramId, party.telegramNickname);
+  }
+  if (party.login) {
+    return getWebClientName({ login: party.login, id: party.userId } as UserRow);
+  }
+  return null;
+}
+
+async function extendVpnForParty(
+  party: ReferralRewardParty,
+  months: number,
+): Promise<void> {
+  const clientName = partyVpnClientName(party);
+  if (!clientName) {
+    console.error(
+      "Referral VPN extend: cannot derive client name",
+      { userId: party.userId },
+    );
+    return;
+  }
+  const durationCode = getDurationCode(months);
+  const servers = await getAllEnabledServers();
+  for (const srv of servers) {
+    try {
+      await extendVpnClient(clientName, durationCode, getServerBaseUrl(srv));
+      return;
+    } catch {
+      /* client not on this VM, try next */
+    }
+  }
+  console.error(
+    "Referral VPN extend: client not found on any server",
+    { userId: party.userId, clientName },
+  );
+}
+
+/**
+ * Sync VPN expiry with the bonus months granted by a referral reward.
+ * Without this, the DB's expired_at drifts ahead of the VPN server's
+ * expires_at on every paid referral conversion.
+ */
+export async function syncVpnForReferralReward(
+  reward: ReferralRewardResult,
+): Promise<void> {
+  if (!reward.applied) return;
+
+  if (reward.invitedUser && reward.invitedBonusMonths > 0) {
+    await extendVpnForParty(reward.invitedUser, reward.invitedBonusMonths);
+  }
+  if (reward.referrerUser && reward.referrerBonusMonths > 0) {
+    await extendVpnForParty(reward.referrerUser, reward.referrerBonusMonths);
+  }
 }

@@ -73,6 +73,7 @@ export interface ApplyReferralCodeResult {
 export interface ReferralRewardParty {
   userId: string;
   telegramId: number | null;
+  telegramNickname: string | null;
   login: string | null;
   referralCode: string | null;
 }
@@ -318,6 +319,19 @@ export async function markExpiryExpiredSent(userId: string): Promise<void> {
 export async function markExpiryCancelledSent(userId: string): Promise<void> {
   await getPool().query(
     "UPDATE users SET is_notificated_cancelled = TRUE WHERE id = $1",
+    [userId],
+  );
+}
+
+/**
+ * Mark a user as having blocked the bot so daily reminder queries stop
+ * returning them — otherwise we hammer Telegram with sends that are guaranteed
+ * to return 403 forever and never set a reminder flag (since `mark*Sent` only
+ * runs on a successful send).
+ */
+export async function markUserBlockedBot(userId: string): Promise<void> {
+  await getPool().query(
+    "UPDATE users SET is_blocked = TRUE WHERE id = $1",
     [userId],
   );
 }
@@ -669,7 +683,9 @@ export async function mergeAccounts(
            referral_applied_at = $7,
            referral_code = COALESCE(referral_code, $8),
            is_notificated_d3 = FALSE,
-           is_notificated_d1 = FALSE
+           is_notificated_d1 = FALSE,
+           is_notificated_expired = FALSE,
+           is_notificated_cancelled = FALSE
        WHERE id = $1
        RETURNING *`,
       [
@@ -743,6 +759,9 @@ async function extendSubscriptionWithClient(
   userId: string,
   months: number,
 ): Promise<void> {
+  // Reset ALL four reminder flags — otherwise a previously-cancelled user who
+  // got a referral / promo top-up never gets `expired` / `cancelled` reminders
+  // for the NEXT expiry cycle (their flag is still TRUE from the previous one).
   await client.query(
     `UPDATE users
      SET expired_at = CASE
@@ -751,18 +770,24 @@ async function extendSubscriptionWithClient(
          ELSE NOW() + make_interval(months => $2)
      END,
      is_notificated_d3 = FALSE,
-     is_notificated_d1 = FALSE
+     is_notificated_d1 = FALSE,
+     is_notificated_expired = FALSE,
+     is_notificated_cancelled = FALSE
      WHERE id = $1`,
     [userId, months],
   );
 }
 
 function mapReferralParty(
-  user: Pick<UserRow, "id" | "telegram_id" | "login" | "referral_code">,
+  user: Pick<
+    UserRow,
+    "id" | "telegram_id" | "telegram_nickname" | "login" | "referral_code"
+  >,
 ): ReferralRewardParty {
   return {
     userId: user.id,
     telegramId: user.telegram_id,
+    telegramNickname: user.telegram_nickname,
     login: user.login,
     referralCode: user.referral_code,
   };
@@ -1074,13 +1099,20 @@ export async function isPaymentProcessed(paymentId: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+/**
+ * Atomically claim a payment for processing.
+ * Returns true if THIS caller inserted the row (i.e. acquired the claim);
+ * false if another worker had already claimed it.
+ * Use as the very first step of any payment-processing flow to make duplicate
+ * webhooks / poll calls truly idempotent.
+ */
 export async function markPaymentProcessed(paymentId: string): Promise<boolean> {
   try {
-    await getPool().query(
+    const { rowCount } = await getPool().query(
       "INSERT INTO processed_payments (payment_id) VALUES ($1) ON CONFLICT DO NOTHING",
       [paymentId],
     );
-    return true;
+    return (rowCount ?? 0) > 0;
   } catch {
     return false;
   }
@@ -1236,7 +1268,9 @@ export async function redeemPromoCode(
            ELSE NOW() + make_interval(months => $2)
        END,
        is_notificated_d3 = FALSE,
-       is_notificated_d1 = FALSE
+       is_notificated_d1 = FALSE,
+       is_notificated_expired = FALSE,
+       is_notificated_cancelled = FALSE
        WHERE id = $1
        RETURNING expired_at`,
       [userId, promo.months],

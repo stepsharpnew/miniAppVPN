@@ -10,6 +10,7 @@ import {
   markExpiryReminderD3Sent,
   markExpiryExpiredSent,
   markExpiryCancelledSent,
+  markUserBlockedBot,
   type SubscriptionReminderRow,
 } from "./db";
 import { resolveAdminChat } from "./store";
@@ -97,6 +98,17 @@ async function sendReminderBatch(
       });
       await mark(row.id);
     } catch (error) {
+      // 403 == user blocked the bot. Flip is_blocked so subsequent reminder
+      // queries skip them; otherwise we keep retrying daily forever and the
+      // reminder flag is never set (mark*Sent only runs on success).
+      if (error instanceof GrammyError && error.error_code === 403) {
+        try {
+          await markUserBlockedBot(row.id);
+        } catch (e) {
+          console.error("markUserBlockedBot failed", row.id, e);
+        }
+        continue;
+      }
       console.error(
         `subscription-reminder: send failed (${kind})`,
         row.telegram_id,
@@ -131,15 +143,19 @@ export async function runSubscriptionExpiryRemindersOnce(
 }
 
 /**
- * Ежедневно в 11:00 по Москве — напоминания о скором окончании подписки.
- * Возвращает задачу cron для остановки при shutdown.
+ * Каждый час в 0 минут по Москве проверяем окна напоминаний.
+ *
+ * Раньше запуск был раз в сутки в 11:00 МСК — если процесс был не запущен
+ * именно в это время (рестарт, деплой, краш), целый день пропускался, и
+ * пользователи могли проскочить мимо узких окон `d1` / `expired` (1–2 дня).
+ * Запросы уже фильтруют по флагам и окнам, так что лишних отправок не будет.
  */
 export function scheduleSubscriptionExpiryReminders(
   api: Api,
   getRenewKeyboard: () => InlineKeyboard | undefined,
 ): ScheduledTask {
   return schedule(
-    "0 11 * * *",
+    "0 * * * *",
     () => {
       void runSubscriptionExpiryRemindersOnce(api, getRenewKeyboard).catch(
         (e) => console.error("subscription-reminder: job error", e),

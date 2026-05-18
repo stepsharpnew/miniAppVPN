@@ -16,7 +16,6 @@ import {
   getUserReferralInfoForWeb,
   redeemPromoCode,
   incrementServerUserCount,
-  isPaymentProcessed,
   markPaymentProcessed,
   type UserRow,
   type ServerRow,
@@ -39,7 +38,11 @@ import { BRAND_NAME, PAYMENT_ADMIN_NOTIFY } from "../shared/texts";
 import { resolveAdminChat } from "./store";
 import { sendReferralRewardNotifications } from "./referral-notifications";
 import { sendGiftPromoAdminNotification } from "./promo-notifications";
-import { getWebClientName, syncVpnForPromoRedemption } from "./promo-vpn";
+import {
+  getWebClientName,
+  syncVpnForPromoRedemption,
+  syncVpnForReferralReward,
+} from "./promo-vpn";
 
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "30d";
@@ -163,9 +166,10 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
   const pending = getPendingPayment(paymentId);
   if (!pending || pending.status === "succeeded") return;
 
-  // Idempotency flag is set at the very end of this function so transient errors
-  // before the admin notification don't silence retries.
-  if (await isPaymentProcessed(paymentId)) {
+  // Atomic claim — see processSucceededPayment in api.ts for the rationale.
+  // Wins exactly one of N concurrent webhook/poll calls per payment_id.
+  const claimed = await markPaymentProcessed(paymentId);
+  if (!claimed) {
     pending.status = "succeeded";
     return;
   }
@@ -225,6 +229,7 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
     try {
       const referralReward = await applyReferralRewardsForPayment(paymentId, paidUser.id);
       if (referralReward.applied) {
+        await syncVpnForReferralReward(referralReward);
         await sendReferralRewardNotifications(api, referralReward);
       }
     } catch (err) {
@@ -267,8 +272,6 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
   } else if (!rawBuyChat) {
     console.warn("ADMIN_CHAT_ID_BUY is not set — admin payment notification (web) skipped");
   }
-
-  await markPaymentProcessed(paymentId);
 }
 
 // ── Mount all web routes ──

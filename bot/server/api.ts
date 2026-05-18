@@ -37,11 +37,14 @@ import {
   getRandomEnabledServer,
   getUserSubscription,
   incrementServerUserCount,
-  isPaymentProcessed,
   markPaymentProcessed,
   upsertUserSubscription,
 } from "./db";
-import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
+import {
+  getTelegramClientName,
+  syncVpnForPromoRedemption,
+  syncVpnForReferralReward,
+} from "./promo-vpn";
 import { mountWebAuthRoutes } from "./web-auth";
 import { mountSyncRoutes } from "./sync-routes";
 import { PLATFORM_BOT_TEXTS, type PlatformId } from "../shared/platforms";
@@ -687,10 +690,12 @@ export function createApiServer(api: Api, botToken: string) {
     const pending = getPendingPayment(paymentId);
     if (!pending || pending.status === "succeeded") return;
 
-    // NB: idempotency flag is set AFTER everything below succeeds far enough to
-    // notify admin; otherwise a transient error would leave the payment in a
-    // "processed but silent" state forever (no admin notif on retries).
-    if (await isPaymentProcessed(paymentId)) {
+    // Atomic claim: INSERT ... ON CONFLICT DO NOTHING. Only one concurrent
+    // caller wins; the rest exit silently. Doing this BEFORE side effects
+    // prevents the double-extension/double-notification race when a YooKassa
+    // webhook and a frontend status poll fire on the same payment at once.
+    const claimed = await markPaymentProcessed(paymentId);
+    if (!claimed) {
       pending.status = "succeeded";
       return;
     }
@@ -761,6 +766,8 @@ export function createApiServer(api: Api, botToken: string) {
       try {
         const referralReward = await applyReferralRewardsForPayment(paymentId, paidUser.id);
         if (referralReward.applied) {
+          // Без VPN-extend expires_at в БД и в AmneziaWG расходятся на 1 мес.
+          await syncVpnForReferralReward(referralReward);
           await sendReferralRewardNotifications(api, referralReward);
         }
       } catch (err) {
@@ -806,11 +813,6 @@ export function createApiServer(api: Api, botToken: string) {
     } else {
       console.warn("ADMIN_CHAT_ID_BUY is not set — admin payment notification skipped");
     }
-
-    // Mark idempotency flag last: if an unhandled error sneaks past the catches
-    // above, the next webhook/poll will retry the whole flow instead of silently
-    // skipping it (which is what made the renewal admin notification disappear).
-    await markPaymentProcessed(paymentId);
   }
 
   app.get("/api/payments/status/:paymentId", auth, requireChannelSubscription, async (req, res) => {
@@ -916,8 +918,11 @@ export function createApiServer(api: Api, botToken: string) {
       return;
     }
 
-    // Fallback: payment not in local store (e.g. server restarted) — use webhook metadata
-    if (await isPaymentProcessed(paymentId)) {
+    // Fallback: payment not in local store (e.g. server restarted) — use webhook metadata.
+    // Atomic claim guarantees the body below runs at most once per payment_id even
+    // when YooKassa retries the webhook.
+    const claimed = await markPaymentProcessed(paymentId);
+    if (!claimed) {
       res.json({ ok: true });
       return;
     }
@@ -997,6 +1002,8 @@ export function createApiServer(api: Api, botToken: string) {
       try {
         const referralReward = await applyReferralRewardsForPayment(paymentId, paidUser.id);
         if (referralReward.applied) {
+          // Без VPN-extend expires_at в БД и в AmneziaWG расходятся на 1 мес.
+          await syncVpnForReferralReward(referralReward);
           await sendReferralRewardNotifications(api, referralReward);
         }
       } catch (err) {
@@ -1039,10 +1046,6 @@ export function createApiServer(api: Api, botToken: string) {
     } else {
       console.warn("ADMIN_CHAT_ID_BUY is not set — admin payment notification (webhook) skipped");
     }
-
-    // Mark idempotency only after we've at least attempted to notify admin/user
-    // so transient failures don't permanently silence renewal notifications.
-    await markPaymentProcessed(paymentId);
 
     res.json({ ok: true });
   });

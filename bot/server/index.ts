@@ -39,7 +39,10 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 import { sendGiftPromoAdminNotification } from "./promo-notifications";
-import { scheduleSubscriptionExpiryReminders } from "./subscription-reminders";
+import {
+  runSubscriptionExpiryRemindersOnce,
+  scheduleSubscriptionExpiryReminders,
+} from "./subscription-reminders";
 
 const botToken = (process.env.BOT_TOKEN ?? "").trim();
 if (!botToken) throw new Error("BOT_TOKEN is not set");
@@ -631,9 +634,18 @@ void (async () => {
     console.warn("Не удалось сбросить webhook перед запуском polling:", e);
   }
 
+  const getRenewKeyboard = () =>
+    webAppKeyboard("🛒 Продлить подписку", { hash: "purchase" });
+
+  // Catch-up прогон сразу после старта: если процесс рестартовал в час, когда
+  // cron должен был сработать, без этого окно `d1`/`expired` могло пропасть.
+  void runSubscriptionExpiryRemindersOnce(bot.api, getRenewKeyboard).catch(
+    (e) => console.error("subscription-reminder: startup run failed", e),
+  );
+
   const subscriptionReminderTask = scheduleSubscriptionExpiryReminders(
     bot.api,
-    () => webAppKeyboard("🛒 Продлить подписку", { hash: "purchase" }),
+    getRenewKeyboard,
   );
 
   const shutdown = async () => {
