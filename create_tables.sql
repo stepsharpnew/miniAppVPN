@@ -44,6 +44,7 @@ ALTER TABLE users DROP COLUMN IF EXISTS email;
 
 DO $$
 BEGIN
+
   -- Если telegram_id всё ещё PRIMARY KEY — мигрируем на UUID PK
   IF EXISTS (
     SELECT 1
