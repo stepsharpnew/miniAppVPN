@@ -15,10 +15,6 @@ on:
         options:
           - preprod
           - prod
-      force_migrate:
-        description: "Принудительно запустить create_tables.sql"
-        type: boolean
-        default: false
       force_rebuild_nginx:
         description: "Принудительно пересобрать nginx (Mini App статика)"
         type: boolean
@@ -59,8 +55,6 @@ jobs:
 
       - name: Detect changed paths
         id: changes
-        env:
-          FORCE_MIGRATE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.force_migrate == 'true' }}
         run: |
           if git rev-parse HEAD~1 >/dev/null 2>&1; then
             CHANGED=$(git diff --name-only HEAD~1 HEAD)
@@ -73,11 +67,6 @@ jobs:
             echo "rebuild_nginx=true" >> $GITHUB_OUTPUT
           else
             echo "rebuild_nginx=false" >> $GITHUB_OUTPUT
-          fi
-          if [ "${FORCE_MIGRATE}" = "true" ] || echo "$CHANGED" | grep -qE '^create_tables\.sql$'; then
-            echo "run_migrator=true" >> $GITHUB_OUTPUT
-          else
-            echo "run_migrator=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Set up SSH
@@ -183,10 +172,9 @@ jobs:
       - name: Build and (re)start services — minimal downtime
         env:
           REBUILD_NGINX: ${{ steps.changes.outputs.rebuild_nginx }}
-          RUN_MIGRATOR: ${{ steps.changes.outputs.run_migrator }}
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
-            REBUILD_NGINX="${REBUILD_NGINX}" RUN_MIGRATOR="${RUN_MIGRATOR}" bash << 'ENDSSH'
+            REBUILD_NGINX="${REBUILD_NGINX}" bash << 'ENDSSH'
             set -euo pipefail
             cd ~/meme_bot
 
@@ -206,18 +194,19 @@ jobs:
               sleep 2
             done
 
-            # Миграции — при изменении create_tables.sql, force_migrate или если HAPP-колонок ещё нет.
-            NEED_HAPP_COLS=false
-            if ! docker compose exec -T postgres psql -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" -tAc \
-              "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='servers' AND column_name='supports_happ')" \
-              | grep -q '^t'; then
-              NEED_HAPP_COLS=true
+            # Миграции через db-migrator (идемпотентны, безопасно всегда запускать).
+            # rm -f сбрасывает состояние exited:1 (старый контейнер мог упасть до SQL-фикса),
+            # иначе bot (depends_on service_completed_successfully) не запустился бы.
+            echo "── Migrations via db-migrator ──"
+            docker compose rm -f db-migrator 2>/dev/null || true
+            docker compose --env-file .env up --no-deps -d db-migrator
+            DB_EXIT=$(docker wait meme-db-migrator)
+            if [ "${DB_EXIT}" != "0" ]; then
+              echo "::error::db-migrator exited ${DB_EXIT}:"
+              docker compose logs --tail=30 db-migrator || true
+              exit 1
             fi
-            if [ "${RUN_MIGRATOR}" = "true" ] || [ "${NEED_HAPP_COLS}" = "true" ]; then
-              echo "Running create_tables.sql (RUN_MIGRATOR=${RUN_MIGRATOR}, NEED_HAPP_COLS=${NEED_HAPP_COLS})"
-              docker compose exec -T postgres psql -v ON_ERROR_STOP=1 \
-                -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" < create_tables.sql
-            fi
+            echo "Migration OK (exit 0)"
 
             # Bot (prod) — ребилд с layer cache, перезапуск только этого сервиса.
             docker compose --env-file .env build bot
@@ -371,9 +360,18 @@ jobs:
               sleep 2
             done
 
-            echo "── Run create_tables.sql (idempotent) ──"
-            docker compose exec -T postgres psql -v ON_ERROR_STOP=1 \
-              -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" < create_tables.sql
+            echo "── Migrations via db-migrator (idempotent, always) ──"
+            # rm -f сбрасывает состояние exited:1 (если предыдущий запуск упал до SQL-фикса).
+            # Без этого bot-preprod (depends_on service_completed_successfully) не стартует.
+            docker compose rm -f db-migrator 2>/dev/null || true
+            docker compose --env-file .env up --no-deps -d db-migrator
+            DB_EXIT=$(docker wait meme-db-migrator)
+            if [ "${DB_EXIT}" != "0" ]; then
+              echo "::error::db-migrator exited ${DB_EXIT}:"
+              docker compose logs --tail=30 db-migrator || true
+              exit 1
+            fi
+            echo "Migration OK (exit 0)"
 
             echo "── Verify HAPP columns exist ──"
             docker compose exec -T postgres psql -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" -c "
