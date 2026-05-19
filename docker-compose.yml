@@ -7,16 +7,22 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # psql читает PGHOST/PGUSER/PGPASSWORD/PGDATABASE из окружения автоматически.
+    # Переменные раскрываются Docker Compose из --env-file, поэтому нет проблем
+    # с дефолтами shell-переменных внутри контейнера.
     environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-meme}
       PGPASSWORD: ${POSTGRES_PASSWORD:-meme_secret}
+      PGDATABASE: ${POSTGRES_DB:-meme_db}
     volumes:
       - ./create_tables.sql:/migrations/create_tables.sql:ro
     command:
-      - sh
-      - -c
-      - >
-        psql -h postgres -U ${POSTGRES_USER:-meme} -d ${POSTGRES_DB:-meme_db}
-        -v ON_ERROR_STOP=1 -f /migrations/create_tables.sql
+      - psql
+      - -v
+      - ON_ERROR_STOP=1
+      - -f
+      - /migrations/create_tables.sql
     networks:
       - meme-net
 

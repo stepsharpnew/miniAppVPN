@@ -194,23 +194,25 @@ jobs:
               sleep 2
             done
 
-            # Миграции через db-migrator (идемпотентны, безопасно всегда запускать).
-            # rm -f сбрасывает состояние exited:1 (старый контейнер мог упасть до SQL-фикса),
-            # иначе bot (depends_on service_completed_successfully) не запустился бы.
-            echo "── Migrations via db-migrator ──"
+            # Миграции: прямой psql внутри postgres-контейнера (использует его env-vars
+            # POSTGRES_USER/POSTGRES_DB/POSTGRES_PASSWORD — всегда корректные).
+            echo "── Migrations (direct psql via postgres container) ──"
+            docker compose exec -T postgres sh -c \
+              "PGPASSWORD=\$POSTGRES_PASSWORD psql -U \$POSTGRES_USER -d \$POSTGRES_DB -v ON_ERROR_STOP=1 -f -" \
+              < create_tables.sql
+            echo "Migration OK"
+
+            # Сбрасываем состояние db-migrator (bot depends_on service_completed_successfully).
+            # Теперь db-migrator тоже работает корректно (PGHOST/PGUSER/PGDATABASE в env).
+            echo "── Reset db-migrator state ──"
             docker compose rm -f db-migrator 2>/dev/null || true
             docker compose --env-file .env up --no-deps -d db-migrator
             DB_EXIT=$(docker wait meme-db-migrator)
-            if [ "${DB_EXIT}" != "0" ]; then
-              echo "::error::db-migrator exited ${DB_EXIT}:"
-              docker compose logs --tail=30 db-migrator || true
-              exit 1
-            fi
-            echo "Migration OK (exit 0)"
+            [ "${DB_EXIT}" = "0" ] && echo "db-migrator OK" || { echo "::error::db-migrator exited ${DB_EXIT}:"; docker compose logs --tail=20 db-migrator || true; exit 1; }
 
-            # Bot (prod) — ребилд с layer cache, перезапуск только этого сервиса.
+            # Bot (prod) — ребилд + принудительный рестарт (подхватывает новый образ).
             docker compose --env-file .env build bot
-            docker compose --env-file .env up -d --no-deps bot
+            docker compose --env-file .env up -d --no-deps --force-recreate bot
 
             # Nginx — пересобирать только при изменениях фронта/конфига или если ещё не запущен.
             # --force-recreate обязателен: nginx.conf смонтирован как single-file bind-mount,
@@ -360,33 +362,29 @@ jobs:
               sleep 2
             done
 
-            echo "── Migrations via db-migrator (idempotent, always) ──"
-            # rm -f сбрасывает состояние exited:1 (если предыдущий запуск упал до SQL-фикса).
-            # Без этого bot-preprod (depends_on service_completed_successfully) не стартует.
+            echo "── Migrations (direct psql via postgres container) ──"
+            docker compose exec -T postgres sh -c \
+              "PGPASSWORD=\$POSTGRES_PASSWORD psql -U \$POSTGRES_USER -d \$POSTGRES_DB -v ON_ERROR_STOP=1 -f -" \
+              < create_tables.sql
+            echo "Migration OK"
+
+            echo "── Reset db-migrator state ──"
             docker compose rm -f db-migrator 2>/dev/null || true
             docker compose --env-file .env up --no-deps -d db-migrator
             DB_EXIT=$(docker wait meme-db-migrator)
-            if [ "${DB_EXIT}" != "0" ]; then
-              echo "::error::db-migrator exited ${DB_EXIT}:"
-              docker compose logs --tail=30 db-migrator || true
-              exit 1
-            fi
-            echo "Migration OK (exit 0)"
+            [ "${DB_EXIT}" = "0" ] && echo "db-migrator OK" || { echo "::error::db-migrator exited ${DB_EXIT}:"; docker compose logs --tail=20 db-migrator || true; exit 1; }
 
-            echo "── Verify HAPP columns exist ──"
-            docker compose exec -T postgres psql -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" -c "
-              SELECT 'users.happ_subscription_url' AS col,
-                     EXISTS (SELECT 1 FROM information_schema.columns
-                             WHERE table_name='users' AND column_name='happ_subscription_url') AS present
-              UNION ALL
-              SELECT 'servers.supports_happ',
-                     EXISTS (SELECT 1 FROM information_schema.columns
-                             WHERE table_name='servers' AND column_name='supports_happ');
-            "
+            echo "── Verify HAPP columns ──"
+            docker compose exec -T postgres sh -c \
+              "psql -U \$POSTGRES_USER -d \$POSTGRES_DB -c \"
+                SELECT column_name, 'present' AS status
+                FROM information_schema.columns
+                WHERE column_name IN ('happ_subscription_url','supports_happ')
+                ORDER BY column_name;\""
 
             echo "── Build & restart bot-preprod ──"
             docker compose --env-file .env build bot-preprod
-            docker compose --env-file .env up -d --no-deps bot-preprod
+            docker compose --env-file .env up -d --no-deps --force-recreate bot-preprod
 
             echo "── Refresh nginx config/volumes (no image rebuild) ──"
             # `up -d` идемпотентен: пересоздаст контейнер только если изменились
