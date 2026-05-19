@@ -28,7 +28,15 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_applied_at TIMESTAMPTZ;
 
 -- ── Миграция: переезд с email на login (исключаем ПД) ──
 -- 1) Backfill login из email для существующих веб-пользователей.
-UPDATE users SET login = LOWER(email) WHERE login IS NULL AND email IS NOT NULL;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'email'
+  ) THEN
+    UPDATE users SET login = LOWER(email) WHERE login IS NULL AND email IS NOT NULL;
+  END IF;
+END $$;
 
 -- 2) Снимаем уникальное ограничение и колонку email — больше не используем.
 DO $$

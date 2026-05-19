@@ -16,6 +16,13 @@ export async function initDb(): Promise<void> {
   const client = await getPool().connect();
   try {
     await client.query("SELECT 1");
+    // Safety net if create_tables.sql did not reach the HAPP section (e.g. failed mid-file).
+    await client.query(
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS happ_subscription_url TEXT",
+    );
+    await client.query(
+      "ALTER TABLE servers ADD COLUMN IF NOT EXISTS supports_happ BOOLEAN NOT NULL DEFAULT FALSE",
+    );
     console.log("PostgreSQL connected");
   } finally {
     client.release();

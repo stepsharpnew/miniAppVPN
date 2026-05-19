@@ -59,6 +59,8 @@ jobs:
 
       - name: Detect changed paths
         id: changes
+        env:
+          FORCE_MIGRATE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.force_migrate == 'true' }}
         run: |
           if git rev-parse HEAD~1 >/dev/null 2>&1; then
             CHANGED=$(git diff --name-only HEAD~1 HEAD)
@@ -72,7 +74,7 @@ jobs:
           else
             echo "rebuild_nginx=false" >> $GITHUB_OUTPUT
           fi
-          if echo "$CHANGED" | grep -qE '^create_tables\.sql$'; then
+          if [ "${FORCE_MIGRATE}" = "true" ] || echo "$CHANGED" | grep -qE '^create_tables\.sql$'; then
             echo "run_migrator=true" >> $GITHUB_OUTPUT
           else
             echo "run_migrator=false" >> $GITHUB_OUTPUT
@@ -204,9 +206,15 @@ jobs:
               sleep 2
             done
 
-            # Миграции — только если поменялся create_tables.sql.
-            if [ "${RUN_MIGRATOR}" = "true" ]; then
-              echo "Running create_tables.sql"
+            # Миграции — при изменении create_tables.sql, force_migrate или если HAPP-колонок ещё нет.
+            NEED_HAPP_COLS=false
+            if ! docker compose exec -T postgres psql -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" -tAc \
+              "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='servers' AND column_name='supports_happ')" \
+              | grep -q '^t'; then
+              NEED_HAPP_COLS=true
+            fi
+            if [ "${RUN_MIGRATOR}" = "true" ] || [ "${NEED_HAPP_COLS}" = "true" ]; then
+              echo "Running create_tables.sql (RUN_MIGRATOR=${RUN_MIGRATOR}, NEED_HAPP_COLS=${NEED_HAPP_COLS})"
               docker compose exec -T postgres psql -v ON_ERROR_STOP=1 \
                 -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" < create_tables.sql
             fi
