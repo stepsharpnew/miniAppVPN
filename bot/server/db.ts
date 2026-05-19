@@ -36,6 +36,7 @@ export interface UserRow {
   telegram_nickname: string | null;
   expired_at: string | null;
   vpn_config: string | null;
+  happ_subscription_url: string | null;
   created_at: string;
   referral_code: string | null;
   referred_by_user_id: string | null;
@@ -1130,6 +1131,7 @@ export interface ServerRow {
   enable: boolean;
   domain_server_name: string | null;
   user_count: number;
+  supports_happ: boolean;
 }
 
 export async function getRandomEnabledServer(): Promise<ServerRow | null> {
@@ -1152,6 +1154,23 @@ export async function incrementServerUserCount(
   await getPool().query(
     "UPDATE servers SET user_count = user_count + 1 WHERE server_id = $1",
     [serverId],
+  );
+}
+
+export async function getHappPanelServer(): Promise<ServerRow | null> {
+  const { rows } = await getPool().query<ServerRow>(
+    "SELECT * FROM servers WHERE enable = TRUE AND supports_happ = TRUE LIMIT 1",
+  );
+  return rows[0] ?? null;
+}
+
+export async function updateUserHappUrl(
+  userId: string,
+  url: string,
+): Promise<void> {
+  await getPool().query(
+    "UPDATE users SET happ_subscription_url = $2 WHERE id = $1",
+    [userId, url],
   );
 }
 

@@ -2,14 +2,18 @@ import { PRICING } from "../shared/plans";
 import { getConfig, saveConfig } from "./config-store";
 import {
   getAllEnabledServers,
+  getHappPanelServer,
+  getPool,
   getRandomEnabledServer,
   incrementServerUserCount,
   type ReferralRewardParty,
   type ReferralRewardResult,
   type ServerRow,
   type UserRow,
+  updateUserHappUrl,
   updateUserVpnConfig,
 } from "./db";
+import { extendHapp, provisionHapp } from "./happ";
 import { extendVpnClient, provisionVpnClient } from "./vpn";
 
 function getServerBaseUrl(server: ServerRow): string {
@@ -101,6 +105,35 @@ function partyVpnClientName(party: ReferralRewardParty): string | null {
   return null;
 }
 
+async function extendHappForParty(
+  party: ReferralRewardParty,
+  months: number,
+): Promise<void> {
+  const happPanel = await getHappPanelServer();
+  if (!happPanel) return;
+
+  const clientName = partyVpnClientName(party);
+  if (!clientName) return;
+
+  const durationCode = getDurationCode(months);
+  try {
+    const { rows } = await getPool().query<{ happ_subscription_url: string | null }>(
+      "SELECT happ_subscription_url FROM users WHERE id = $1",
+      [party.userId],
+    );
+    const existingHappUrl = rows[0]?.happ_subscription_url ?? null;
+
+    if (existingHappUrl) {
+      await extendHapp(happPanel, clientName, durationCode);
+    } else {
+      const result = await provisionHapp(happPanel, clientName, durationCode);
+      await updateUserHappUrl(party.userId, result.url);
+    }
+  } catch (err) {
+    console.error("HAPP extend for referral party failed:", { userId: party.userId, err });
+  }
+}
+
 async function extendVpnForParty(
   party: ReferralRewardParty,
   months: number,
@@ -141,8 +174,10 @@ export async function syncVpnForReferralReward(
 
   if (reward.invitedUser && reward.invitedBonusMonths > 0) {
     await extendVpnForParty(reward.invitedUser, reward.invitedBonusMonths);
+    await extendHappForParty(reward.invitedUser, reward.invitedBonusMonths);
   }
   if (reward.referrerUser && reward.referrerBonusMonths > 0) {
     await extendVpnForParty(reward.referrerUser, reward.referrerBonusMonths);
+    await extendHappForParty(reward.referrerUser, reward.referrerBonusMonths);
   }
 }

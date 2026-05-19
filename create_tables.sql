@@ -281,3 +281,7 @@ CREATE TABLE IF NOT EXISTS servers (
     domain_server_name  VARCHAR(255),
     user_count          INTEGER         DEFAULT 0
 );
+
+-- ── HAPP (VLESS/Reality) support ──
+ALTER TABLE users   ADD COLUMN IF NOT EXISTS happ_subscription_url TEXT;
+ALTER TABLE servers ADD COLUMN IF NOT EXISTS supports_happ BOOLEAN NOT NULL DEFAULT FALSE;

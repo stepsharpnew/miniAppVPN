@@ -34,10 +34,12 @@ import {
   type ServerRow,
   type UserRow,
   getAllEnabledServers,
+  getHappPanelServer,
   getRandomEnabledServer,
   getUserSubscription,
   incrementServerUserCount,
   markPaymentProcessed,
+  updateUserHappUrl,
   upsertUserSubscription,
 } from "./db";
 import {
@@ -45,6 +47,7 @@ import {
   syncVpnForPromoRedemption,
   syncVpnForReferralReward,
 } from "./promo-vpn";
+import { extendHapp, provisionHapp } from "./happ";
 import { mountWebAuthRoutes } from "./web-auth";
 import { mountSyncRoutes } from "./sync-routes";
 import { PLATFORM_BOT_TEXTS, type PlatformId } from "../shared/platforms";
@@ -446,12 +449,30 @@ export function createApiServer(api: Api, botToken: string) {
       const referralInfo = await getUserReferralInfo(row.id);
       const expiredAt = row.expired_at ? new Date(row.expired_at) : null;
       const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
+
+      // ── Lazy HAPP backfill for active users without a subscription URL ──
+      let happUrl = row.happ_subscription_url ?? null;
+      if (active && !happUrl) {
+        try {
+          const happPanel = await getHappPanelServer();
+          if (happPanel) {
+            const clientName = getTelegramClientName(user.id, user.username);
+            const result = await provisionHapp(happPanel, clientName, "1m");
+            happUrl = result.url;
+            await updateUserHappUrl(row.id, happUrl);
+          }
+        } catch (err) {
+          console.error("Lazy HAPP backfill failed:", err);
+        }
+      }
+
       res.json({
         active,
         expired_at: row.expired_at,
         is_blocked: row.is_blocked,
         telegram_nickname: row.telegram_nickname,
         config: active ? row.vpn_config : null,
+        happ_subscription_url: active ? happUrl : null,
         created_at: row.created_at,
         my_referral_code: referralInfo.my_referral_code,
         referred_by_applied: referralInfo.referred_by_applied,
@@ -503,6 +524,29 @@ export function createApiServer(api: Api, botToken: string) {
             newExpiredAt: promo.newExpiredAt,
           });
         }
+
+        // ── HAPP extend/provision after promo ──
+        try {
+          const happPanel = await getHappPanelServer();
+          if (happPanel) {
+            const clientName = getTelegramClientName(tgUser.id, tgUser.username);
+            const promoDurationCode = PRICING.find((p) => p.months === promo.months)?.durationCode ?? "1m";
+            let happUrl = userRow.happ_subscription_url ?? null;
+            if (happUrl) {
+              await extendHapp(happPanel, clientName, promoDurationCode);
+            } else {
+              const result = await provisionHapp(happPanel, clientName, promoDurationCode);
+              happUrl = result.url;
+            }
+            if (happUrl) {
+              await updateUserHappUrl(dbUser.id, happUrl);
+              userRow = { ...userRow, happ_subscription_url: happUrl };
+            }
+          }
+        } catch (err) {
+          console.error("HAPP sync after promo failed:", err);
+        }
+
         const referralInfo = await getUserReferralInfo(dbUser.id);
         const expiredAt = userRow.expired_at ? new Date(userRow.expired_at) : null;
         const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
@@ -515,6 +559,7 @@ export function createApiServer(api: Api, botToken: string) {
             expired_at: userRow.expired_at,
             is_blocked: userRow.is_blocked,
             config: active ? (userRow.vpn_config ?? config ?? null) : null,
+            happ_subscription_url: active ? (userRow.happ_subscription_url ?? null) : null,
             my_referral_code: referralInfo.my_referral_code,
             referred_by_applied: referralInfo.referred_by_applied,
             referred_by_code: referralInfo.referred_by_code,
@@ -773,6 +818,27 @@ export function createApiServer(api: Api, botToken: string) {
       } catch (err) {
         console.error("Referral rewards after payment failed:", err);
       }
+
+      // ── HAPP (VLESS/Reality) provision/extend ──
+      try {
+        const happPanel = await getHappPanelServer();
+        if (happPanel) {
+          const clientName = pending.username || `tg_${userId}`;
+          const existingHappUrl = paidUser.happ_subscription_url ?? null;
+          let happUrl = existingHappUrl;
+          if (existingHappUrl) {
+            await extendHapp(happPanel, clientName, pending.durationCode);
+          } else {
+            const result = await provisionHapp(happPanel, clientName, pending.durationCode);
+            happUrl = result.url;
+          }
+          if (happUrl) {
+            await updateUserHappUrl(paidUser.id, happUrl);
+          }
+        }
+      } catch (err) {
+        console.error("HAPP sync after payment failed:", err);
+      }
     }
 
     const plan = PRICING.find((p) => p.months === pending.months);
@@ -1008,6 +1074,27 @@ export function createApiServer(api: Api, botToken: string) {
         }
       } catch (err) {
         console.error("Referral rewards after webhook payment failed:", err);
+      }
+
+      // ── HAPP (VLESS/Reality) provision/extend ──
+      try {
+        const happPanel = await getHappPanelServer();
+        if (happPanel) {
+          const clientName = username || `tg_${userId}`;
+          const existingHappUrl = paidUser.happ_subscription_url ?? null;
+          let happUrl = existingHappUrl;
+          if (existingHappUrl) {
+            await extendHapp(happPanel, clientName, durationCode);
+          } else {
+            const result = await provisionHapp(happPanel, clientName, durationCode);
+            happUrl = result.url;
+          }
+          if (happUrl) {
+            await updateUserHappUrl(paidUser.id, happUrl);
+          }
+        }
+      } catch (err) {
+        console.error("HAPP sync after webhook payment failed:", err);
       }
     }
 

@@ -83,6 +83,33 @@
   cursor: default;
 }
 
+/* ── Client kind toggle ── */
+
+.kindToggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.kindTab {
+  flex: 1;
+  padding: 10px 6px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  transition: background 0.15s, color 0.15s;
+  cursor: pointer;
+}
+
+.kindTabActive {
+  background: var(--btn-gradient);
+  color: #fff;
+  border-color: transparent;
+}
+
 .helpCard {
   background: var(--bg-card);
   border-radius: var(--border-radius);

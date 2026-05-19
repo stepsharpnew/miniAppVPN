@@ -16,6 +16,7 @@ interface SubscriptionInfo {
   is_blocked?: boolean;
   is_vip?: boolean;
   config?: string | null;
+  happ_subscription_url?: string | null;
   my_referral_code?: string;
   referred_by_applied?: boolean;
   referred_by_code?: string | null;
@@ -58,6 +59,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const [inviterLoading, setInviterLoading] = useState(false);
   const [inviterError, setInviterError] = useState<string | null>(null);
   const [referralCopied, setReferralCopied] = useState(false);
+  const [happCopied, setHappCopied] = useState(false);
   const [showSyncInfo, setShowSyncInfo] = useState(false);
   const [syncChecked, setSyncChecked] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
@@ -111,6 +113,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   }, []);
 
   const activeConfig = sub?.config ?? (sub?.active ? localConfig : null);
+  const happUrl = sub?.happ_subscription_url ?? null;
 
   useEffect(() => {
     let alive = true;
@@ -133,6 +136,30 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
       alive = false;
     };
   }, [activeConfig]);
+
+  const [happQrDataUrl, setHappQrDataUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    if (!happUrl) {
+      setHappQrDataUrl(null);
+      return;
+    }
+    QRCode.toDataURL(happUrl, {
+      width: 260,
+      margin: 2,
+      color: { dark: "#000000", light: "#FFFFFF" },
+    })
+      .then((dataUrl) => {
+        if (alive) setHappQrDataUrl(dataUrl);
+      })
+      .catch(() => {
+        if (alive) setHappQrDataUrl(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [happUrl]);
 
   const handleSendFile = useCallback(async () => {
     if (sending || !activeConfig) return;
@@ -266,6 +293,22 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
       WebApp.showAlert("Не удалось скопировать код.");
     }
   }, [sub?.my_referral_code]);
+
+  const handleCopyHappUrl = useCallback(async () => {
+    if (!happUrl) return;
+    try {
+      await navigator.clipboard.writeText(happUrl);
+      setHappCopied(true);
+      window.setTimeout(() => setHappCopied(false), 2000);
+    } catch {
+      WebApp.showAlert("Не удалось скопировать ссылку.");
+    }
+  }, [happUrl]);
+
+  const handleOpenHapp = useCallback(() => {
+    if (!happUrl) return;
+    WebApp.openLink(`happ://add/${btoa(happUrl)}`);
+  }, [happUrl]);
 
   const referralApplied = Boolean(sub?.referred_by_applied);
 
@@ -412,7 +455,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
         <div className={styles.divider} />
 
         <div className={styles.configBlock}>
-          <div className={styles.sectionHeader}>VPN конфиг</div>
+          <div className={styles.sectionHeader}>AmneziaWG конфиг</div>
 
           {!loaded ? (
             <div className={styles.noConfig}>Загрузка...</div>
@@ -438,6 +481,47 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
           ) : (
             <div className={styles.noConfig}>
               После оплаты конфиг появится здесь и в чате с ботом {BRAND_NAME}.
+            </div>
+          )}
+        </div>
+
+        <div className={styles.divider} />
+
+        <div className={styles.happBlock}>
+          <div className={styles.sectionHeader}>HAPP подписка (VLESS)</div>
+
+          {!loaded ? (
+            <div className={styles.noConfig}>Загрузка...</div>
+          ) : sub?.active && happUrl ? (
+            <>
+              {happQrDataUrl && (
+                <img
+                  src={happQrDataUrl}
+                  alt="QR код HAPP подписки"
+                  className={styles.qr}
+                />
+              )}
+              <div className={styles.happUrlRow}>
+                <input
+                  className={styles.happUrlInput}
+                  readOnly
+                  value={happUrl}
+                  onFocus={(e) => e.target.select()}
+                />
+                <button
+                  className={styles.secondaryBtn}
+                  onClick={handleCopyHappUrl}
+                >
+                  {happCopied ? "✓" : "Копировать"}
+                </button>
+              </div>
+              <button className={styles.happOpenBtn} onClick={handleOpenHapp}>
+                Открыть в HAPP
+              </button>
+            </>
+          ) : (
+            <div className={styles.noConfig}>
+              После оплаты ссылка на HAPP-подписку появится здесь.
             </div>
           )}
         </div>

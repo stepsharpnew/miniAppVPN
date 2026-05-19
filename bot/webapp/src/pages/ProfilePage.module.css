@@ -313,3 +313,50 @@
   z-index: 5;
   text-align: left;
 }
+
+/* ── HAPP subscription block ── */
+
+.happBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.happUrlRow {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.happUrlInput {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+  user-select: all;
+}
+
+.happOpenBtn {
+  width: 100%;
+  padding: 14px;
+  border-radius: var(--border-radius-sm);
+  background: linear-gradient(135deg, #7b2fff 0%, #5b4afe 100%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  transition: opacity 0.15s;
+}
+
+.happOpenBtn:active {
+  opacity: 0.85;
+}
