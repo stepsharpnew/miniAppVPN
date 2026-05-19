@@ -29,3 +29,6 @@ Thumbs.db
 # Docker volumes
 amneziawg-config/
 postgres-data/
+
+# Preprod Mini App static (bind-mounted into edge-nginx, built per push to dev)
+webapp-preprod/

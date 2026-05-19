@@ -85,6 +85,11 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt:ro
       # Certbot на хосте: certonly --webroot -w /var/www/certbot (см. nginx.conf /.well-known)
       - /var/www/certbot:/var/www/certbot:ro
+      # Mini App preprod: статика собирается в CI (push в dev) и кладётся на хост.
+      # Prod-статика остаётся внутри образа (/usr/share/nginx/miniapp), preprod —
+      # bind-mount, чтобы push в dev не пересобирал общий образ и не задевал prod.
+      # Папка на хосте создаётся CI-шагом `mkdir -p` перед docker compose up.
+      - ./webapp-preprod/dist:/usr/share/nginx/miniapp-preprod:ro
     depends_on:
       # Только prod-bot. bot-preprod поднимается отдельно из preprod-job; nginx
       # маршрутизирует на него через docker-DNS (resolver 127.0.0.11) при запросе.
