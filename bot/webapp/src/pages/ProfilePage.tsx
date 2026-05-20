@@ -43,8 +43,16 @@ interface ProfilePageProps {
   onOpenSync?: () => void;
 }
 
+function toBase64Url(input: string): string {
+  return window
+    .btoa(input)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 function buildHappDeepLink(subscriptionUrl: string): string {
-  return `happ://add/${encodeURIComponent(window.btoa(subscriptionUrl))}`;
+  return `happ://add/${toBase64Url(subscriptionUrl)}`;
 }
 
 export function ProfilePage({ onOpenSync }: ProfilePageProps) {
@@ -448,6 +456,10 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
                 >
                   Открыть в HAPP
                 </a>
+                <div className={styles.referralHint}>
+                  Подписка добавится автоматически. Если HAPP не открылся —
+                  ссылка уже в буфере, откройте приложение и подтвердите импорт.
+                </div>
               </>
             ) : (
               <div className={styles.noConfig}>
