@@ -52,14 +52,53 @@
   min-width: 0;
 }
 
-.sectionHeader {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 14px;
+/* ── Compact sync badge ── */
+
+.syncBadgeRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
 }
+
+.syncBadgeOk {
+  font-size: 11px;
+  font-weight: 600;
+  color: #88f0b3;
+  background: rgba(136, 240, 179, 0.1);
+  border: 1px solid rgba(136, 240, 179, 0.22);
+  border-radius: 20px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.syncBadgeLogin {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.syncBadgeLink {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  background: rgba(77, 139, 255, 0.1);
+  border: 1px solid rgba(77, 139, 255, 0.25);
+  border-radius: 20px;
+  padding: 3px 10px;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.syncBadgeLink:active {
+  opacity: 0.7;
+}
+
+/* ── Subscription status ── */
 
 .statusWrap {
   display: flex;
@@ -85,8 +124,10 @@
 .divider {
   height: 1px;
   background: rgba(255, 255, 255, 0.06);
-  margin: 10px 0;
+  margin: 14px 0;
 }
+
+/* ── VPN config block ── */
 
 .configBlock {
   display: flex;
@@ -94,155 +135,49 @@
   align-items: center;
 }
 
-.syncStatusCard {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(77, 139, 255, 0.2);
-  background: rgba(77, 139, 255, 0.08);
+/* ── VPN client toggle ── */
+
+.kindToggleWrap {
+  width: 100%;
+  margin-bottom: 16px;
 }
 
-.syncStatusTitle {
-  font-size: 13px;
-  font-weight: 700;
-  color: #d9e7ff;
-}
-
-.syncStatusOk {
-  font-size: 13px;
-  font-weight: 700;
-  color: #88f0b3;
-}
-
-.syncStatusText {
+.kindToggleLabel {
   font-size: 12px;
-  color: #c4d6ff;
-  line-height: 1.45;
-}
-
-.promoBlock {
-  display: flex;
-  flex-direction: column;
-}
-
-.referralCodeCard {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.referralCodeValue {
-  flex: 1;
-  min-width: 0;
-  padding: 14px 12px;
-  border-radius: var(--border-radius-sm);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  text-align: center;
-}
-
-.promoRow {
-  display: flex;
-  gap: 10px;
-}
-
-.referralHint {
-  margin-bottom: 10px;
-  font-size: 12px;
+  font-weight: 600;
   color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-.promoInput {
-  flex: 1;
-  min-width: 0;
-  padding: 14px 12px;
-  border-radius: var(--border-radius-sm);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-  font-size: 14px;
   text-transform: uppercase;
-}
-
-.promoInput::placeholder {
-  color: var(--text-secondary);
-  text-transform: none;
-}
-
-.promoBtn {
-  padding: 0 16px;
-  border-radius: var(--border-radius-sm);
-  background: var(--btn-gradient);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.promoBtn:disabled {
-  opacity: 0.6;
-}
-
-.secondaryBtn {
-  padding: 0 16px;
-  height: 48px;
-  border-radius: var(--border-radius-sm);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.secondaryBtn:disabled {
-  opacity: 0.6;
-}
-
-.promoSuccess {
-  margin-top: 10px;
-  color: #7df5ab;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.promoError {
-  margin-top: 10px;
-  color: #ff8e8e;
-  font-size: 12px;
-  line-height: 1.5;
+  letter-spacing: 0.8px;
+  margin-bottom: 8px;
 }
 
 .kindToggle {
   display: flex;
   width: 100%;
-  gap: 8px;
-  margin-bottom: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 4px;
+  gap: 4px;
 }
 
 .kindTab {
   flex: 1;
-  padding: 10px 6px;
+  padding: 12px 6px;
   border-radius: 10px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.35);
+  transition: color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .kindTabActive {
   background: var(--btn-gradient);
-  border-color: transparent;
   color: #fff;
+  box-shadow: 0 2px 14px rgba(77, 139, 255, 0.35);
 }
+
+/* ── Misc config ── */
 
 .noConfig {
   font-size: 13px;
@@ -250,6 +185,14 @@
   line-height: 1.6;
   text-align: center;
   padding: 6px 4px 2px;
+}
+
+.configHint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  text-align: center;
 }
 
 .qr {
@@ -279,72 +222,23 @@
   pointer-events: none;
 }
 
-.syncBtn {
-  flex: 1;
-  min-width: 0;
-  padding: 14px;
+.secondaryBtn {
+  padding: 0 16px;
+  height: 48px;
   border-radius: var(--border-radius-sm);
-  background: rgba(77, 139, 255, 0.12);
-  color: var(--accent-blue);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
   font-size: 14px;
   font-weight: 700;
-  transition: opacity 0.15s, background 0.15s;
+  white-space: nowrap;
 }
 
-.syncBtn:active {
-  opacity: 0.8;
-  background: rgba(77, 139, 255, 0.2);
-}
-
-.syncActionRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-
-.syncInfoWrap {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.syncInfoBtn {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 1px solid rgba(77, 139, 255, 0.35);
-  background: rgba(77, 139, 255, 0.12);
-  color: var(--accent-blue);
-  font-size: 13px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.syncTooltip {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  width: min(280px, calc(100vw - 56px));
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(77, 139, 255, 0.28);
-  background: #1a1a33;
-  color: #d7e6ff;
-  font-size: 12px;
-  line-height: 1.45;
-  z-index: 5;
-  text-align: left;
+.secondaryBtn:disabled {
+  opacity: 0.6;
 }
 
 /* ── HAPP subscription block ── */
-
-.happBlock {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
 
 .happUrlRow {
   display: flex;
@@ -379,6 +273,9 @@
   font-size: 14px;
   font-weight: 700;
   transition: opacity 0.15s;
+  display: block;
+  text-align: center;
+  text-decoration: none;
 }
 
 .happOpenBtn:active {

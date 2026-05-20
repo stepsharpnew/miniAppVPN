@@ -1,6 +1,6 @@
 import styles from './BottomNav.module.css';
 
-export type TabId = 'purchase' | 'profile' | 'instructions' | 'support';
+export type TabId = 'profile' | 'purchase' | 'referral' | 'instructions' | 'support';
 
 interface Tab {
   id: TabId;
@@ -11,6 +11,7 @@ interface Tab {
 const tabs: Tab[] = [
   { id: 'profile', label: 'Профиль', icon: '👤' },
   { id: 'purchase', label: 'Покупка', icon: '🛒' },
+  { id: 'referral', label: 'Реферал', icon: '🎁' },
   { id: 'instructions', label: 'Инструкции', icon: '📖' },
   { id: 'support', label: 'Поддержка', icon: '💬' },
 ];

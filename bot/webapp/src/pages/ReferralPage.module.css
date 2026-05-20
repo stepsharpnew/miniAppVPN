@@ -1,0 +1,127 @@
+.page {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.codeRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.codeValue {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 12px;
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-align: center;
+}
+
+.copyBtn {
+  padding: 0 16px;
+  height: 48px;
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.copyBtn:disabled {
+  opacity: 0.4;
+}
+
+.appliedBadge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #88f0b3;
+  background: rgba(136, 240, 179, 0.08);
+  border: 1px solid rgba(136, 240, 179, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  line-height: 1.4;
+}
+
+.promoRow {
+  display: flex;
+  gap: 10px;
+}
+
+.promoInput {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 12px;
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.promoInput::placeholder {
+  color: var(--text-secondary);
+  text-transform: none;
+}
+
+.promoBtn {
+  padding: 0 16px;
+  border-radius: var(--border-radius-sm);
+  background: var(--btn-gradient);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.promoBtn:disabled {
+  opacity: 0.5;
+}
+
+.promoSuccess {
+  font-size: 12px;
+  color: #7df5ab;
+  line-height: 1.5;
+}
+
+.promoError {
+  font-size: 12px;
+  color: #ff8e8e;
+  line-height: 1.5;
+}
