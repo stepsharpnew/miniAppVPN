@@ -172,62 +172,66 @@ jobs:
       - name: Build and (re)start services — minimal downtime
         env:
           REBUILD_NGINX: ${{ steps.changes.outputs.rebuild_nginx }}
+        # Скрипт собирается на runner-е и заливается на сервер. Это надёжнее,
+        # чем `ssh ... bash << 'ENDSSH'`, где stdin heredoc может быть проглочен
+        # внутренней `docker compose exec` командой → bash тихо exit-нет без работы.
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
-            REBUILD_NGINX="${REBUILD_NGINX}" bash << 'ENDSSH'
-            set -euo pipefail
-            cd ~/meme_bot
+          cat > /tmp/prod-deploy.sh <<PROD_SCRIPT
+          #!/usr/bin/env bash
+          set -Eeuxo pipefail
+          REBUILD_NGINX="${REBUILD_NGINX}"
+          PROD_SCRIPT
+          cat >> /tmp/prod-deploy.sh <<'PROD_SCRIPT'
+          cd ~/meme_bot
 
-            # Bind-mount папка preprod-фронта (см. docker-compose nginx.volumes).
-            # На prod может ещё не существовать — создаём пустую, чтобы compose не падал.
-            mkdir -p ~/meme_bot/webapp-preprod/dist
+          mkdir -p ~/meme_bot/webapp-preprod/dist
+          docker compose --env-file .env config > /dev/null
 
-            docker compose --env-file .env config > /dev/null
-
-            # Postgres — поднять, если ещё не запущен. up -d идемпотентен.
-            docker compose --env-file .env up -d postgres
-            for i in {1..30}; do
-              if docker compose exec -T postgres pg_isready -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" > /dev/null 2>&1; then
-                break
-              fi
-              [ "$i" -eq 30 ] && { echo "Postgres failed to become ready"; exit 1; }
-              sleep 2
-            done
-
-            # Миграции: прямой psql внутри postgres-контейнера (использует его env-vars
-            # POSTGRES_USER/POSTGRES_DB/POSTGRES_PASSWORD — всегда корректные).
-            echo "── Migrations (direct psql via postgres container) ──"
-            docker compose exec -T postgres sh -c \
-              "PGPASSWORD=\$POSTGRES_PASSWORD psql -U \$POSTGRES_USER -d \$POSTGRES_DB -v ON_ERROR_STOP=1 -f -" \
-              < create_tables.sql
-            echo "Migration OK"
-
-            # Сбрасываем состояние db-migrator (bot depends_on service_completed_successfully).
-            # Теперь db-migrator тоже работает корректно (PGHOST/PGUSER/PGDATABASE в env).
-            echo "── Reset db-migrator state ──"
-            docker compose rm -f db-migrator 2>/dev/null || true
-            docker compose --env-file .env up --no-deps -d db-migrator
-            DB_EXIT=$(docker wait meme-db-migrator)
-            [ "${DB_EXIT}" = "0" ] && echo "db-migrator OK" || { echo "::error::db-migrator exited ${DB_EXIT}:"; docker compose logs --tail=20 db-migrator || true; exit 1; }
-
-            # Bot (prod) — ребилд + принудительный рестарт (подхватывает новый образ).
-            docker compose --env-file .env build bot
-            docker compose --env-file .env up -d --no-deps --force-recreate bot
-
-            # Nginx — пересобирать только при изменениях фронта/конфига или если ещё не запущен.
-            # --force-recreate обязателен: nginx.conf смонтирован как single-file bind-mount,
-            # после rsync на хосте у файла новый inode, а контейнер держит старый. Пересоздание
-            # контейнера перепривязывает маунт к актуальному inode.
-            if [ "${REBUILD_NGINX}" = "true" ] || ! docker ps --format '{{.Names}}' | grep -q '^edge-nginx$'; then
-              echo "Rebuilding nginx (REBUILD_NGINX=${REBUILD_NGINX})"
-              docker compose --env-file .env build nginx
-              docker compose --env-file .env up -d --no-deps --force-recreate nginx
-            else
-              echo "Skipping nginx rebuild — no relevant changes"
+          docker compose --env-file .env up -d postgres
+          for i in $(seq 1 30); do
+            if docker compose exec -T postgres pg_isready > /dev/null 2>&1; then
+              break
             fi
+            [ "$i" -eq 30 ] && { echo "::error::Postgres failed to become ready"; exit 1; }
+            sleep 2
+          done
 
-            docker compose ps
-          ENDSSH
+          docker cp ./create_tables.sql meme-postgres:/tmp/create_tables.sql
+          docker compose exec -T postgres bash -c \
+            'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /tmp/create_tables.sql'
+
+          PRESENT=$(docker compose exec -T postgres bash -c \
+            'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE column_name IN ('"'"'happ_subscription_url'"'"','"'"'supports_happ'"'"')"')
+          PRESENT=$(echo "$PRESENT" | tr -d '[:space:]')
+          if [ "$PRESENT" != "2" ]; then
+            echo "::error::HAPP columns missing after migration (got=$PRESENT, expected=2)"
+            exit 1
+          fi
+
+          docker compose rm -f db-migrator 2>/dev/null || true
+          docker compose --env-file .env up --no-deps -d db-migrator
+          DB_EXIT=$(docker wait meme-db-migrator)
+          if [ "$DB_EXIT" != "0" ]; then
+            echo "::error::db-migrator exited $DB_EXIT"
+            docker compose logs --tail=30 db-migrator || true
+            exit 1
+          fi
+
+          docker compose --env-file .env build bot
+          docker compose --env-file .env up -d --no-deps --force-recreate bot
+
+          if [ "${REBUILD_NGINX}" = "true" ] || ! docker ps --format '{{.Names}}' | grep -q '^edge-nginx$'; then
+            docker compose --env-file .env build nginx
+            docker compose --env-file .env up -d --no-deps --force-recreate nginx
+          fi
+
+          docker compose ps
+          PROD_SCRIPT
+
+          scp -o StrictHostKeyChecking=no /tmp/prod-deploy.sh \
+            ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }}:/tmp/prod-deploy.sh
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
+            'bash /tmp/prod-deploy.sh && rm -f /tmp/prod-deploy.sh'
 
       - name: Health check
         run: |
@@ -326,85 +330,82 @@ jobs:
             "tee ~/meme_bot/.env.preprod ~/meme_bot/bot/.env.preprod > /dev/null"
 
       - name: Migrate DB, rebuild bot-preprod, refresh nginx mount
-        # Идемпотентно: миграция через ALTER ... IF NOT EXISTS, build с layer-cache.
-        # Преднамеренно ВСЕГДА делаем полный цикл (без условных регэкспов) —
-        # чтобы push в dev гарантированно поднимал тест-стенд.
-        #
-        # NB: nginx-образ НЕ пересобирается на dev-пуше. Prod-статика остаётся
-        # запечённой в образе, preprod-статика приходит через bind-mount, который
-        # обновляется в шаге "Rsync preprod Mini App static" выше. Здесь только
-        # `up -d` чтобы при первом раскате этого изменения compose подхватил
-        # новый volume (./webapp-preprod/dist).
+        # Скрипт собирается на runner-е, заливается на сервер файлом, потом
+        # выполняется отдельным `ssh ... bash <script>`. Так мы:
+        #  - не зависим от того, как SSH прокидывает heredoc через stdin
+        #    (раньше шаг "завершался" за 2с, потому что часть скрипта молча
+        #    обрезалась и bash думал что всё ок),
+        #  - получаем РЕАЛЬНЫЙ exit code bash-а (без двойного wrap'а),
+        #  - видим полный лог: каждая команда печатается через `set -x`.
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
-            set -euo pipefail
-            cd ~/meme_bot
+          cat > /tmp/preprod-deploy.sh <<'PREPROD_SCRIPT'
+          #!/usr/bin/env bash
+          set -Eeuxo pipefail
+          cd ~/meme_bot
 
-            # Прод-овский .env обязателен — иначе docker compose упадёт на интерполяции переменных.
-            if [ ! -f .env ]; then
-              echo "::error::~/meme_bot/.env (prod) отсутствует. Сначала задеплой prod (push в main)."
-              exit 1
+          if [ ! -f .env ]; then
+            echo "::error::~/meme_bot/.env (prod) отсутствует. Сначала задеплой prod (push в main)."
+            exit 1
+          fi
+
+          mkdir -p ~/meme_bot/webapp-preprod/dist
+          docker compose --env-file .env config > /dev/null
+
+          docker compose --env-file .env up -d postgres
+          for i in $(seq 1 30); do
+            if docker compose exec -T postgres pg_isready > /dev/null 2>&1; then
+              break
             fi
-
-            echo "── Ensure bind-mount target exists ──"
-            mkdir -p ~/meme_bot/webapp-preprod/dist
-
-            echo "── Validate compose ──"
-            docker compose --env-file .env config > /dev/null
-
-            echo "── Ensure postgres is up ──"
-            docker compose --env-file .env up -d postgres
-            for i in {1..30}; do
-              if docker compose exec -T postgres pg_isready -U "${POSTGRES_USER:-meme}" -d "${POSTGRES_DB:-meme_db}" > /dev/null 2>&1; then
-                break
-              fi
-              [ "$i" -eq 30 ] && { echo "::error::Postgres failed to become ready"; exit 1; }
-              sleep 2
-            done
-
-            echo "── Migrations (direct psql via postgres container) ──"
-            docker compose exec -T postgres sh -c \
-              "PGPASSWORD=\$POSTGRES_PASSWORD psql -U \$POSTGRES_USER -d \$POSTGRES_DB -v ON_ERROR_STOP=1 -f -" \
-              < create_tables.sql
-            echo "Migration OK"
-
-            echo "── Reset db-migrator state ──"
-            docker compose rm -f db-migrator 2>/dev/null || true
-            docker compose --env-file .env up --no-deps -d db-migrator
-            DB_EXIT=$(docker wait meme-db-migrator)
-            [ "${DB_EXIT}" = "0" ] && echo "db-migrator OK" || { echo "::error::db-migrator exited ${DB_EXIT}:"; docker compose logs --tail=20 db-migrator || true; exit 1; }
-
-            echo "── Verify HAPP columns ──"
-            docker compose exec -T postgres sh -c \
-              "psql -U \$POSTGRES_USER -d \$POSTGRES_DB -c \"
-                SELECT column_name, 'present' AS status
-                FROM information_schema.columns
-                WHERE column_name IN ('happ_subscription_url','supports_happ')
-                ORDER BY column_name;\""
-
-            echo "── Build & restart bot-preprod ──"
-            docker compose --env-file .env build bot-preprod
-            docker compose --env-file .env up -d --no-deps --force-recreate bot-preprod
-
-            echo "── Refresh nginx config/volumes (no image rebuild) ──"
-            # `up -d` идемпотентен: пересоздаст контейнер только если изменились
-            # compose-конфиг (например, новый volume) или nginx.conf bind-mount.
-            # Статика preprod подхватывается из bind-mount без reload — файлы
-            # читаются на каждый запрос.
-            docker compose --env-file .env up -d --no-deps nginx
-
+            [ "$i" -eq 30 ] && { echo "::error::Postgres failed to become ready"; exit 1; }
             sleep 2
-            if ! docker ps --format '{{.Names}}' | grep -q '^edge-nginx$'; then
-              echo "::error::edge-nginx не запущен. Логи:"
-              docker compose logs --tail=40 nginx || true
-              echo "Если это первый раскат изменений с bind-mount preprod — проверь, что"
-              echo "~/meme_bot/webapp-preprod/dist существует и доступен под docker."
-              exit 1
-            fi
+          done
 
-            echo "── Final container status ──"
-            docker compose ps
-          ENDSSH
+          # Миграция: запускаем psql прямо внутри postgres-контейнера, используя
+          # его собственные env-vars (POSTGRES_USER/DB/PASSWORD). Файл копируем
+          # в контейнер через `docker cp`, чтобы не зависеть от stdin-pipe.
+          docker cp ./create_tables.sql meme-postgres:/tmp/create_tables.sql
+          docker compose exec -T postgres bash -c \
+            'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /tmp/create_tables.sql'
+
+          # Проверяем, что HAPP-колонки появились (если нет — fail с понятной ошибкой).
+          PRESENT=$(docker compose exec -T postgres bash -c \
+            'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE column_name IN ('"'"'happ_subscription_url'"'"','"'"'supports_happ'"'"')"')
+          PRESENT=$(echo "$PRESENT" | tr -d '[:space:]')
+          if [ "$PRESENT" != "2" ]; then
+            echo "::error::После миграции HAPP-колонки не найдены (got=$PRESENT, expected=2)"
+            exit 1
+          fi
+          echo "HAPP columns present: $PRESENT/2"
+
+          # Сбрасываем кэш статуса db-migrator (bot depends_on service_completed_successfully).
+          docker compose rm -f db-migrator 2>/dev/null || true
+          docker compose --env-file .env up --no-deps -d db-migrator
+          DB_EXIT=$(docker wait meme-db-migrator)
+          if [ "$DB_EXIT" != "0" ]; then
+            echo "::error::db-migrator exited $DB_EXIT"
+            docker compose logs --tail=30 db-migrator || true
+            exit 1
+          fi
+
+          docker compose --env-file .env build bot-preprod
+          docker compose --env-file .env up -d --no-deps --force-recreate bot-preprod
+          docker compose --env-file .env up -d --no-deps nginx
+
+          sleep 2
+          if ! docker ps --format '{{.Names}}' | grep -q '^edge-nginx$'; then
+            echo "::error::edge-nginx не запущен"
+            docker compose logs --tail=40 nginx || true
+            exit 1
+          fi
+
+          docker compose ps
+          PREPROD_SCRIPT
+
+          # Заливаем + выполняем + получаем реальный exit code.
+          scp -o StrictHostKeyChecking=no /tmp/preprod-deploy.sh \
+            ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }}:/tmp/preprod-deploy.sh
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
+            'bash /tmp/preprod-deploy.sh && rm -f /tmp/preprod-deploy.sh'
 
       - name: Health check (preprod)
         run: |
