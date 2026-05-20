@@ -50,7 +50,7 @@ import {
 import { extendHapp, provisionHapp } from "./happ";
 import { mountWebAuthRoutes } from "./web-auth";
 import { mountSyncRoutes } from "./sync-routes";
-import { PLATFORM_BOT_TEXTS, type PlatformId } from "../shared/platforms";
+import { PLATFORMS, type PlatformId, type VpnClientKind } from "../shared/platforms";
 import {
   getSupportMessages,
   sendSupportTextMessage,
@@ -247,7 +247,11 @@ export function createApiServer(api: Api, botToken: string) {
     const platformIdRaw =
       typeof req.body?.platformId === "string" ? req.body.platformId : "";
     const platformId = platformIdRaw as PlatformId;
-    const instructionText = PLATFORM_BOT_TEXTS[platformId];
+    const clientKindRaw =
+      typeof req.body?.clientKind === "string" ? req.body.clientKind : "amneziawg";
+    const clientKind: VpnClientKind = clientKindRaw === "happ" ? "happ" : "amneziawg";
+    const platform = PLATFORMS.find((item) => item.id === platformId);
+    const instructionText = platform?.variants[clientKind]?.botText;
 
     if (!instructionText) {
       res.status(400).json({ error: "Unknown platform" });

@@ -43,6 +43,10 @@ interface ProfilePageProps {
   onOpenSync?: () => void;
 }
 
+function buildHappDeepLink(subscriptionUrl: string): string {
+  return `happ://add/${encodeURIComponent(window.btoa(subscriptionUrl))}`;
+}
+
 export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const user = useTelegramUser();
   const { config: localConfig, save: saveLocalConfig } = useVpnConfig();
@@ -61,7 +65,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const [syncChecked, setSyncChecked] = useState(false);
   const [isSynced, setIsSynced] = useState(false);
   const [syncedLogin, setSyncedLogin] = useState<string | null>(null);
-  const [clientKind, setClientKind] = useState<"happ" | "amneziawg">("happ");
+  const [clientKind, setClientKind] = useState<"happ" | "amneziawg">("amneziawg");
 
   useEffect(() => {
     let alive = true;
@@ -276,7 +280,13 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
 
   const handleOpenHapp = useCallback(() => {
     if (!happUrl) return;
-    WebApp.openLink(`happ://add/${btoa(happUrl)}`);
+    void navigator.clipboard.writeText(happUrl).catch(() => {});
+    window.location.href = buildHappDeepLink(happUrl);
+    window.setTimeout(() => {
+      if (!document.hidden) {
+        WebApp.showAlert("Если HAPP не открылся, ссылка уже скопирована — вставьте её в приложении вручную.");
+      }
+    }, 900);
   }, [happUrl]);
 
   return (
@@ -399,17 +409,17 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
           <div className={styles.kindToggle}>
             <button
               type="button"
-              className={`${styles.kindTab} ${clientKind === "happ" ? styles.kindTabActive : ""}`}
-              onClick={() => setClientKind("happ")}
-            >
-              HAPP
-            </button>
-            <button
-              type="button"
               className={`${styles.kindTab} ${clientKind === "amneziawg" ? styles.kindTabActive : ""}`}
               onClick={() => setClientKind("amneziawg")}
             >
               AmneziaWG
+            </button>
+            <button
+              type="button"
+              className={`${styles.kindTab} ${clientKind === "happ" ? styles.kindTabActive : ""}`}
+              onClick={() => setClientKind("happ")}
+            >
+              HAPP
             </button>
           </div>
 
@@ -467,7 +477,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
           )}
         </div>
 
-        {onOpenSync && (
+        {onOpenSync && syncChecked && !isSynced && (
           <>
             <div className={styles.divider} />
             <div className={styles.syncActionRow}>

@@ -54,7 +54,7 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
-  const [clientKind, setClientKind] = useState<VpnClientKind>("happ");
+  const [clientKind, setClientKind] = useState<VpnClientKind>("amneziawg");
 
   useEffect(() => {
     if (!user) return;
@@ -281,17 +281,17 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
           <div className={styles.kindToggle}>
             <button
               type="button"
-              className={`${styles.kindTab} ${clientKind === "happ" ? styles.kindTabActive : ""}`}
-              onClick={() => setClientKind("happ")}
-            >
-              HAPP
-            </button>
-            <button
-              type="button"
               className={`${styles.kindTab} ${clientKind === "amneziawg" ? styles.kindTabActive : ""}`}
               onClick={() => setClientKind("amneziawg")}
             >
               AmneziaWG
+            </button>
+            <button
+              type="button"
+              className={`${styles.kindTab} ${clientKind === "happ" ? styles.kindTabActive : ""}`}
+              onClick={() => setClientKind("happ")}
+            >
+              HAPP
             </button>
           </div>
 
