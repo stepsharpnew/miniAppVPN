@@ -57,18 +57,18 @@ export const PLATFORMS: PlatformInfo[] = [
 • Подтверждаем импорт и жмем «Подключиться».`,
       },
       happ: {
-        downloadUrl: 'https://play.google.com/store/apps/details?id=app.happ.vpn',
+        downloadUrl: 'https://play.google.com/store/apps/details?id=com.happproxy',
         steps: [
           'Скачайте HAPP из Google Play по кнопке ниже',
-          'Откройте HAPP и нажмите «+» → «Добавить подписку»',
-          'Введите или отсканируйте QR-код подписки из раздела «Профиль»',
+          'Скопируйте HAPP-ссылку из раздела «Профиль»',
+          'Откройте HAPP и добавьте подписку из буфера обмена',
           'Выберите сервер и нажмите «Подключиться»',
         ],
         botText: `🤖 Android | HAPP (VLESS)
 
 • Скачиваем HAPP из Google Play.
-• Нажимаем «+» → «Добавить подписку».
-• Вводим или сканируем QR ссылки из раздела «Профиль».
+• Копируем HAPP-ссылку из раздела «Профиль».
+• Добавляем подписку из буфера обмена.
 • Выбираем сервер и жмем «Подключиться».`,
       },
     },
@@ -109,18 +109,18 @@ export const PLATFORMS: PlatformInfo[] = [
 • Разрешаем VPN-профиль и подключаемся.`,
       },
       happ: {
-        downloadUrl: 'https://apps.apple.com/app/happ-vpn/id6446476622',
+        downloadUrl: 'https://apps.apple.com/us/app/happ-proxy-utility/id6504287215',
         steps: [
           'Скачайте HAPP из App Store по кнопке ниже',
-          'Откройте HAPP и нажмите «+» → «Добавить подписку»',
-          'Введите или отсканируйте QR-код подписки из раздела «Профиль»',
+          'Скопируйте HAPP-ссылку из раздела «Профиль»',
+          'Откройте HAPP и добавьте подписку из буфера обмена',
           'Выберите сервер и нажмите «Подключиться»',
         ],
         botText: `🍎 iPhone | HAPP (VLESS)
 
 • Скачиваем HAPP из App Store.
-• Нажимаем «+» → «Добавить подписку».
-• Вводим или сканируем QR ссылки из раздела «Профиль».
+• Копируем HAPP-ссылку из раздела «Профиль».
+• Добавляем подписку из буфера обмена.
 • Выбираем сервер и жмем «Подключиться».`,
       },
     },
@@ -161,17 +161,17 @@ export const PLATFORMS: PlatformInfo[] = [
 • Жмем «Connect».`,
       },
       happ: {
-        downloadUrl: 'https://github.com/hiddify/hiddify-next/releases/latest',
+        downloadUrl: 'https://github.com/Happ-proxy/happ-desktop/releases/latest',
         steps: [
-          'Скачайте Hiddify (HAPP-совместимый клиент) по кнопке ниже',
-          'Откройте приложение и нажмите «+» → «Добавить из буфера»',
-          'Вставьте ссылку подписки из раздела «Профиль»',
+          'Скачайте HAPP для Windows по кнопке ниже',
+          'Скопируйте HAPP-ссылку из раздела «Профиль»',
+          'Откройте HAPP и добавьте подписку из буфера обмена',
           'Нажмите «Подключиться»',
         ],
-        botText: `🪟 Windows | HAPP / Hiddify (VLESS)
+        botText: `🪟 Windows | HAPP (VLESS)
 
-• Скачиваем Hiddify.
-• Добавляем ссылку подписки из раздела «Профиль».
+• Скачиваем HAPP.
+• Добавляем HAPP-ссылку из раздела «Профиль».
 • Жмем «Подключиться».`,
       },
     },
@@ -212,17 +212,17 @@ export const PLATFORMS: PlatformInfo[] = [
 • Включаем VPN.`,
       },
       happ: {
-        downloadUrl: 'https://github.com/hiddify/hiddify-next/releases/latest',
+        downloadUrl: 'https://apps.apple.com/us/app/happ-proxy-utility/id6504287215',
         steps: [
-          'Скачайте Hiddify (HAPP-совместимый клиент) по кнопке ниже',
-          'Откройте приложение и нажмите «+» → «Добавить из буфера»',
-          'Вставьте ссылку подписки из раздела «Профиль»',
+          'Скачайте HAPP из App Store по кнопке ниже',
+          'Скопируйте HAPP-ссылку из раздела «Профиль»',
+          'Откройте HAPP и добавьте подписку из буфера обмена',
           'Нажмите «Подключиться»',
         ],
-        botText: `🍏 macOS | HAPP / Hiddify (VLESS)
+        botText: `🍏 macOS | HAPP (VLESS)
 
-• Скачиваем Hiddify.
-• Добавляем ссылку подписки из раздела «Профиль».
+• Скачиваем HAPP.
+• Добавляем HAPP-ссылку из раздела «Профиль».
 • Жмем «Подключиться».`,
       },
     },
@@ -263,17 +263,17 @@ export const PLATFORMS: PlatformInfo[] = [
 • Поднимаем туннель.`,
       },
       happ: {
-        downloadUrl: 'https://github.com/hiddify/hiddify-next/releases/latest',
+        downloadUrl: 'https://github.com/Happ-proxy/happ-desktop/releases/latest',
         steps: [
-          'Скачайте Hiddify (HAPP-совместимый клиент) по кнопке ниже',
-          'Запустите приложение и нажмите «+» → «Добавить из буфера»',
-          'Вставьте ссылку подписки из раздела «Профиль»',
+          'Скачайте HAPP для Linux по кнопке ниже',
+          'Скопируйте HAPP-ссылку из раздела «Профиль»',
+          'Откройте HAPP и добавьте подписку из буфера обмена',
           'Нажмите «Подключиться»',
         ],
-        botText: `🐧 Linux | HAPP / Hiddify (VLESS)
+        botText: `🐧 Linux | HAPP (VLESS)
 
-• Скачиваем Hiddify.
-• Добавляем ссылку подписки из раздела «Профиль».
+• Скачиваем HAPP.
+• Добавляем HAPP-ссылку из раздела «Профиль».
 • Жмем «Подключиться».`,
       },
     },

@@ -1,10 +1,10 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- ── Таблица пользователей (новая схема: UUID PK, опциональный telegram_id) ──
+-- Users
 CREATE TABLE IF NOT EXISTS users (
     id              UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
-    telegram_id     BIGINT          UNIQUE,
-    login           TEXT            UNIQUE,
+    telegram_id     BIGINT,
+    login           TEXT,
     password_hash   TEXT,
     auth_source     TEXT            NOT NULL DEFAULT 'telegram',
     is_blocked      BOOLEAN         NOT NULL DEFAULT FALSE,
@@ -14,11 +14,10 @@ CREATE TABLE IF NOT EXISTS users (
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
--- ── Идемпотентная миграция: поддержка старой схемы (telegram_id PK) ──
+-- Idempotent migrations for existing installations.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS vpn_config TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_nickname VARCHAR(255);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid();
-ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS login TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_source TEXT DEFAULT 'telegram';
@@ -26,8 +25,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code CHAR(8);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by_user_id UUID;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_applied_at TIMESTAMPTZ;
 
--- ── Миграция: переезд с email на login (исключаем ПД) ──
--- 1) Backfill login из email для существующих веб-пользователей.
+-- Move existing web users from email to login, then drop email data.
 DO $$
 BEGIN
   IF EXISTS (
@@ -38,7 +36,6 @@ BEGIN
   END IF;
 END $$;
 
--- 2) Снимаем уникальное ограничение и колонку email — больше не используем.
 DO $$
 BEGIN
   IF EXISTS (
@@ -53,7 +50,6 @@ ALTER TABLE users DROP COLUMN IF EXISTS email;
 DO $$
 BEGIN
 
-  -- Если telegram_id всё ещё PRIMARY KEY — мигрируем на UUID PK
   IF EXISTS (
     SELECT 1
     FROM information_schema.table_constraints tc
@@ -72,7 +68,6 @@ BEGIN
   END IF;
 END $$;
 
--- Уникальное ограничение на telegram_id (если отсутствует)
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -82,7 +77,9 @@ BEGIN
   END IF;
 END $$;
 
--- Уникальное ограничение на login (case-insensitive, NULL допустим для TG-only)
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_telegram_id_key;
+
+-- Case-insensitive login uniqueness; NULL is allowed for Telegram-only users.
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -92,6 +89,8 @@ BEGIN
     CREATE UNIQUE INDEX users_login_unique ON users (LOWER(login));
   END IF;
 END $$;
+
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_login_key;
 
 DO $$
 BEGIN
@@ -135,7 +134,6 @@ BEGIN
   END IF;
 END $$;
 
--- auth_source NOT NULL для всех строк
 UPDATE users SET auth_source = 'telegram' WHERE auth_source IS NULL;
 
 DO $$
@@ -165,7 +163,7 @@ RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  -- Рефкод для веб-регистрации не выдаём на уровне БД (только Mini App / Telegram-логика в приложении).
+  -- Web users do not receive DB-generated referral codes.
   IF NEW.auth_source = 'web' THEN
     IF NEW.referral_code IS NOT NULL THEN
       NEW.referral_code := UPPER(BTRIM(NEW.referral_code::TEXT))::CHAR(8);
@@ -220,20 +218,19 @@ BEGIN
   END LOOP;
 END $$;
 
--- ── Напоминания об окончании подписки (cron в боте, 11:00 Europe/Moscow) ──
+-- Subscription reminder flags.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_d3 BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_d1 BOOLEAN NOT NULL DEFAULT FALSE;
--- Уведомление в момент истечения (грейс 2 дня на продление)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_expired BOOLEAN NOT NULL DEFAULT FALSE;
--- Уведомление об окончательной отмене (спустя 2 дня грейса без оплаты)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_notificated_cancelled BOOLEAN NOT NULL DEFAULT FALSE;
 
--- ── Идемпотентность платежей (защита от дублей webhook) ──
+-- Idempotent payment webhook processing.
 CREATE TABLE IF NOT EXISTS processed_payments (
     payment_id  TEXT                        PRIMARY KEY,
     processed_at TIMESTAMP WITH TIME ZONE   NOT NULL DEFAULT NOW()
 );
--- ── Промокоды ──
+
+-- Promo codes.
 CREATE TABLE IF NOT EXISTS promo_codes (
     id          UUID                     PRIMARY KEY DEFAULT gen_random_uuid(),
     code        CHAR(8)                  NOT NULL UNIQUE,
@@ -243,7 +240,6 @@ CREATE TABLE IF NOT EXISTS promo_codes (
     used_by     UUID                     REFERENCES users(id)
 );
 
--- Попытки ввода промокодов (rate-limit + аудит)
 CREATE TABLE IF NOT EXISTS promo_attempts (
     id           UUID                     PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id      UUID                     NOT NULL REFERENCES users(id),
@@ -277,7 +273,7 @@ BEGIN
   END IF;
 END $$;
 
--- ── Таблица серверов ──
+-- Servers.
 CREATE TABLE IF NOT EXISTS servers (
     id                  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
     name_server         VARCHAR(255),

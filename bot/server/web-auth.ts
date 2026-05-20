@@ -15,8 +15,10 @@ import {
   getAllEnabledServers,
   getUserReferralInfoForWeb,
   redeemPromoCode,
+  getHappPanelServer,
   incrementServerUserCount,
   markPaymentProcessed,
+  updateUserHappUrl,
   type UserRow,
   type ServerRow,
 } from "./db";
@@ -43,6 +45,7 @@ import {
   syncVpnForPromoRedemption,
   syncVpnForReferralReward,
 } from "./promo-vpn";
+import { extendHapp, provisionHapp } from "./happ";
 
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "30d";
@@ -223,6 +226,26 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
     paidUser = await extendSubscriptionById(userId, pending.months, config);
   } catch (err) {
     console.error("DB upsert after web payment failed:", err);
+  }
+
+  if (paidUser) {
+    try {
+      const happPanel = await getHappPanelServer();
+      if (happPanel) {
+        let happUrl = paidUser.happ_subscription_url ?? null;
+        if (happUrl) {
+          await extendHapp(happPanel, clientName, pending.durationCode);
+        } else {
+          const result = await provisionHapp(happPanel, clientName, pending.durationCode);
+          happUrl = result.url;
+        }
+        if (happUrl) {
+          await updateUserHappUrl(paidUser.id, happUrl);
+        }
+      }
+    } catch (err) {
+      console.error("Web HAPP sync after payment failed:", err);
+    }
   }
 
   if (paidUser && api) {
@@ -411,11 +434,25 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     const referralInfo = await getUserReferralInfoForWeb(user.id);
     const expiredAt = user.expired_at ? new Date(user.expired_at) : null;
     const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
+    let happUrl = user.happ_subscription_url ?? null;
+    if (active && !happUrl) {
+      try {
+        const happPanel = await getHappPanelServer();
+        if (happPanel) {
+          const result = await provisionHapp(happPanel, getWebClientName(user), "1m");
+          happUrl = result.url;
+          await updateUserHappUrl(user.id, happUrl);
+        }
+      } catch (err) {
+        console.error("Lazy web HAPP backfill failed:", err);
+      }
+    }
     res.json({
       active,
       expired_at: user.expired_at,
       is_blocked: user.is_blocked,
       config: active ? user.vpn_config : null,
+      happ_subscription_url: active ? happUrl : null,
       created_at: user.created_at,
       login: user.login,
       referred_by_applied: referralInfo.referred_by_applied,
@@ -485,6 +522,32 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
             newExpiredAt: promo.newExpiredAt,
           });
         }
+
+        try {
+          const happPanel = await getHappPanelServer();
+          if (happPanel) {
+            const durationCode =
+              PRICING.find((p) => p.months === promo.months)?.durationCode ?? "1m";
+            let happUrl = userRow.happ_subscription_url ?? null;
+            if (happUrl) {
+              await extendHapp(happPanel, getWebClientName(userRow), durationCode);
+            } else {
+              const result = await provisionHapp(
+                happPanel,
+                getWebClientName(userRow),
+                durationCode,
+              );
+              happUrl = result.url;
+            }
+            if (happUrl) {
+              await updateUserHappUrl(user.id, happUrl);
+              userRow = { ...userRow, happ_subscription_url: happUrl };
+            }
+          }
+        } catch (err) {
+          console.error("Web HAPP sync after promo failed:", err);
+        }
+
         const referralInfo = await getUserReferralInfoForWeb(user.id);
         const expiredAt = userRow.expired_at ? new Date(userRow.expired_at) : null;
         const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
@@ -497,6 +560,7 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
             expired_at: userRow.expired_at,
             is_blocked: userRow.is_blocked,
             config: active ? (userRow.vpn_config ?? config ?? null) : null,
+            happ_subscription_url: active ? (userRow.happ_subscription_url ?? null) : null,
             login: userRow.login,
             referred_by_applied: referralInfo.referred_by_applied,
             referred_by_code: referralInfo.referred_by_code,

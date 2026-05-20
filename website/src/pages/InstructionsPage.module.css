@@ -43,6 +43,28 @@
   gap: 10px;
 }
 
+.kindToggle {
+  display: flex;
+  gap: 8px;
+}
+
+.kindTab {
+  flex: 1;
+  padding: 10px 6px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+}
+
+.kindTabActive {
+  background: var(--btn-gradient);
+  border-color: transparent;
+  color: #fff;
+}
+
 .downloadBtn {
   display: inline-flex;
   align-items: center;

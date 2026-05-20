@@ -1,9 +1,12 @@
 import { Accordion } from "../components/Accordion";
-import { PLATFORMS } from "../data/platforms";
+import { PLATFORMS, type VpnClientKind } from "../data/platforms";
 import { PlatformLogo } from "../components/PlatformLogo";
+import { useState } from "react";
 import styles from "./InstructionsPage.module.css";
 
 export function InstructionsPage() {
+  const [clientKind, setClientKind] = useState<VpnClientKind>("happ");
+
   const openInstructionInBrowser = (
     platformName: string,
     steps: string[],
@@ -32,42 +35,65 @@ export function InstructionsPage() {
         <div>
           <div className={styles.heroTitle}>Инструкции</div>
           <div className={styles.heroSubtitle}>
-            Настройка AmneziaWG на вашем устройстве
+            Настройка VPN на вашем устройстве
           </div>
         </div>
       </div>
 
-      <div className={styles.accordions}>
-        {PLATFORMS.map((platform) => (
-          <Accordion
-            key={platform.id}
-            icon={<PlatformLogo platformId={platform.id} size={18} />}
-            title={platform.name}
-            iconColor="rgba(0,200,83,0.15)"
-          >
-            <ol>
-              {platform.steps.map((step, i) => (
-                <li key={i}>{step}</li>
-              ))}
-            </ol>
+      <div className={styles.kindToggle}>
+        <button
+          type="button"
+          className={`${styles.kindTab} ${clientKind === "happ" ? styles.kindTabActive : ""}`}
+          onClick={() => setClientKind("happ")}
+        >
+          HAPP (VLESS)
+        </button>
+        <button
+          type="button"
+          className={`${styles.kindTab} ${clientKind === "amneziawg" ? styles.kindTabActive : ""}`}
+          onClick={() => setClientKind("amneziawg")}
+        >
+          AmneziaWG
+        </button>
+      </div>
 
-            <a
-              href={platform.downloadUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.downloadBtn}
+      <div className={styles.accordions}>
+        {PLATFORMS.map((platform) => {
+          const steps = clientKind === "happ" ? platform.happSteps : platform.steps;
+          const downloadUrl =
+            clientKind === "happ" ? platform.happDownloadUrl : platform.downloadUrl;
+
+          return (
+            <Accordion
+              key={platform.id}
+              icon={<PlatformLogo platformId={platform.id} size={18} />}
+              title={platform.name}
+              iconColor="rgba(0,200,83,0.15)"
             >
-              📥 Скачать AmneziaWG
-            </a>
-            <button
-              type="button"
-              className={styles.instructionBtn}
-              onClick={() => openInstructionInBrowser(platform.name, platform.steps)}
-            >
-              Открыть инструкцию в браузере
-            </button>
-          </Accordion>
-        ))}
+              <ol>
+                {steps.map((step, i) => (
+                  <li key={i}>{step}</li>
+                ))}
+              </ol>
+
+              <a
+                href={downloadUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.downloadBtn}
+              >
+                Скачать {clientKind === "happ" ? "HAPP" : "AmneziaWG"}
+              </a>
+              <button
+                type="button"
+                className={styles.instructionBtn}
+                onClick={() => openInstructionInBrowser(platform.name, steps)}
+              >
+                Открыть инструкцию в браузере
+              </button>
+            </Accordion>
+          );
+        })}
       </div>
 
       <div className={styles.helpCard}>

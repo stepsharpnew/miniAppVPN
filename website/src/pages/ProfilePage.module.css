@@ -72,7 +72,14 @@
 .divider {
   height: 1px;
   background: rgba(255, 255, 255, 0.06);
-  margin: 16px 0;
+  margin: 14px 0;
+}
+
+.compactGrid {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+  margin-top: 16px;
 }
 
 .telegramSyncBlock {
@@ -165,6 +172,30 @@
   font-size: 12px;
 }
 
+.kindToggle {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.kindTab {
+  flex: 1;
+  padding: 10px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.kindTabActive {
+  background: var(--btn-gradient);
+  border-color: transparent;
+  color: #fff;
+}
+
 .configBlock {
   display: flex;
   flex-direction: column;
@@ -238,6 +269,26 @@
   opacity: 0.85;
 }
 
+.happUrlRow {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.happUrlInput {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 12px;
+  outline: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .buyBtn {
   width: 100%;
   padding: 16px;
@@ -275,4 +326,10 @@
   color: #ff6b6b;
   border-color: rgba(255, 107, 107, 0.2);
   background: rgba(255, 107, 107, 0.06);
+}
+
+@media (max-width: 560px) {
+  .compactGrid {
+    grid-template-columns: 1fr;
+  }
 }

@@ -21,7 +21,6 @@ on:
         default: false
 
 jobs:
-  # ── 1. Lint & type-check bot (общий для prod и preprod) ─────
   check-bot:
     runs-on: ubuntu-latest
     steps:
@@ -41,7 +40,6 @@ jobs:
         run: npm run bot:check
         working-directory: bot
 
-  # ── 2a. PROD: деплой при push в main → app.memeinternet.site ─
   deploy-prod:
     if: |
       github.ref == 'refs/heads/main' ||
@@ -56,6 +54,10 @@ jobs:
       - name: Detect changed paths
         id: changes
         run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force_rebuild_nginx }}" = "true" ]; then
+            echo "rebuild_nginx=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if git rev-parse HEAD~1 >/dev/null 2>&1; then
             CHANGED=$(git diff --name-only HEAD~1 HEAD)
           else
@@ -64,9 +66,9 @@ jobs:
           echo "Changed files:"
           echo "$CHANGED"
           if echo "$CHANGED" | grep -qE '^(nginx\.conf|nginx/|bot/webapp/|website/)'; then
-            echo "rebuild_nginx=true" >> $GITHUB_OUTPUT
+            echo "rebuild_nginx=true" >> "$GITHUB_OUTPUT"
           else
-            echo "rebuild_nginx=false" >> $GITHUB_OUTPUT
+            echo "rebuild_nginx=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up SSH
@@ -99,7 +101,6 @@ jobs:
             --exclude="webapp-preprod" \
             ./ ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }}:~/meme_bot/
 
-      # DOTENV via echo '...' breaks on quotes/newlines in values. Pipe from runner env instead.
       - name: Create .env on server
         env:
           DOTENV_CONTENT: ${{ secrets.DOTENV }}
@@ -111,11 +112,10 @@ jobs:
           printf '%s\n' "$DOTENV_CONTENT" | ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
             "tee ~/meme_bot/.env ~/meme_bot/bot/.env > /dev/null"
 
-      - name: Ensure ports 80/443 are free (first-run / drift guard)
+      - name: Ensure ports 80/443 are free
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} bash << 'ENDSSH'
             set -euo pipefail
-            # Если edge-nginx уже работает — порты заняты ИМ, ничего не освобождаем.
             if docker ps --format '{{.Names}}' | grep -q '^edge-nginx$'; then
               echo "edge-nginx already running — skipping host port cleanup"
               exit 0
@@ -172,9 +172,6 @@ jobs:
       - name: Build and (re)start services — minimal downtime
         env:
           REBUILD_NGINX: ${{ steps.changes.outputs.rebuild_nginx }}
-        # Скрипт собирается на runner-е и заливается на сервер. Это надёжнее,
-        # чем `ssh ... bash << 'ENDSSH'`, где stdin heredoc может быть проглочен
-        # внутренней `docker compose exec` командой → bash тихо exit-нет без работы.
         run: |
           cat > /tmp/prod-deploy.sh <<PROD_SCRIPT
           #!/usr/bin/env bash
@@ -245,12 +242,6 @@ jobs:
             docker compose logs --tail=10 bot
           ENDSSH
 
-  # ── 2b. PREPROD: деплой при push в dev → test.memeinternet.site
-  # Запускается на push в dev и при ручном workflow_dispatch с target=preprod.
-  # ВАЖНО: prod и preprod делят ОДИН nginx-контейнер (см. nginx.conf и
-  # docker-compose.yml). Mini App статика запечена в образ nginx, поэтому
-  # обновление фронта preprod = пересборка общего nginx = фронт prod тоже
-  # обновится из текущей ветки dev. Это пре-existing архитектура.
   deploy-preprod:
     if: |
       github.ref == 'refs/heads/dev' ||
@@ -281,9 +272,6 @@ jobs:
           ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
       - name: Deploy project files to server
-        # Тот же ~/meme_bot/. Прод-овский .env остаётся на сервере (excluded).
-        # webapp-preprod исключаем — фронт preprod собирается отдельным шагом ниже
-        # и rsync-ится в свою папку, иначе --delete снёс бы остатки прошлого билда.
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
             "mkdir -p ~/meme_bot ~/meme_bot/webapp-preprod/dist"
@@ -311,8 +299,6 @@ jobs:
           npm run webapp:build
 
       - name: Rsync preprod Mini App static to server
-        # Кладём именно в ту папку, которую nginx маунтит как /usr/share/nginx/miniapp-preprod.
-        # --delete чтобы убирать старые ассеты с прошлого билда.
         run: |
           rsync -avz --delete \
             bot/webapp/dist/ \
@@ -330,13 +316,6 @@ jobs:
             "tee ~/meme_bot/.env.preprod ~/meme_bot/bot/.env.preprod > /dev/null"
 
       - name: Migrate DB, rebuild bot-preprod, refresh nginx mount
-        # Скрипт собирается на runner-е, заливается на сервер файлом, потом
-        # выполняется отдельным `ssh ... bash <script>`. Так мы:
-        #  - не зависим от того, как SSH прокидывает heredoc через stdin
-        #    (раньше шаг "завершался" за 2с, потому что часть скрипта молча
-        #    обрезалась и bash думал что всё ок),
-        #  - получаем РЕАЛЬНЫЙ exit code bash-а (без двойного wrap'а),
-        #  - видим полный лог: каждая команда печатается через `set -x`.
         run: |
           cat > /tmp/preprod-deploy.sh <<'PREPROD_SCRIPT'
           #!/usr/bin/env bash
@@ -360,14 +339,10 @@ jobs:
             sleep 2
           done
 
-          # Миграция: запускаем psql прямо внутри postgres-контейнера, используя
-          # его собственные env-vars (POSTGRES_USER/DB/PASSWORD). Файл копируем
-          # в контейнер через `docker cp`, чтобы не зависеть от stdin-pipe.
           docker cp ./create_tables.sql meme-postgres:/tmp/create_tables.sql
           docker compose exec -T postgres bash -c \
             'PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /tmp/create_tables.sql'
 
-          # Проверяем, что HAPP-колонки появились (если нет — fail с понятной ошибкой).
           PRESENT=$(docker compose exec -T postgres bash -c \
             'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE column_name IN ('"'"'happ_subscription_url'"'"','"'"'supports_happ'"'"')"')
           PRESENT=$(echo "$PRESENT" | tr -d '[:space:]')
@@ -377,7 +352,6 @@ jobs:
           fi
           echo "HAPP columns present: $PRESENT/2"
 
-          # Сбрасываем кэш статуса db-migrator (bot depends_on service_completed_successfully).
           docker compose rm -f db-migrator 2>/dev/null || true
           docker compose --env-file .env up --no-deps -d db-migrator
           DB_EXIT=$(docker wait meme-db-migrator)
@@ -401,7 +375,6 @@ jobs:
           docker compose ps
           PREPROD_SCRIPT
 
-          # Заливаем + выполняем + получаем реальный exit code.
           scp -o StrictHostKeyChecking=no /tmp/preprod-deploy.sh \
             ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }}:/tmp/preprod-deploy.sh
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USERNAME }}@${{ secrets.SERVER_IP_ADDRESS }} \
