@@ -457,7 +457,12 @@ export function createApiServer(api: Api, botToken: string) {
           const happPanel = await getHappPanelServer();
           if (happPanel) {
             const clientName = getTelegramClientName(user.id, user.username);
-            const result = await provisionHapp(happPanel, clientName, "1m");
+            const daysLeft = expiredAt
+              ? Math.max(1, Math.ceil((expiredAt.getTime() - Date.now()) / 86_400_000))
+              : 30;
+            const durationCode =
+              daysLeft > 180 ? "6m" : daysLeft > 60 ? "3m" : daysLeft > 25 ? "1m" : `${daysLeft}d`;
+            const result = await provisionHapp(happPanel, clientName, durationCode);
             happUrl = result.url;
             await updateUserHappUrl(row.id, happUrl);
           }
