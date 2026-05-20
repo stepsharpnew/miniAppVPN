@@ -43,16 +43,8 @@ interface ProfilePageProps {
   onOpenSync?: () => void;
 }
 
-function toBase64Url(input: string): string {
-  return window
-    .btoa(input)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
 function buildHappDeepLink(subscriptionUrl: string): string {
-  return `happ://add/${toBase64Url(subscriptionUrl)}`;
+  return `happ://add/${subscriptionUrl}`;
 }
 
 export function ProfilePage({ onOpenSync }: ProfilePageProps) {
