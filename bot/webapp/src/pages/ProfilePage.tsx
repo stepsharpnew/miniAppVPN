@@ -47,6 +47,14 @@ function buildHappDeepLink(subscriptionUrl: string): string {
   return `happ://add/${encodeURIComponent(window.btoa(subscriptionUrl))}`;
 }
 
+function tryOpenHappWithoutLeavingPage(subscriptionUrl: string): void {
+  const iframe = document.createElement("iframe");
+  iframe.style.display = "none";
+  iframe.src = buildHappDeepLink(subscriptionUrl);
+  document.body.appendChild(iframe);
+  window.setTimeout(() => iframe.remove(), 1200);
+}
+
 export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const user = useTelegramUser();
   const { config: localConfig, save: saveLocalConfig } = useVpnConfig();
@@ -281,7 +289,7 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
   const handleOpenHapp = useCallback(() => {
     if (!happUrl) return;
     void navigator.clipboard.writeText(happUrl).catch(() => {});
-    window.location.href = buildHappDeepLink(happUrl);
+    tryOpenHappWithoutLeavingPage(happUrl);
     window.setTimeout(() => {
       if (!document.hidden) {
         WebApp.showAlert("Если HAPP не открылся, ссылка уже скопирована — вставьте её в приложении вручную.");
