@@ -1,7 +1,6 @@
 import WebApp from "@twa-dev/sdk";
 import { useCallback, useEffect, useState } from "react";
-import { StatusBadge } from "../components/StatusBadge";
-import { useTelegramUser } from "../hooks/useTelegramUser";
+import { BRAND_NAME, MINI_APP_URL, TELEGRAM_BOT_URL } from "../../../shared/texts";
 import styles from "./ReferralPage.module.css";
 
 const REFERRAL_INVITER_SUCCESS =
@@ -88,36 +87,20 @@ interface ReferralStats {
 }
 
 interface SubInfo {
-  active?: boolean;
-  expired_at?: string | null;
   my_referral_code?: string;
   referred_by_applied?: boolean;
   referred_by_code?: string | null;
+  referred_by_nickname?: string | null;
 }
 
-function formatExpiry(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = d.getTime() - now.getTime();
-  if (diff <= 0) return "Истекла";
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  if (days > 30) {
-    const months = Math.floor(days / 30);
-    const rem = days % 30;
-    return rem > 0 ? `${months} мес. ${rem} дн.` : `${months} мес.`;
-  }
-  return days > 0 ? `${days} дн.` : `${Math.floor(diff / (1000 * 60 * 60))} ч.`;
+function formatReferrerNickname(nickname: string | null | undefined): string | null {
+  if (!nickname) return null;
+  const trimmed = nickname.trim();
+  if (!trimmed) return null;
+  return trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
 }
 
-// ── ReferralPage ─────────────────────────────────────────────────────────────
-interface ReferralPageProps {
-  onOpenSync?: () => void;
-  isSynced?: boolean;
-  syncedLogin?: string | null;
-}
-
-export function ReferralPage({ onOpenSync, isSynced, syncedLogin }: ReferralPageProps) {
-  const user = useTelegramUser();
+export function ReferralPage() {
   const [sub, setSub] = useState<SubInfo | null>(null);
   const [stats, setStats] = useState<ReferralStats | null>(null);
   const [promoCode, setPromoCode] = useState("");
@@ -161,10 +144,15 @@ export function ReferralPage({ onOpenSync, isSynced, syncedLogin }: ReferralPage
 
   const handleShareCode = useCallback(() => {
     if (!sub?.my_referral_code) return;
-    const text = encodeURIComponent(
-      `Пользуюсь VPN — рекомендую! Используй мой реферальный код ${sub.my_referral_code} при покупке и получи бонус 🎁`,
+    const shareText = [
+      `Пользуюсь ${BRAND_NAME} — рекомендую!`,
+      `Реферальный код: ${sub.my_referral_code}`,
+      `Подарочный VPN: ${MINI_APP_URL}`,
+      `Бот: ${TELEGRAM_BOT_URL}`,
+    ].join("\n");
+    WebApp.openTelegramLink(
+      `https://t.me/share/url?url=${encodeURIComponent(MINI_APP_URL)}&text=${encodeURIComponent(shareText)}`,
     );
-    WebApp.openTelegramLink(`https://t.me/share/url?url=&text=${text}`);
   }, [sub?.my_referral_code]);
 
   const handleRedeemPromo = useCallback(async () => {
@@ -205,6 +193,7 @@ export function ReferralPage({ onOpenSync, isSynced, syncedLogin }: ReferralPage
                   my_referral_code: data?.my_referral_code ?? prev.my_referral_code,
                   referred_by_applied: Boolean(data?.referred_by_applied),
                   referred_by_code: data?.referred_by_code ?? normalizedCode,
+                  referred_by_nickname: data?.referred_by_nickname ?? prev.referred_by_nickname,
                 }
               : prev,
           );
@@ -222,45 +211,10 @@ export function ReferralPage({ onOpenSync, isSynced, syncedLogin }: ReferralPage
   }, [promoCode, promoLoading, sub?.referred_by_applied]);
 
   const converted = stats?.totalConverted ?? 0;
+  const referrerNickname = formatReferrerNickname(sub?.referred_by_nickname);
 
   return (
     <div className={styles.page}>
-      {/* ── Profile card ── */}
-      <div className={styles.profileCard}>
-        <div className={styles.profileTop}>
-          {user.photoUrl ? (
-            <img src={user.photoUrl} alt={user.firstName} className={styles.avatar} />
-          ) : (
-            <div className={`${styles.avatar} ${styles.avatarPlaceholder}`}>
-              {user.firstName.charAt(0)}
-            </div>
-          )}
-          <div className={styles.profileMeta}>
-            <div className={styles.userName}>{user.firstName} {user.lastName}</div>
-            <div className={styles.userId}>ID: {user.id || "—"}</div>
-            <div className={styles.syncBadgeRow}>
-              {isSynced ? (
-                <>
-                  <span className={styles.syncBadgeOk}>✓ Синхронизирован</span>
-                  {syncedLogin && <span className={styles.syncBadgeLogin}>{syncedLogin}</span>}
-                </>
-              ) : onOpenSync ? (
-                <button className={styles.syncBadgeLink} onClick={onOpenSync}>
-                  🔗 Привязать аккаунт
-                </button>
-              ) : null}
-            </div>
-          </div>
-          <div className={styles.statusWrap}>
-            <div className={styles.statusLabel}>Подписка</div>
-            <StatusBadge active={sub?.active ?? false} />
-            {sub?.active && sub.expired_at && (
-              <div className={styles.expiryInfo}>{formatExpiry(sub.expired_at)}</div>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* ── Activity rings + tier labels ── */}
       <div className={styles.ringsCard}>
         <div className={styles.ringsRow}>
@@ -349,7 +303,10 @@ export function ReferralPage({ onOpenSync, isSynced, syncedLogin }: ReferralPage
         </div>
         {sub?.referred_by_applied && sub.referred_by_code && (
           <div className={styles.appliedBadge}>
-            ✓ Реферальный код применён: {sub.referred_by_code}
+            <div>✓ Реферальный код применён: {sub.referred_by_code}</div>
+            {referrerNickname && (
+              <div className={styles.appliedInviter}>Пригласил: {referrerNickname}</div>
+            )}
           </div>
         )}
       </div>

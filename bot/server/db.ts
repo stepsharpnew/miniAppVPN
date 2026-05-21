@@ -59,6 +59,7 @@ export interface ReferralInfo {
   my_referral_code: string | null;
   referred_by_applied: boolean;
   referred_by_code: string | null;
+  referred_by_nickname: string | null;
   referral_message: string | null;
   referred_by_user_id: string | null;
 }
@@ -847,8 +848,11 @@ export async function getUserReferralInfo(userId: string): Promise<ReferralInfo>
   const { rows } = await getPool().query<{
     referred_by_user_id: string | null;
     referred_by_code: string | null;
+    referred_by_nickname: string | null;
   }>(
-    `SELECT u.referred_by_user_id, ref.referral_code AS referred_by_code
+    `SELECT u.referred_by_user_id,
+            ref.referral_code AS referred_by_code,
+            ref.telegram_nickname AS referred_by_nickname
      FROM users u
      LEFT JOIN users ref ON ref.id = u.referred_by_user_id
      WHERE u.id = $1`,
@@ -861,6 +865,7 @@ export async function getUserReferralInfo(userId: string): Promise<ReferralInfo>
     my_referral_code: myReferralCode,
     referred_by_applied: rows[0].referred_by_user_id !== null,
     referred_by_code: rows[0].referred_by_code ?? null,
+    referred_by_nickname: rows[0].referred_by_nickname ?? null,
     referral_message:
       rows[0].referred_by_user_id !== null ? REFERRAL_APPLY_SUCCESS_MESSAGE : null,
     referred_by_user_id: rows[0].referred_by_user_id,
@@ -873,8 +878,11 @@ export async function getUserReferralInfoForWeb(userId: string): Promise<Referra
   const { rows } = await getPool().query<{
     referred_by_user_id: string | null;
     referred_by_code: string | null;
+    referred_by_nickname: string | null;
   }>(
-    `SELECT u.referred_by_user_id, ref.referral_code AS referred_by_code
+    `SELECT u.referred_by_user_id,
+            ref.referral_code AS referred_by_code,
+            ref.telegram_nickname AS referred_by_nickname
      FROM users u
      LEFT JOIN users ref ON ref.id = u.referred_by_user_id
      WHERE u.id = $1`,
@@ -887,6 +895,7 @@ export async function getUserReferralInfoForWeb(userId: string): Promise<Referra
     my_referral_code: myReferralCode,
     referred_by_applied: rows[0].referred_by_user_id !== null,
     referred_by_code: rows[0].referred_by_code ?? null,
+    referred_by_nickname: rows[0].referred_by_nickname ?? null,
     referral_message:
       rows[0].referred_by_user_id !== null ? REFERRAL_APPLY_SUCCESS_MESSAGE : null,
     referred_by_user_id: rows[0].referred_by_user_id,

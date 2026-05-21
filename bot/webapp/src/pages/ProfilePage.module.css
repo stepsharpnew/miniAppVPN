@@ -2,11 +2,134 @@
   padding: 16px;
 }
 
-.configCard {
+.profileCard {
   background: var(--bg-card);
   border-radius: var(--border-radius);
   padding: 16px;
   border: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+}
+
+.profileTop {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.avatarPlaceholder {
+  background: var(--btn-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 28px;
+  color: #fff;
+}
+
+.userName {
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.userId {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.profileMeta {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Compact sync badge ── */
+
+.syncBadgeRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.syncBadgeOk {
+  font-size: 11px;
+  font-weight: 600;
+  color: #88f0b3;
+  background: rgba(136, 240, 179, 0.1);
+  border: 1px solid rgba(136, 240, 179, 0.22);
+  border-radius: 20px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.syncBadgeLogin {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.syncBadgeLink {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  background: rgba(77, 139, 255, 0.1);
+  border: 1px solid rgba(77, 139, 255, 0.25);
+  border-radius: 20px;
+  padding: 3px 10px;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.syncBadgeLink:active {
+  opacity: 0.7;
+}
+
+/* ── Subscription status ── */
+
+.statusWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.statusLabel {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.expiryInfo {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 14px 0;
+}
+
+/* ── VPN config block ── */
+
+.configBlock {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -54,7 +177,7 @@
   box-shadow: 0 2px 14px rgba(77, 139, 255, 0.35);
 }
 
-/* ── Config content ── */
+/* ── Misc config ── */
 
 .noConfig {
   font-size: 13px;
@@ -111,7 +234,11 @@
   white-space: nowrap;
 }
 
-/* ── HAPP ── */
+.secondaryBtn:disabled {
+  opacity: 0.6;
+}
+
+/* ── HAPP subscription block ── */
 
 .happUrlRow {
   display: flex;

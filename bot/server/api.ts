@@ -487,6 +487,7 @@ export function createApiServer(api: Api, botToken: string) {
         my_referral_code: referralInfo.my_referral_code,
         referred_by_applied: referralInfo.referred_by_applied,
         referred_by_code: referralInfo.referred_by_code,
+        referred_by_nickname: referralInfo.referred_by_nickname,
         referral_message: referralInfo.referral_message,
       });
     } catch (err) {
@@ -614,6 +615,7 @@ export function createApiServer(api: Api, botToken: string) {
         my_referral_code: referralInfo.my_referral_code,
         referred_by_applied: referralInfo.referred_by_applied,
         referred_by_code: referralInfo.referred_by_code,
+        referred_by_nickname: referralInfo.referred_by_nickname,
       });
     } catch (err) {
       console.error("Referral code apply error:", err);
