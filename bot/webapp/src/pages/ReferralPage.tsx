@@ -14,16 +14,15 @@ const TIERS = [
   { min: 11, max: Infinity, days: 60, label: "+60 дн.", color: "#FF375F" },
 ] as const;
 
-function getRingProgress(converted: number) {
+function getRingProgress(converted: number): [number, number, number] {
   const r1 = Math.min(converted, 3) / 3;
   const r2 = Math.max(0, Math.min(converted - 3, 7)) / 7;
   const r3 = Math.max(0, Math.min(converted - 10, 20)) / 20;
-  return [r1, r2, r3] as const;
+  return [r1, r2, r3];
 }
 
 // ── ActivityRings SVG component ─────────────────────────────────────────────
 function ActivityRings({ converted }: { converted: number }) {
-  const [progress] = useState(() => getRingProgress(converted));
   const [animProg, setAnimProg] = useState<[number, number, number]>([0, 0, 0]);
 
   useEffect(() => {
