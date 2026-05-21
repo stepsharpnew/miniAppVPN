@@ -14,7 +14,6 @@ import {
   getRandomEnabledServer,
   getAllEnabledServers,
   getUserReferralInfoForWeb,
-  redeemPromoCode,
   getHappPanelServer,
   incrementServerUserCount,
   markPaymentProcessed,
@@ -46,6 +45,7 @@ import {
   syncVpnForReferralReward,
 } from "./promo-vpn";
 import { extendHapp, provisionHapp } from "./happ";
+import { redeemUnifiedCode, type UnifiedRedeemError } from "./redeem-code";
 
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "30d";
@@ -152,6 +152,11 @@ function mapReferralApplyError(error?: string): { status: number; message: strin
 
 function mapPromoRedeemError(error?: string): { status: number; message: string } {
   switch (error) {
+    case "daily_limit":
+      return {
+        status: 429,
+        message: "Промокод можно применить раз в сутки. Попробуйте завтра.",
+      };
     case "rate_limited":
       return { status: 429, message: "Слишком много попыток. Попробуйте позже." };
     case "already_used":
@@ -161,6 +166,17 @@ function mapPromoRedeemError(error?: string): { status: number; message: string 
     default:
       return { status: 500, message: "Не удалось активировать промокод" };
   }
+}
+
+function mapUnifiedRedeemError(error: UnifiedRedeemError): { status: number; message: string } {
+  if (
+    error === "daily_limit" ||
+    error === "rate_limited" ||
+    error === "already_used"
+  ) {
+    return mapPromoRedeemError(error);
+  }
+  return mapReferralApplyError(error);
 }
 
 // ── Web payment processing (shared between polling and webhook) ──
@@ -493,18 +509,18 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     }
 
     try {
-      const promo = await redeemPromoCode(user.id, code);
-      if (promo.ok && promo.months != null) {
+      const redeemed = await redeemUnifiedCode(user.id, code);
+      if (redeemed.ok && redeemed.kind === "gift") {
         let userRow = await getUserById(user.id);
         if (!userRow) throw new Error(`User missing after promo redeem: ${user.id}`);
         const { config } = await syncVpnForPromoRedemption(
           userRow,
-          promo.months,
+          redeemed.months,
           getWebClientName(userRow),
         );
         userRow = await getUserById(user.id);
         if (!userRow) throw new Error(`User missing after VPN promo sync: ${user.id}`);
-        if (api && promo.newExpiredAt != null) {
+        if (api) {
           const userName = userRow.login ?? "Веб-пользователь";
           const userTag = userRow.telegram_nickname
             ? `@${userRow.telegram_nickname}`
@@ -517,9 +533,9 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
             telegramId: userRow.telegram_id,
             dbUserId: user.id,
             code,
-            months: promo.months,
-            oldExpiredAt: promo.oldExpiredAt,
-            newExpiredAt: promo.newExpiredAt,
+            months: redeemed.months,
+            oldExpiredAt: redeemed.oldExpiredAt,
+            newExpiredAt: redeemed.newExpiredAt,
           });
         }
 
@@ -527,7 +543,7 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
           const happPanel = await getHappPanelServer();
           if (happPanel) {
             const durationCode =
-              PRICING.find((p) => p.months === promo.months)?.durationCode ?? "1m";
+              PRICING.find((p) => p.months === redeemed.months)?.durationCode ?? "1m";
             let happUrl = userRow.happ_subscription_url ?? null;
             if (happUrl) {
               await extendHapp(happPanel, getWebClientName(userRow), durationCode);
@@ -554,7 +570,7 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
         res.json({
           ok: true,
           kind: "gift" as const,
-          months: promo.months,
+          months: redeemed.months,
           subscription: {
             active,
             expired_at: userRow.expired_at,
@@ -570,8 +586,20 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
         return;
       }
 
-      const promoErr = mapPromoRedeemError(promo.error);
-      res.status(promoErr.status).json({ error: promoErr.message });
+      if (redeemed.ok && redeemed.kind === "referral") {
+        const referralInfo = await getUserReferralInfoForWeb(user.id);
+        res.json({
+          ok: true,
+          kind: "referral" as const,
+          referral_message: redeemed.referral_message,
+          referred_by_applied: referralInfo.referred_by_applied,
+          referred_by_code: referralInfo.referred_by_code,
+        });
+        return;
+      }
+
+      const mapped = mapUnifiedRedeemError(redeemed.error ?? "not_found");
+      res.status(mapped.status).json({ error: mapped.message });
     } catch (err) {
       console.error("Apply web promocode failed:", err);
       res.status(500).json({ error: "Не удалось применить промокод" });

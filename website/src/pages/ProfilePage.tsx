@@ -123,36 +123,14 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
     setPromoError(null);
     setPromoMessage(null);
 
-    const applyReferralCode = async () => {
+    try {
       const data = await apiFetch<{
+        kind?: "gift" | "referral";
+        months?: number;
+        subscription?: SubData;
         referral_message?: string | null;
         referred_by_applied?: boolean;
         referred_by_code?: string | null;
-      }>("/api/web/referral-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-
-      setSub((prev) =>
-        prev
-          ? {
-              ...prev,
-              referred_by_applied: Boolean(data.referred_by_applied),
-              referred_by_code: data.referred_by_code ?? code,
-              referral_message: data.referral_message ?? prev.referral_message,
-            }
-          : prev,
-      );
-      setPromoCode("");
-      setPromoMessage(data.referral_message ?? REFERRAL_INVITER_SUCCESS);
-    };
-
-    try {
-      const data = await apiFetch<{
-        kind?: "gift";
-        months?: number;
-        subscription?: SubData;
       }>("/api/web/promocode", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -169,22 +147,23 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
         return;
       }
 
-      throw new Error("Не удалось активировать промокод");
-    } catch (err) {
-      if (!sub?.referred_by_applied) {
-        try {
-          await applyReferralCode();
-          return;
-        } catch (referralErr) {
-          const message =
-            referralErr instanceof Error && referralErr.message
-              ? referralErr.message
-              : "Промокод не найден";
-          setPromoError(message);
-          return;
-        }
+      if (data.kind === "referral") {
+        setSub((prev) =>
+          prev
+            ? {
+                ...prev,
+                referred_by_applied: Boolean(data.referred_by_applied),
+                referred_by_code: data.referred_by_code ?? code,
+                referral_message: data.referral_message ?? prev.referral_message,
+              }
+            : prev,
+        );
+        setPromoMessage(data.referral_message ?? REFERRAL_INVITER_SUCCESS);
+        return;
       }
 
+      throw new Error("Не удалось активировать промокод");
+    } catch (err) {
       setPromoError(
         err instanceof Error && err.message
           ? err.message
@@ -193,7 +172,7 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
     } finally {
       setPromoLoading(false);
     }
-  }, [promoCode, promoLoading, sub?.referred_by_applied]);
+  }, [promoCode, promoLoading]);
 
   const handleCopyHappUrl = useCallback(() => {
     if (!sub?.happ_subscription_url) return;

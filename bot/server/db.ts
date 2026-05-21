@@ -1285,7 +1285,11 @@ export async function generatePromoCodes(
   return codes;
 }
 
-export type PromoRedeemError = "not_found" | "already_used" | "rate_limited";
+export type PromoRedeemError =
+  | "not_found"
+  | "already_used"
+  | "rate_limited"
+  | "daily_limit";
 
 export interface PromoRedeemResult {
   ok: boolean;
@@ -1307,6 +1311,20 @@ export async function redeemPromoCode(
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+
+    const { rows: dailyRows } = await client.query<{ found: string }>(
+      `SELECT '1' AS found
+       FROM promo_attempts
+       WHERE user_id = $1
+         AND success = TRUE
+         AND attempted_at > NOW() - INTERVAL '24 hours'
+       LIMIT 1`,
+      [userId],
+    );
+    if (dailyRows.length > 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, error: "daily_limit" };
+    }
 
     const { rows: limitRows } = await client.query<{ cnt: string }>(
       `SELECT COUNT(*)::text AS cnt
@@ -1331,10 +1349,6 @@ export async function redeemPromoCode(
     );
 
     if (codeRows.length === 0) {
-      await client.query(
-        `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, FALSE)`,
-        [userId, code],
-      );
       await client.query("COMMIT");
       return { ok: false, error: "not_found" };
     }

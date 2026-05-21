@@ -31,7 +31,6 @@ import {
   getUserById,
   getUserReferralInfo,
   getReferralStats,
-  redeemPromoCode,
   type ServerRow,
   type UserRow,
   getAllEnabledServers,
@@ -48,6 +47,7 @@ import {
   syncVpnForPromoRedemption,
   syncVpnForReferralReward,
 } from "./promo-vpn";
+import { redeemUnifiedCode, type UnifiedRedeemError } from "./redeem-code";
 import { extendHapp, provisionHapp } from "./happ";
 import { mountWebAuthRoutes } from "./web-auth";
 import { mountSyncRoutes } from "./sync-routes";
@@ -98,6 +98,11 @@ function mapReferralApplyError(error?: string): { status: number; message: strin
 
 function mapPromoRedeemError(error?: string): { status: number; message: string } {
   switch (error) {
+    case "daily_limit":
+      return {
+        status: 429,
+        message: "Промокод можно применить раз в сутки. Попробуйте завтра.",
+      };
     case "rate_limited":
       return { status: 429, message: "Слишком много попыток. Попробуйте позже." };
     case "already_used":
@@ -107,6 +112,17 @@ function mapPromoRedeemError(error?: string): { status: number; message: string 
     default:
       return { status: 500, message: "Не удалось активировать промокод" };
   }
+}
+
+function mapUnifiedRedeemError(error: UnifiedRedeemError): { status: number; message: string } {
+  if (
+    error === "daily_limit" ||
+    error === "rate_limited" ||
+    error === "already_used"
+  ) {
+    return mapPromoRedeemError(error);
+  }
+  return mapReferralApplyError(error);
 }
 
 /** @MemeVPNbest — подписка на канал; пусто = не требовать (удобно для локальной разработки). */
@@ -510,38 +526,37 @@ export function createApiServer(api: Api, botToken: string) {
         normalizeTelegramNickname(tgUser.username),
       );
 
-      const promo = await redeemPromoCode(dbUser.id, code);
-      if (promo.ok && promo.months != null) {
+      const redeemed = await redeemUnifiedCode(dbUser.id, code);
+      if (redeemed.ok && redeemed.kind === "gift") {
         let userRow = await getUserById(dbUser.id);
         if (!userRow) throw new Error(`User missing after promo redeem: ${dbUser.id}`);
         const { config } = await syncVpnForPromoRedemption(
           userRow,
-          promo.months,
+          redeemed.months,
           getTelegramClientName(tgUser.id, tgUser.username),
         );
         userRow = await getUserById(dbUser.id);
         if (!userRow) throw new Error(`User missing after VPN promo sync: ${dbUser.id}`);
-        if (promo.newExpiredAt != null) {
-          const userName = tgUser.first_name ?? "Аноним";
-          const userTag = tgUser.username ? `@${tgUser.username}` : "без @ника";
-          await sendGiftPromoAdminNotification(api, {
-            userName,
-            userTag,
-            telegramId: tgUser.id,
-            dbUserId: dbUser.id,
-            code,
-            months: promo.months,
-            oldExpiredAt: promo.oldExpiredAt,
-            newExpiredAt: promo.newExpiredAt,
-          });
-        }
+        const userName = tgUser.first_name ?? "Аноним";
+        const userTag = tgUser.username ? `@${tgUser.username}` : "без @ника";
+        await sendGiftPromoAdminNotification(api, {
+          userName,
+          userTag,
+          telegramId: tgUser.id,
+          dbUserId: dbUser.id,
+          code,
+          months: redeemed.months,
+          oldExpiredAt: redeemed.oldExpiredAt,
+          newExpiredAt: redeemed.newExpiredAt,
+        });
 
         // ── HAPP extend/provision after promo ──
         try {
           const happPanel = await getHappPanelServer();
           if (happPanel) {
             const clientName = getTelegramClientName(tgUser.id, tgUser.username);
-            const promoDurationCode = PRICING.find((p) => p.months === promo.months)?.durationCode ?? "1m";
+            const promoDurationCode =
+              PRICING.find((p) => p.months === redeemed.months)?.durationCode ?? "1m";
             let happUrl = userRow.happ_subscription_url ?? null;
             if (happUrl) {
               await extendHapp(happPanel, clientName, promoDurationCode);
@@ -564,7 +579,7 @@ export function createApiServer(api: Api, botToken: string) {
         res.json({
           ok: true,
           kind: "gift" as const,
-          months: promo.months,
+          months: redeemed.months,
           subscription: {
             active,
             expired_at: userRow.expired_at,
@@ -580,8 +595,22 @@ export function createApiServer(api: Api, botToken: string) {
         return;
       }
 
-      const promoErr = mapPromoRedeemError(promo.error);
-      res.status(promoErr.status).json({ error: promoErr.message });
+      if (redeemed.ok && redeemed.kind === "referral") {
+        const referralInfo = await getUserReferralInfo(dbUser.id);
+        res.json({
+          ok: true,
+          kind: "referral" as const,
+          referral_message: redeemed.referral_message,
+          my_referral_code: referralInfo.my_referral_code,
+          referred_by_applied: referralInfo.referred_by_applied,
+          referred_by_code: referralInfo.referred_by_code,
+          referred_by_nickname: referralInfo.referred_by_nickname,
+        });
+        return;
+      }
+
+      const mapped = mapUnifiedRedeemError(redeemed.error ?? "not_found");
+      res.status(mapped.status).json({ error: mapped.message });
     } catch (err) {
       console.error("Promocode apply error:", err);
       res.status(500).json({ error: "Не удалось применить промокод" });

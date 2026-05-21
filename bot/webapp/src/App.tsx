@@ -134,7 +134,10 @@ export default function App() {
               {showSync ? (
                 <SyncPage onBack={() => setShowSync(false)} />
               ) : (
-                <ProfilePage onOpenSync={() => setShowSync(true)} />
+                <ProfilePage
+                  onOpenSync={() => setShowSync(true)}
+                  onOpenInstructions={() => setActiveTab("instructions")}
+                />
               )}
             </div>
             <div

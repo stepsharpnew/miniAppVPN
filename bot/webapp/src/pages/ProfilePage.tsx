@@ -34,13 +34,14 @@ function formatExpiry(iso: string): string {
 
 interface ProfilePageProps {
   onOpenSync?: () => void;
+  onOpenInstructions?: () => void;
 }
 
 function buildHappDeepLink(subscriptionUrl: string): string {
   return `happ://add/${subscriptionUrl}`;
 }
 
-export function ProfilePage({ onOpenSync }: ProfilePageProps) {
+export function ProfilePage({ onOpenSync, onOpenInstructions }: ProfilePageProps) {
   const user = useTelegramUser();
   const { config: localConfig, save: saveLocalConfig } = useVpnConfig();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -163,6 +164,17 @@ export function ProfilePage({ onOpenSync }: ProfilePageProps) {
 
   return (
     <div className={styles.page}>
+      {onOpenInstructions ? (
+        <button
+          type="button"
+          className={styles.helpBtn}
+          onClick={onOpenInstructions}
+          aria-label="Инструкции и помощь"
+          title="Инструкции"
+        >
+          ?
+        </button>
+      ) : null}
       <div className={styles.profileCard}>
         <div className={styles.profileTop}>
           {user.photoUrl ? (

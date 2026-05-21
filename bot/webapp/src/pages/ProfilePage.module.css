@@ -1,5 +1,37 @@
 .page {
   padding: 16px;
+  position: relative;
+}
+
+.helpBtn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.helpBtn:hover {
+  background: rgba(0, 223, 238, 0.12);
+  border-color: rgba(0, 223, 238, 0.35);
+  color: #00dfee;
+}
+
+.helpBtn:active {
+  transform: scale(0.96);
 }
 
 .profileCard {

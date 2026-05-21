@@ -171,44 +171,33 @@ export function ReferralPage() {
       if (!res.ok) throw new Error(data?.error ?? "Не удалось активировать промокод.");
       setPromoCode("");
       if (data?.kind === "gift") {
-        setPromoMessage(`Подарочный промокод активирован. Подписка продлена на ${data.months ?? 0} мес.`);
+        setPromoMessage(
+          `Подарочный промокод активирован. Подписка продлена на ${data.months ?? 0} мес.`,
+        );
+        return;
+      }
+      if (data?.kind === "referral") {
+        setSub((prev) =>
+          prev
+            ? {
+                ...prev,
+                my_referral_code: data?.my_referral_code ?? prev.my_referral_code,
+                referred_by_applied: Boolean(data?.referred_by_applied),
+                referred_by_code: data?.referred_by_code ?? normalizedCode,
+                referred_by_nickname: data?.referred_by_nickname ?? prev.referred_by_nickname,
+              }
+            : prev,
+        );
+        setPromoMessage(data?.referral_message ?? REFERRAL_INVITER_SUCCESS);
         return;
       }
       throw new Error("Не удалось активировать промокод.");
     } catch (err) {
-      if (!sub?.referred_by_applied) {
-        try {
-          const res = await fetch("/api/referral-code", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": WebApp.initData },
-            body: JSON.stringify({ code: normalizedCode }),
-          });
-          const data = await res.json().catch(() => null);
-          if (!res.ok) throw new Error(data?.error ?? "Промокод не найден");
-          setPromoCode("");
-          setSub((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  my_referral_code: data?.my_referral_code ?? prev.my_referral_code,
-                  referred_by_applied: Boolean(data?.referred_by_applied),
-                  referred_by_code: data?.referred_by_code ?? normalizedCode,
-                  referred_by_nickname: data?.referred_by_nickname ?? prev.referred_by_nickname,
-                }
-              : prev,
-          );
-          setPromoMessage(data?.referral_message ?? REFERRAL_INVITER_SUCCESS);
-          return;
-        } catch (referralErr) {
-          setPromoError(referralErr instanceof Error ? referralErr.message : "Промокод не найден");
-          return;
-        }
-      }
       setPromoError(err instanceof Error ? err.message : "Не удалось активировать промокод.");
     } finally {
       setPromoLoading(false);
     }
-  }, [promoCode, promoLoading, sub?.referred_by_applied]);
+  }, [promoCode, promoLoading]);
 
   const converted = stats?.totalConverted ?? 0;
   const referrerNickname = formatReferrerNickname(sub?.referred_by_nickname);

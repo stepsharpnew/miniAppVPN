@@ -95,6 +95,8 @@ function mapReferralApplyError(error?: string): string {
 
 function mapPromoRedeemError(error?: string): string | null {
   switch (error) {
+    case "daily_limit":
+      return "Промокод можно применить раз в сутки. Попробуйте завтра.";
     case "rate_limited":
       return "Слишком много попыток. Попробуйте позже.";
     case "already_used":
