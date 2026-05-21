@@ -71,6 +71,9 @@ export default function App() {
   const [gateChannelUrl, setGateChannelUrl] = useState(DEFAULT_CHANNEL_URL);
   const [splash, setSplash] = useState(true);
   const [showSync, setShowSync] = useState(false);
+  const [isSynced, setIsSynced] = useState(false);
+  const [syncedLogin, setSyncedLogin] = useState<string | null>(null);
+  const [syncChecked, setSyncChecked] = useState(false);
 
   const runChannelCheck = useCallback(async (): Promise<void> => {
     try {
@@ -94,6 +97,23 @@ export default function App() {
     WebApp.setBackgroundColor("#0A0A1A");
     void runChannelCheck();
   }, [runChannelCheck]);
+
+  useEffect(() => {
+    let alive = true;
+    WebApp.ready();
+    fetch("/api/sync/status", {
+      headers: { "X-Telegram-Init-Data": WebApp.initData },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!alive) return;
+        setIsSynced(Boolean(data?.synced));
+        setSyncedLogin(data?.login ?? null);
+        setSyncChecked(true);
+      })
+      .catch(() => { if (alive) setSyncChecked(true); });
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     if (boot !== "app") return;
@@ -131,11 +151,7 @@ export default function App() {
               <PurchasePage active={activeTab === "purchase"} />
             </div>
             <div style={activeTab === "profile" ? visibleStyle : hiddenStyle}>
-              {showSync ? (
-                <SyncPage onBack={() => setShowSync(false)} />
-              ) : (
-                <ProfilePage onOpenSync={() => setShowSync(true)} />
-              )}
+              <ProfilePage />
             </div>
             <div
               style={activeTab === "instructions" ? visibleStyle : hiddenStyle}
@@ -143,7 +159,15 @@ export default function App() {
               <InstructionsPage />
             </div>
             <div style={activeTab === "referral" ? visibleStyle : hiddenStyle}>
-              <ReferralPage />
+              {showSync ? (
+                <SyncPage onBack={() => setShowSync(false)} />
+              ) : (
+                <ReferralPage
+                  onOpenSync={syncChecked && !isSynced ? () => setShowSync(true) : undefined}
+                  isSynced={isSynced}
+                  syncedLogin={syncedLogin}
+                />
+              )}
             </div>
             <div style={activeTab === "support" ? visibleStyle : hiddenStyle}>
               <SupportPage active={activeTab === "support"} />

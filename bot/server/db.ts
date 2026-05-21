@@ -93,6 +93,8 @@ export interface ReferralRewardResult {
   paymentId: string;
   invitedBonusMonths: number;
   referrerBonusMonths: number;
+  invitedBonusDays: number;
+  referrerBonusDays: number;
   isFirstPaidConversion: boolean;
   invitedUserId: string;
   referrerUserId: string | null;
@@ -108,11 +110,25 @@ export interface SubscriptionReminderRow {
 }
 
 export const REFERRAL_APPLY_SUCCESS_MESSAGE =
-  "Промокод успешно применен, при покупке вам будет в подарок 1 месяц";
+  "Промокод успешно применен, при покупке вам будет в подарок 30 дней";
 
 const CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const REFERRAL_CODE_LENGTH = 8;
+/** Legacy constant — kept only for the invited-user fixed bonus. */
 const REFERRAL_BONUS_MONTHS = 1;
+
+/** Tiered bonus days awarded to the referrer on each paid conversion. */
+const REFERRAL_TIER1_DAYS = 30; // conversions 1-3
+const REFERRAL_TIER2_DAYS = 45; // conversions 4-10
+const REFERRAL_TIER3_DAYS = 60; // conversions 11+
+/** Fixed bonus days for the invited user (always Tier 1). */
+const REFERRAL_INVITED_BONUS_DAYS = 30;
+
+function getReferralBonusDaysByRank(rank: number): number {
+  if (rank <= 3) return REFERRAL_TIER1_DAYS;
+  if (rank <= 10) return REFERRAL_TIER2_DAYS;
+  return REFERRAL_TIER3_DAYS;
+}
 
 function generateRandomCode(length: number): string {
   const bytes = crypto.randomBytes(length);
@@ -786,6 +802,27 @@ async function extendSubscriptionWithClient(
   );
 }
 
+async function extendSubscriptionWithClientByDays(
+  client: Pick<Pool, "query">,
+  userId: string,
+  days: number,
+): Promise<void> {
+  await client.query(
+    `UPDATE users
+     SET expired_at = CASE
+       WHEN expired_at IS NOT NULL AND expired_at > NOW()
+         THEN expired_at + make_interval(days => $2)
+         ELSE NOW() + make_interval(days => $2)
+     END,
+     is_notificated_d3 = FALSE,
+     is_notificated_d1 = FALSE,
+     is_notificated_expired = FALSE,
+     is_notificated_cancelled = FALSE
+     WHERE id = $1`,
+    [userId, days],
+  );
+}
+
 function mapReferralParty(
   user: Pick<
     UserRow,
@@ -963,6 +1000,8 @@ export async function applyReferralRewardsForPayment(
         paymentId,
         invitedBonusMonths: REFERRAL_BONUS_MONTHS,
         referrerBonusMonths: REFERRAL_BONUS_MONTHS,
+        invitedBonusDays: REFERRAL_INVITED_BONUS_DAYS,
+        referrerBonusDays: REFERRAL_TIER1_DAYS,
         isFirstPaidConversion: false,
         invitedUserId,
         referrerUserId: null,
@@ -988,6 +1027,8 @@ export async function applyReferralRewardsForPayment(
         paymentId,
         invitedBonusMonths: REFERRAL_BONUS_MONTHS,
         referrerBonusMonths: REFERRAL_BONUS_MONTHS,
+        invitedBonusDays: REFERRAL_INVITED_BONUS_DAYS,
+        referrerBonusDays: REFERRAL_TIER1_DAYS,
         isFirstPaidConversion: false,
         invitedUserId,
         referrerUserId: null,
@@ -996,9 +1037,21 @@ export async function applyReferralRewardsForPayment(
       };
     }
 
+    // Count referrer's prior paid conversions (before this payment) to determine tier.
+    const { rows: convCountRows } = await client.query<{ cnt: string }>(
+      `SELECT COUNT(*)::TEXT AS cnt FROM referral_rewards WHERE referrer_user_id = $1`,
+      [referrerUser.id],
+    );
+    const priorConversions = parseInt(convCountRows[0]?.cnt ?? "0", 10);
+    // This payment will be the (priorConversions + 1)-th conversion (1-indexed).
+    const referrerBonusDays = getReferralBonusDaysByRank(priorConversions + 1);
+    const invitedBonusDays = REFERRAL_INVITED_BONUS_DAYS;
+
     const { rows: insertedRows } = await client.query<{
       invited_bonus_months: number;
       referrer_bonus_months: number;
+      invited_bonus_days: number;
+      referrer_bonus_days: number;
       is_first_paid_conversion: boolean;
     }>(
       `WITH prior_reward AS (
@@ -1016,30 +1069,38 @@ export async function applyReferralRewardsForPayment(
            referrer_user_id,
            invited_bonus_months,
            referrer_bonus_months,
+           invited_bonus_days,
+           referrer_bonus_days,
            is_first_paid_conversion
          )
          SELECT
            $1,
            $2,
            $3,
+           1,
+           1,
            $4,
-           $4,
+           $5,
            NOT has_prior_reward
          FROM prior_reward
          ON CONFLICT (payment_id) DO NOTHING
-         RETURNING invited_bonus_months, referrer_bonus_months, is_first_paid_conversion
+         RETURNING invited_bonus_months, referrer_bonus_months,
+                   invited_bonus_days, referrer_bonus_days, is_first_paid_conversion
        )
        SELECT * FROM inserted`,
-      [paymentId, invitedUserId, referrerUser.id, REFERRAL_BONUS_MONTHS],
+      [paymentId, invitedUserId, referrerUser.id, invitedBonusDays, referrerBonusDays],
     );
 
     if (!insertedRows[0]) {
       const { rows: existingRows } = await client.query<{
         invited_bonus_months: number;
         referrer_bonus_months: number;
+        invited_bonus_days: number;
+        referrer_bonus_days: number;
         is_first_paid_conversion: boolean;
       }>(
-        `SELECT invited_bonus_months, referrer_bonus_months, is_first_paid_conversion
+        `SELECT invited_bonus_months, referrer_bonus_months,
+                invited_bonus_days, referrer_bonus_days, is_first_paid_conversion
          FROM referral_rewards
          WHERE payment_id = $1`,
         [paymentId],
@@ -1055,6 +1116,8 @@ export async function applyReferralRewardsForPayment(
           existingRows[0]?.invited_bonus_months ?? REFERRAL_BONUS_MONTHS,
         referrerBonusMonths:
           existingRows[0]?.referrer_bonus_months ?? REFERRAL_BONUS_MONTHS,
+        invitedBonusDays: existingRows[0]?.invited_bonus_days ?? REFERRAL_INVITED_BONUS_DAYS,
+        referrerBonusDays: existingRows[0]?.referrer_bonus_days ?? REFERRAL_TIER1_DAYS,
         isFirstPaidConversion: existingRows[0]?.is_first_paid_conversion ?? false,
         invitedUserId,
         referrerUserId: referrerUser.id,
@@ -1063,17 +1126,17 @@ export async function applyReferralRewardsForPayment(
       };
     }
 
-    // Keep reward insert and month extensions in one transaction so duplicate
+    // Keep reward insert and subscription extensions in one transaction so duplicate
     // webhooks/status polls cannot ever grant the same referral bonus twice.
-    await extendSubscriptionWithClient(
+    await extendSubscriptionWithClientByDays(
       client,
       invitedUser.id,
-      insertedRows[0].invited_bonus_months,
+      insertedRows[0].invited_bonus_days,
     );
-    await extendSubscriptionWithClient(
+    await extendSubscriptionWithClientByDays(
       client,
       referrerUser.id,
-      insertedRows[0].referrer_bonus_months,
+      insertedRows[0].referrer_bonus_days,
     );
 
     await client.query("COMMIT");
@@ -1083,6 +1146,8 @@ export async function applyReferralRewardsForPayment(
       paymentId,
       invitedBonusMonths: insertedRows[0].invited_bonus_months,
       referrerBonusMonths: insertedRows[0].referrer_bonus_months,
+      invitedBonusDays: insertedRows[0].invited_bonus_days,
+      referrerBonusDays: insertedRows[0].referrer_bonus_days,
       isFirstPaidConversion: insertedRows[0].is_first_paid_conversion,
       invitedUserId,
       referrerUserId: referrerUser.id,
@@ -1320,4 +1385,76 @@ export async function redeemPromoCode(
   } finally {
     client.release();
   }
+}
+
+// ── Referral statistics ──
+
+export interface ReferralInvitee {
+  displayName: string;
+  appliedAt: string;
+  hasConverted: boolean;
+  purchaseCount: number;
+}
+
+export interface ReferralStats {
+  totalInvited: number;
+  totalConverted: number;
+  daysEarned: number;
+  pending: number;
+  currentTier: 1 | 2 | 3;
+  invitees: ReferralInvitee[];
+}
+
+export async function getReferralStats(userId: string): Promise<ReferralStats> {
+  const pool = getPool();
+
+  const { rows: statsRows } = await pool.query<{
+    total_invited: string;
+    total_converted: string;
+    days_earned: string;
+  }>(
+    `SELECT
+       (SELECT COUNT(*)::TEXT FROM users WHERE referred_by_user_id = $1) AS total_invited,
+       (SELECT COUNT(DISTINCT invited_user_id)::TEXT FROM referral_rewards WHERE referrer_user_id = $1) AS total_converted,
+       (SELECT COALESCE(SUM(COALESCE(referrer_bonus_days, 30)), 0)::TEXT FROM referral_rewards WHERE referrer_user_id = $1) AS days_earned`,
+    [userId],
+  );
+
+  const totalInvited = parseInt(statsRows[0]?.total_invited ?? "0", 10);
+  const totalConverted = parseInt(statsRows[0]?.total_converted ?? "0", 10);
+  const daysEarned = parseInt(statsRows[0]?.days_earned ?? "0", 10);
+  const pending = Math.max(0, totalInvited - totalConverted);
+  const currentTier: 1 | 2 | 3 =
+    totalConverted >= 11 ? 3 : totalConverted >= 4 ? 2 : 1;
+
+  const { rows: inviteeRows } = await pool.query<{
+    telegram_nickname: string | null;
+    referral_applied_at: string;
+    has_converted: boolean;
+    purchase_count: string;
+  }>(
+    `SELECT
+       inv.telegram_nickname,
+       inv.referral_applied_at,
+       COUNT(rr.id) > 0 AS has_converted,
+       COUNT(rr.id)::TEXT AS purchase_count
+     FROM users inv
+     LEFT JOIN referral_rewards rr
+            ON rr.invited_user_id = inv.id
+           AND rr.referrer_user_id = $1
+     WHERE inv.referred_by_user_id = $1
+     GROUP BY inv.id, inv.telegram_nickname, inv.referral_applied_at
+     ORDER BY inv.referral_applied_at DESC
+     LIMIT 20`,
+    [userId],
+  );
+
+  const invitees: ReferralInvitee[] = inviteeRows.map((row, i) => ({
+    displayName: row.telegram_nickname ? `@${row.telegram_nickname}` : `Гость ${i + 1}`,
+    appliedAt: row.referral_applied_at,
+    hasConverted: Boolean(row.has_converted),
+    purchaseCount: parseInt(row.purchase_count, 10),
+  }));
+
+  return { totalInvited, totalConverted, daysEarned, pending, currentTier, invitees };
 }

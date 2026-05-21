@@ -290,3 +290,7 @@ CREATE TABLE IF NOT EXISTS servers (
 -- ── HAPP (VLESS/Reality) support ──
 ALTER TABLE users   ADD COLUMN IF NOT EXISTS happ_subscription_url TEXT;
 ALTER TABLE servers ADD COLUMN IF NOT EXISTS supports_happ BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ── Tiered referral bonus days (replaces flat month bonuses) ──
+ALTER TABLE referral_rewards ADD COLUMN IF NOT EXISTS invited_bonus_days SMALLINT NOT NULL DEFAULT 30;
+ALTER TABLE referral_rewards ADD COLUMN IF NOT EXISTS referrer_bonus_days SMALLINT NOT NULL DEFAULT 30;

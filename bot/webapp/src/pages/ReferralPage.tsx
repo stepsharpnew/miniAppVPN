@@ -1,20 +1,126 @@
 import WebApp from "@twa-dev/sdk";
 import { useCallback, useEffect, useState } from "react";
+import { StatusBadge } from "../components/StatusBadge";
+import { useTelegramUser } from "../hooks/useTelegramUser";
 import styles from "./ReferralPage.module.css";
 
 const REFERRAL_INVITER_SUCCESS =
-  "Промокод успешно применён, при покупке вам будет в подарок 1 месяц";
+  "Промокод успешно применён, при покупке вам будет в подарок 30 дней";
+
+// ── Tiers ──────────────────────────────────────────────────────────────────
+const TIERS = [
+  { min: 1, max: 3, days: 30, label: "+30 дн.", color: "#00DFEE" },
+  { min: 4, max: 10, days: 45, label: "+45 дн.", color: "#A8FF3E" },
+  { min: 11, max: Infinity, days: 60, label: "+60 дн.", color: "#FF375F" },
+] as const;
+
+function getRingProgress(converted: number) {
+  const r1 = Math.min(converted, 3) / 3;
+  const r2 = Math.max(0, Math.min(converted - 3, 7)) / 7;
+  const r3 = Math.max(0, Math.min(converted - 10, 20)) / 20;
+  return [r1, r2, r3] as const;
+}
+
+// ── ActivityRings SVG component ─────────────────────────────────────────────
+function ActivityRings({ converted }: { converted: number }) {
+  const [progress] = useState(() => getRingProgress(converted));
+  const [animProg, setAnimProg] = useState<[number, number, number]>([0, 0, 0]);
+
+  useEffect(() => {
+    // Recompute when converted changes
+    const p = getRingProgress(converted);
+    const raf = requestAnimationFrame(() => {
+      setAnimProg(p);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [converted]);
+
+  const SIZE = 200;
+  const C = SIZE / 2; // center = 100
+  const STROKE = 13;
+
+  // outer → inner (rendered first so inner sits on top)
+  const rings = [
+    { r: 78, color: "#FF375F", bg: "rgba(255,55,95,0.15)", prog: animProg[2] },
+    { r: 60, color: "#A8FF3E", bg: "rgba(168,255,62,0.15)", prog: animProg[1] },
+    { r: 42, color: "#00DFEE", bg: "rgba(0,223,238,0.15)", prog: animProg[0] },
+  ];
+
+  return (
+    <svg
+      width={SIZE}
+      height={SIZE}
+      viewBox={`0 0 ${SIZE} ${SIZE}`}
+      className={styles.ringssvg}
+    >
+      {rings.map(({ r, color, bg, prog }) => {
+        const circ = 2 * Math.PI * r;
+        const offset = circ * (1 - prog);
+        return (
+          <g key={r} transform={`rotate(-90, ${C}, ${C})`}>
+            <circle cx={C} cy={C} r={r} fill="none" stroke={bg} strokeWidth={STROKE} />
+            <circle
+              cx={C}
+              cy={C}
+              r={r}
+              fill="none"
+              stroke={color}
+              strokeWidth={STROKE}
+              strokeDasharray={circ}
+              strokeDashoffset={offset}
+              strokeLinecap="round"
+              style={{ transition: "stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1)" }}
+            />
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ── Interfaces ───────────────────────────────────────────────────────────────
+interface ReferralStats {
+  totalInvited: number;
+  totalConverted: number;
+  daysEarned: number;
+  pending: number;
+  currentTier: 1 | 2 | 3;
+  invitees: { displayName: string; appliedAt: string; hasConverted: boolean; purchaseCount: number }[];
+}
 
 interface SubInfo {
   active?: boolean;
+  expired_at?: string | null;
   my_referral_code?: string;
   referred_by_applied?: boolean;
   referred_by_code?: string | null;
-  referral_message?: string | null;
 }
 
-export function ReferralPage() {
+function formatExpiry(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = d.getTime() - now.getTime();
+  if (diff <= 0) return "Истекла";
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  if (days > 30) {
+    const months = Math.floor(days / 30);
+    const rem = days % 30;
+    return rem > 0 ? `${months} мес. ${rem} дн.` : `${months} мес.`;
+  }
+  return days > 0 ? `${days} дн.` : `${Math.floor(diff / (1000 * 60 * 60))} ч.`;
+}
+
+// ── ReferralPage ─────────────────────────────────────────────────────────────
+interface ReferralPageProps {
+  onOpenSync?: () => void;
+  isSynced?: boolean;
+  syncedLogin?: string | null;
+}
+
+export function ReferralPage({ onOpenSync, isSynced, syncedLogin }: ReferralPageProps) {
+  const user = useTelegramUser();
   const [sub, setSub] = useState<SubInfo | null>(null);
+  const [stats, setStats] = useState<ReferralStats | null>(null);
   const [promoCode, setPromoCode] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
@@ -27,16 +133,20 @@ export function ReferralPage() {
       headers: { "X-Telegram-Init-Data": WebApp.initData },
     })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!alive) return;
-        setSub(data ?? {});
-      })
-      .catch(() => {
-        if (alive) setSub({});
-      });
-    return () => {
-      alive = false;
-    };
+      .then((data) => { if (alive) setSub(data ?? {}); })
+      .catch(() => { if (alive) setSub({}); });
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/referral/stats", {
+      headers: { "X-Telegram-Init-Data": WebApp.initData },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (alive && data) setStats(data as ReferralStats); })
+      .catch(() => {});
+    return () => { alive = false; };
   }, []);
 
   const handleCopyReferralCode = useCallback(async () => {
@@ -50,56 +160,44 @@ export function ReferralPage() {
     }
   }, [sub?.my_referral_code]);
 
+  const handleShareCode = useCallback(() => {
+    if (!sub?.my_referral_code) return;
+    const text = encodeURIComponent(
+      `Пользуюсь VPN — рекомендую! Используй мой реферальный код ${sub.my_referral_code} при покупке и получи бонус 🎁`,
+    );
+    WebApp.openTelegramLink(`https://t.me/share/url?url=&text=${text}`);
+  }, [sub?.my_referral_code]);
+
   const handleRedeemPromo = useCallback(async () => {
     const normalizedCode = promoCode.trim().toUpperCase();
     if (!normalizedCode || promoLoading) return;
-
     setPromoLoading(true);
     setPromoError(null);
     setPromoMessage(null);
-
     try {
       const res = await fetch("/api/promocode", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Telegram-Init-Data": WebApp.initData,
-        },
+        headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": WebApp.initData },
         body: JSON.stringify({ code: normalizedCode }),
       });
-
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error ?? "Не удалось активировать промокод.");
-      }
-
+      if (!res.ok) throw new Error(data?.error ?? "Не удалось активировать промокод.");
       setPromoCode("");
-
       if (data?.kind === "gift") {
-        setPromoMessage(
-          `Подарочный промокод активирован. Подписка продлена на ${data.months ?? 0} мес.`,
-        );
+        setPromoMessage(`Подарочный промокод активирован. Подписка продлена на ${data.months ?? 0} мес.`);
         return;
       }
-
       throw new Error("Не удалось активировать промокод.");
     } catch (err) {
       if (!sub?.referred_by_applied) {
         try {
           const res = await fetch("/api/referral-code", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Telegram-Init-Data": WebApp.initData,
-            },
+            headers: { "Content-Type": "application/json", "X-Telegram-Init-Data": WebApp.initData },
             body: JSON.stringify({ code: normalizedCode }),
           });
-
           const data = await res.json().catch(() => null);
-          if (!res.ok) {
-            throw new Error(data?.error ?? "Промокод не найден");
-          }
-
+          if (!res.ok) throw new Error(data?.error ?? "Промокод не найден");
           setPromoCode("");
           setSub((prev) =>
             prev
@@ -108,63 +206,158 @@ export function ReferralPage() {
                   my_referral_code: data?.my_referral_code ?? prev.my_referral_code,
                   referred_by_applied: Boolean(data?.referred_by_applied),
                   referred_by_code: data?.referred_by_code ?? normalizedCode,
-                  referral_message: data?.referral_message ?? prev.referral_message,
                 }
               : prev,
           );
           setPromoMessage(data?.referral_message ?? REFERRAL_INVITER_SUCCESS);
           return;
         } catch (referralErr) {
-          const message =
-            referralErr instanceof Error ? referralErr.message : "Промокод не найден";
-          setPromoError(message);
+          setPromoError(referralErr instanceof Error ? referralErr.message : "Промокод не найден");
           return;
         }
       }
-
-      const message =
-        err instanceof Error ? err.message : "Не удалось активировать промокод.";
-      setPromoError(message);
+      setPromoError(err instanceof Error ? err.message : "Не удалось активировать промокод.");
     } finally {
       setPromoLoading(false);
     }
   }, [promoCode, promoLoading, sub?.referred_by_applied]);
 
+  const converted = stats?.totalConverted ?? 0;
+
   return (
     <div className={styles.page}>
+      {/* ── Profile card ── */}
+      <div className={styles.profileCard}>
+        <div className={styles.profileTop}>
+          {user.photoUrl ? (
+            <img src={user.photoUrl} alt={user.firstName} className={styles.avatar} />
+          ) : (
+            <div className={`${styles.avatar} ${styles.avatarPlaceholder}`}>
+              {user.firstName.charAt(0)}
+            </div>
+          )}
+          <div className={styles.profileMeta}>
+            <div className={styles.userName}>{user.firstName} {user.lastName}</div>
+            <div className={styles.userId}>ID: {user.id || "—"}</div>
+            <div className={styles.syncBadgeRow}>
+              {isSynced ? (
+                <>
+                  <span className={styles.syncBadgeOk}>✓ Синхронизирован</span>
+                  {syncedLogin && <span className={styles.syncBadgeLogin}>{syncedLogin}</span>}
+                </>
+              ) : onOpenSync ? (
+                <button className={styles.syncBadgeLink} onClick={onOpenSync}>
+                  🔗 Привязать аккаунт
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <div className={styles.statusWrap}>
+            <div className={styles.statusLabel}>Подписка</div>
+            <StatusBadge active={sub?.active ?? false} />
+            {sub?.active && sub.expired_at && (
+              <div className={styles.expiryInfo}>{formatExpiry(sub.expired_at)}</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Activity rings + tier labels ── */}
+      <div className={styles.ringsCard}>
+        <div className={styles.ringsRow}>
+          <div className={styles.ringsWrap}>
+            <ActivityRings converted={converted} />
+            <div className={styles.ringsCenter}>
+              <div className={styles.ringsCenterCount}>{converted}</div>
+              <div className={styles.ringsCenterLabel}>конверсий</div>
+            </div>
+          </div>
+          <div className={styles.tierList}>
+            {TIERS.map((t, i) => {
+              const isActive =
+                i === 0 ? converted >= 1 && converted <= 3 :
+                i === 1 ? converted >= 4 && converted <= 10 :
+                converted >= 11;
+              const isDone =
+                i === 0 ? converted > 3 :
+                i === 1 ? converted > 10 : false;
+              return (
+                <div
+                  key={i}
+                  className={`${styles.tierRow} ${isActive ? styles.tierRowActive : ""} ${isDone ? styles.tierRowDone : ""}`}
+                >
+                  <span className={styles.tierDot} style={{ background: t.color }} />
+                  <div className={styles.tierInfo}>
+                    <span className={styles.tierRange}>
+                      {i === 2 ? "11+" : `${t.min}–${t.max}`} приглашённых
+                    </span>
+                    <span className={styles.tierDays} style={{ color: t.color }}>
+                      {t.label} за каждого
+                    </span>
+                  </div>
+                  {isDone && <span className={styles.tierCheck}>✓</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Stats strip ── */}
+      <div className={styles.statsRow}>
+        <div className={styles.statCard}>
+          <div className={styles.statNum}>{stats?.totalInvited ?? "—"}</div>
+          <div className={styles.statLabel}>Приглашено</div>
+        </div>
+        <div className={styles.statCard}>
+          <div className={styles.statNum}>{converted || "—"}</div>
+          <div className={styles.statLabel}>Купили</div>
+        </div>
+        <div className={styles.statCard}>
+          <div className={styles.statNum}>
+            {stats ? (stats.daysEarned > 0 ? `${stats.daysEarned}д` : "0") : "—"}
+          </div>
+          <div className={styles.statLabel}>Заработано</div>
+        </div>
+      </div>
+
+      {/* ── Referral code ── */}
       <div className={styles.card}>
         <div className={styles.sectionTitle}>Ваш реферальный код</div>
         <p className={styles.hint}>
-          Поделитесь кодом с другом — он получит бонус при покупке, а вы
-          получите вознаграждение.
+          Поделитесь кодом — друг получит бонус при покупке, вы получите дни.
         </p>
-
         <div className={styles.codeRow}>
           <div className={styles.codeValue}>
             {sub === null ? "Загрузка..." : (sub.my_referral_code ?? "—")}
           </div>
           <button
-            className={styles.copyBtn}
+            className={styles.iconBtn}
             onClick={handleCopyReferralCode}
             disabled={!sub?.my_referral_code}
+            title="Копировать"
           >
-            {referralCopied ? "✓ Скопировано" : "Копировать"}
+            {referralCopied ? "✓" : "📋"}
+          </button>
+          <button
+            className={styles.iconBtn}
+            onClick={handleShareCode}
+            disabled={!sub?.my_referral_code}
+            title="Поделиться"
+          >
+            📤
           </button>
         </div>
-
-        {sub?.referred_by_applied && sub.referred_by_code ? (
+        {sub?.referred_by_applied && sub.referred_by_code && (
           <div className={styles.appliedBadge}>
             ✓ Реферальный код применён: {sub.referred_by_code}
           </div>
-        ) : null}
+        )}
       </div>
 
+      {/* ── Promo code ── */}
       <div className={styles.card}>
         <div className={styles.sectionTitle}>Применить промокод</div>
-        <p className={styles.hint}>
-          Введите подарочный или реферальный промокод.
-        </p>
-
         <div className={styles.promoRow}>
           <input
             className={styles.promoInput}
@@ -174,10 +367,7 @@ export function ReferralPage() {
             maxLength={32}
             disabled={promoLoading}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void handleRedeemPromo();
-              }
+              if (e.key === "Enter") { e.preventDefault(); void handleRedeemPromo(); }
             }}
           />
           <button
@@ -188,14 +378,33 @@ export function ReferralPage() {
             {promoLoading ? "..." : "Применить"}
           </button>
         </div>
-
-        {promoMessage ? (
-          <div className={styles.promoSuccess}>{promoMessage}</div>
-        ) : null}
-        {promoError ? (
-          <div className={styles.promoError}>{promoError}</div>
-        ) : null}
+        {promoMessage && <div className={styles.promoSuccess}>{promoMessage}</div>}
+        {promoError && <div className={styles.promoError}>{promoError}</div>}
       </div>
+
+      {/* ── Invitees list ── */}
+      {stats && stats.invitees.length > 0 && (
+        <div className={styles.card}>
+          <div className={styles.sectionTitle}>Приглашённые</div>
+          <div className={styles.inviteeList}>
+            {stats.invitees.map((inv, i) => (
+              <div key={i} className={styles.inviteeRow}>
+                <span className={styles.inviteeIcon}>
+                  {inv.hasConverted ? (inv.purchaseCount > 1 ? "🔥" : "✅") : "🕐"}
+                </span>
+                <span className={styles.inviteeName}>{inv.displayName}</span>
+                <span className={styles.inviteeStatus}>
+                  {inv.hasConverted
+                    ? inv.purchaseCount > 1
+                      ? `${inv.purchaseCount} покупки`
+                      : "Купил"
+                    : "Ожидает"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

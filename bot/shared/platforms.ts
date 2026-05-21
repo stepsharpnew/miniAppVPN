@@ -212,7 +212,7 @@ export const PLATFORMS: PlatformInfo[] = [
 • Включаем VPN.`,
       },
       happ: {
-        downloadUrl: 'https://apps.apple.com/us/app/happ-proxy-utility/id6504287215',
+        downloadUrl: 'https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973',
         steps: [
           'Скачайте HAPP из App Store по кнопке ниже',
           'Скопируйте HAPP-ссылку из раздела «Профиль»',

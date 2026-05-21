@@ -30,6 +30,7 @@ import {
   createTelegramUserIfMissing,
   getUserById,
   getUserReferralInfo,
+  getReferralStats,
   redeemPromoCode,
   type ServerRow,
   type UserRow,
@@ -617,6 +618,21 @@ export function createApiServer(api: Api, botToken: string) {
     } catch (err) {
       console.error("Referral code apply error:", err);
       res.status(500).json({ error: "Не удалось применить реферальный код" });
+    }
+  });
+
+  app.get("/api/referral/stats", auth, requireChannelSubscription, async (req, res) => {
+    const tgUser = getUser(req);
+    try {
+      const dbUser = await createTelegramUserIfMissing(
+        tgUser.id,
+        normalizeTelegramNickname(tgUser.username),
+      );
+      const stats = await getReferralStats(dbUser.id);
+      res.json(stats);
+    } catch (err) {
+      console.error("Referral stats error:", err);
+      res.status(500).json({ error: "Не удалось загрузить статистику" });
     }
   });
 

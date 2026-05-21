@@ -28,7 +28,7 @@ export async function sendReferralRewardNotifications(
     try {
       await api.sendMessage(
         reward.referrerUser.telegramId,
-        `ваш промокод применен\nначислен <b>+${reward.referrerBonusMonths} месяц</b>`,
+        `ваш реферальный код сработал 🎁\nначислено <b>+${reward.referrerBonusDays} дней</b>`,
         { parse_mode: "HTML" },
       );
     } catch (err) {
@@ -53,7 +53,7 @@ export async function sendReferralRewardNotifications(
         `👤 Покупатель: ${formatPartyIdentity(reward.invitedUser)}\n` +
         `👥 Реферер: ${formatPartyIdentity(reward.referrerUser)}\n` +
         `💳 payment_id: <code>${escapeHtml(reward.paymentId)}</code>\n` +
-        `📦 Начислено: приглашенному +${reward.invitedBonusMonths}, рефереру +${reward.referrerBonusMonths}\n` +
+        `📦 Начислено: приглашенному +${reward.invitedBonusDays} дн., рефереру +${reward.referrerBonusDays} дн.\n` +
         `⭐ first-paid-conversion: <b>${reward.isFirstPaidConversion ? "true" : "false"}</b>`,
       {
         parse_mode: "HTML",
