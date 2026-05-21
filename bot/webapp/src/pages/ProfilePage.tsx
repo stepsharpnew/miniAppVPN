@@ -167,12 +167,13 @@ export function ProfilePage({ onOpenSync, onOpenInstructions }: ProfilePageProps
       {onOpenInstructions ? (
         <button
           type="button"
-          className={styles.helpBtn}
+          className={styles.helpLink}
           onClick={onOpenInstructions}
-          aria-label="Инструкции и помощь"
-          title="Инструкции"
         >
-          ?
+          <span className={styles.helpLinkIcon} aria-hidden>
+            📖
+          </span>
+          <span className={styles.helpLinkText}>Инструкция по подключению</span>
         </button>
       ) : null}
       <div className={styles.profileCard}>

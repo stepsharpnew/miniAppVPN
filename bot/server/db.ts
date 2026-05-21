@@ -1412,6 +1412,17 @@ export async function redeemPromoCode(
 
 // ── Referral statistics ──
 
+function formatReferralInviteeDisplayName(row: {
+  telegram_nickname: string | null;
+  login: string | null;
+}): string {
+  const nick = row.telegram_nickname?.trim();
+  if (nick) return nick.startsWith("@") ? nick : `@${nick}`;
+  const login = row.login?.trim();
+  if (login) return login;
+  return "Участник";
+}
+
 export interface ReferralInvitee {
   displayName: string;
   appliedAt: string;
@@ -1437,14 +1448,24 @@ export async function getReferralStats(userId: string): Promise<ReferralStats> {
     days_earned: string;
   }>(
     `SELECT
-       (SELECT COUNT(*)::TEXT FROM users WHERE referred_by_user_id = $1) AS total_invited,
+       (SELECT COUNT(*)::TEXT FROM (
+          SELECT id FROM users WHERE referred_by_user_id = $1
+          UNION
+          SELECT invited_user_id FROM referral_rewards WHERE referrer_user_id = $1
+        ) AS all_invitees) AS total_invited,
        (SELECT COUNT(DISTINCT invited_user_id)::TEXT FROM referral_rewards WHERE referrer_user_id = $1) AS total_converted,
        (SELECT COALESCE(SUM(COALESCE(referrer_bonus_days, 30)), 0)::TEXT FROM referral_rewards WHERE referrer_user_id = $1) AS days_earned`,
     [userId],
   );
 
-  const totalInvited = parseInt(statsRows[0]?.total_invited ?? "0", 10);
-  const totalConverted = parseInt(statsRows[0]?.total_converted ?? "0", 10);
+  const totalInvited = Math.max(
+    0,
+    parseInt(statsRows[0]?.total_invited ?? "0", 10),
+  );
+  const totalConverted = Math.max(
+    0,
+    parseInt(statsRows[0]?.total_converted ?? "0", 10),
+  );
   const daysEarned = parseInt(statsRows[0]?.days_earned ?? "0", 10);
   const pending = Math.max(0, totalInvited - totalConverted);
   const currentTier: 1 | 2 | 3 =
@@ -1452,12 +1473,14 @@ export async function getReferralStats(userId: string): Promise<ReferralStats> {
 
   const { rows: inviteeRows } = await pool.query<{
     telegram_nickname: string | null;
-    referral_applied_at: string;
+    login: string | null;
+    referral_applied_at: string | null;
     has_converted: boolean;
     purchase_count: string;
   }>(
     `SELECT
        inv.telegram_nickname,
+       inv.login,
        inv.referral_applied_at,
        COUNT(rr.id) > 0 AS has_converted,
        COUNT(rr.id)::TEXT AS purchase_count
@@ -1466,15 +1489,18 @@ export async function getReferralStats(userId: string): Promise<ReferralStats> {
             ON rr.invited_user_id = inv.id
            AND rr.referrer_user_id = $1
      WHERE inv.referred_by_user_id = $1
-     GROUP BY inv.id, inv.telegram_nickname, inv.referral_applied_at
-     ORDER BY inv.referral_applied_at DESC
+        OR inv.id IN (
+          SELECT invited_user_id FROM referral_rewards WHERE referrer_user_id = $1
+        )
+     GROUP BY inv.id, inv.telegram_nickname, inv.login, inv.referral_applied_at
+     ORDER BY inv.referral_applied_at DESC NULLS LAST, inv.id
      LIMIT 20`,
     [userId],
   );
 
-  const invitees: ReferralInvitee[] = inviteeRows.map((row, i) => ({
-    displayName: row.telegram_nickname ? `@${row.telegram_nickname}` : `Гость ${i + 1}`,
-    appliedAt: row.referral_applied_at,
+  const invitees: ReferralInvitee[] = inviteeRows.map((row) => ({
+    displayName: formatReferralInviteeDisplayName(row),
+    appliedAt: row.referral_applied_at ?? "",
     hasConverted: Boolean(row.has_converted),
     purchaseCount: parseInt(row.purchase_count, 10),
   }));

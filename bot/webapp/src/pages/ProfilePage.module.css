@@ -1,37 +1,43 @@
 .page {
   padding: 16px;
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.helpBtn {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 2;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-secondary);
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
+.helpLink {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  gap: 8px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 223, 238, 0.22);
+  background: rgba(0, 223, 238, 0.08);
+  color: #b8f6ff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.helpBtn:hover {
-  background: rgba(0, 223, 238, 0.12);
-  border-color: rgba(0, 223, 238, 0.35);
-  color: #00dfee;
+.helpLink:hover {
+  background: rgba(0, 223, 238, 0.14);
+  border-color: rgba(0, 223, 238, 0.38);
 }
 
-.helpBtn:active {
-  transform: scale(0.96);
+.helpLink:active {
+  transform: scale(0.99);
+}
+
+.helpLinkIcon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.helpLinkText {
+  line-height: 1.2;
 }
 
 .profileCard {

@@ -248,11 +248,15 @@ export function ReferralPage() {
       {/* ── Stats strip ── */}
       <div className={styles.statsRow}>
         <div className={styles.statCard}>
-          <div className={styles.statNum}>{stats?.totalInvited ?? "—"}</div>
+          <div className={styles.statNum}>
+            {stats != null ? Math.max(0, stats.totalInvited) : "—"}
+          </div>
           <div className={styles.statLabel}>Приглашено</div>
         </div>
         <div className={styles.statCard}>
-          <div className={styles.statNum}>{converted || "—"}</div>
+          <div className={styles.statNum}>
+            {stats != null ? converted : "—"}
+          </div>
           <div className={styles.statLabel}>Купили</div>
         </div>
         <div className={styles.statCard}>
