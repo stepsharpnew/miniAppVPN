@@ -216,9 +216,11 @@ export async function reissueVpnConfig(
   const newServer = candidates[Math.floor(Math.random() * candidates.length)];
   const newBaseUrl = getServerBaseUrl(newServer);
 
-  // Шаг 3: провизионировать с abs:<unix_ts> чтобы срок совпал с DB
-  const absExpiry = `abs:${(expiredAt.getTime() / 1000).toFixed(3)}`;
-  const config = await provisionVpnClient(clientName, absExpiry, newServer.server_id, newBaseUrl);
+  // Шаг 3: провизионировать с остаточным сроком в днях (совместимо с любой версией app.py)
+  const remainingMs = expiredAt.getTime() - Date.now();
+  const remainingDays = Math.max(1, Math.ceil(remainingMs / (1000 * 60 * 60 * 24)));
+  const durationCode = `${remainingDays}d`;
+  const config = await provisionVpnClient(clientName, durationCode, newServer.server_id, newBaseUrl);
 
   // Шаг 4: сохранить новый конфиг в БД
   saveConfig(user.id, config);
