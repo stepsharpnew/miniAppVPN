@@ -41,6 +41,7 @@ import { sendReferralRewardNotifications } from "./referral-notifications";
 import { sendGiftPromoAdminNotification } from "./promo-notifications";
 import {
   getWebClientName,
+  reissueVpnConfig,
   syncVpnForPromoRedemption,
   syncVpnForReferralReward,
 } from "./promo-vpn";
@@ -708,6 +709,40 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     } catch (err) {
       console.error("Apply web referral code failed:", err);
       res.status(500).json({ error: "Не удалось применить реферальный код" });
+    }
+  });
+
+  // ── VPN server reissue (смена сервера AmneziaWG, веб) ──
+
+  app.post("/api/web/vpn/reissue", webAuth, async (req, res) => {
+    const userId = getWebUserId(req);
+    try {
+      const userRow = await getUserById(userId);
+      if (!userRow) {
+        res.status(404).json({ error: "Пользователь не найден" });
+        return;
+      }
+      const expiredAt = userRow.expired_at ? new Date(userRow.expired_at) : null;
+      if (!expiredAt || expiredAt.getTime() <= Date.now()) {
+        res.status(400).json({ error: "Подписка неактивна" });
+        return;
+      }
+
+      const clientName = getWebClientName(userRow);
+      const result = await reissueVpnConfig(userRow, clientName);
+      res.json({ ok: true, config: result.config });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "no_other_servers") {
+        res.status(409).json({ error: "Нет других доступных серверов для смены" });
+        return;
+      }
+      if (msg === "subscription_inactive") {
+        res.status(400).json({ error: "Подписка неактивна" });
+        return;
+      }
+      console.error("Web VPN reissue error:", err);
+      res.status(500).json({ error: "Не удалось сменить сервер. Попробуйте позже." });
     }
   });
 

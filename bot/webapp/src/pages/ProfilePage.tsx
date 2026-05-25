@@ -54,6 +54,8 @@ export function ProfilePage({ onOpenSync, onOpenInstructions }: ProfilePageProps
   const [isSynced, setIsSynced] = useState(false);
   const [syncedLogin, setSyncedLogin] = useState<string | null>(null);
   const [clientKind, setClientKind] = useState<"happ" | "amneziawg">("amneziawg");
+  const [reissuing, setReissuing] = useState(false);
+  const [reissueOk, setReissueOk] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -153,6 +155,35 @@ export function ProfilePage({ onOpenSync, onOpenInstructions }: ProfilePageProps
       WebApp.showAlert("Не удалось скопировать ссылку.");
     }
   }, [happUrl]);
+
+  const handleReissue = useCallback(() => {
+    if (reissuing) return;
+    WebApp.showConfirm(
+      "Получить конфиг с другого сервера?\n\nТекущий конфиг перестанет работать.",
+      (confirmed) => {
+        if (!confirmed) return;
+        setReissuing(true);
+        setReissueOk(false);
+        fetch("/api/vpn/reissue", {
+          method: "POST",
+          headers: { "X-Telegram-Init-Data": WebApp.initData },
+        })
+          .then(async (r) => {
+            const data = await r.json().catch(() => null);
+            if (!r.ok) throw new Error(data?.error ?? "Ошибка");
+            setSub((prev) => prev ? { ...prev, config: data.config } : prev);
+            setSent(false);
+            setReissueOk(true);
+            window.setTimeout(() => setReissueOk(false), 4000);
+          })
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : "Не удалось сменить сервер";
+            WebApp.showAlert(msg);
+          })
+          .finally(() => setReissuing(false));
+      },
+    );
+  }, [reissuing]);
 
   const handleOpenHapp = useCallback(() => {
     if (!happUrl) return;
@@ -302,6 +333,23 @@ export function ProfilePage({ onOpenSync, onOpenInstructions }: ProfilePageProps
                     ? "✓ Файл отправлен в чат"
                     : "📄 Получить .conf файлом"}
               </button>
+              <div className={styles.reissueBlock}>
+                <div className={styles.reissueHint}>
+                  Этот сервер не работает?
+                </div>
+                <button
+                  type="button"
+                  className={`${styles.reissueBtn} ${reissueOk ? styles.reissueBtnOk : ""}`}
+                  onClick={handleReissue}
+                  disabled={reissuing}
+                >
+                  {reissuing
+                    ? "Переключаем..."
+                    : reissueOk
+                      ? "✓ Сервер сменён"
+                      : "🔄 Сменить сервер"}
+                </button>
+              </div>
             </>
           ) : (
             <div className={styles.noConfig}>

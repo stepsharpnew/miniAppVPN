@@ -55,6 +55,9 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
   const [clientKind, setClientKind] = useState<VpnClientKind>("amneziawg");
+  const [reissuing, setReissuing] = useState(false);
+  const [reissueOk, setReissueOk] = useState(false);
+  const [reissueError, setReissueError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -114,6 +117,30 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
       })
       .catch(() => {});
   }, []);
+
+  const handleReissue = useCallback(async () => {
+    if (reissuing) return;
+    const confirmed = window.confirm(
+      "Получить конфиг с другого сервера?\n\nТекущий конфиг перестанет работать.",
+    );
+    if (!confirmed) return;
+    setReissuing(true);
+    setReissueOk(false);
+    setReissueError(null);
+    try {
+      const data = await apiFetch<{ ok: boolean; config: string }>(
+        "/api/web/vpn/reissue",
+        { method: "POST" },
+      );
+      setSub((prev) => prev ? { ...prev, config: data.config } : prev);
+      setReissueOk(true);
+      window.setTimeout(() => setReissueOk(false), 4000);
+    } catch (err) {
+      setReissueError(err instanceof Error ? err.message : "Не удалось сменить сервер");
+    } finally {
+      setReissuing(false);
+    }
+  }, [reissuing]);
 
   const handleApplyPromo = useCallback(async () => {
     const code = promoCode.trim().toUpperCase();
@@ -308,6 +335,24 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
                 <button className={styles.downloadBtn} onClick={handleDownloadConf}>
                   Скачать .conf
                 </button>
+              </div>
+              <div className={styles.reissueBlock}>
+                <div className={styles.reissueHint}>Этот сервер не работает?</div>
+                <button
+                  type="button"
+                  className={`${styles.reissueBtn} ${reissueOk ? styles.reissueBtnOk : ""}`}
+                  onClick={() => void handleReissue()}
+                  disabled={reissuing}
+                >
+                  {reissuing
+                    ? "Переключаем..."
+                    : reissueOk
+                      ? "✓ Сервер сменён"
+                      : "🔄 Сменить сервер"}
+                </button>
+                {reissueError && (
+                  <div className={styles.reissueError}>{reissueError}</div>
+                )}
               </div>
             </>
           ) : (

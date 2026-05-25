@@ -66,6 +66,7 @@ import {
 } from "./db";
 import {
   getTelegramClientName,
+  reissueVpnConfig,
   syncVpnForPromoRedemption,
   syncVpnForReferralReward,
 } from "./promo-vpn";
@@ -774,6 +775,44 @@ export function createApiServer(api: Api, botToken: string) {
     } catch (err) {
       console.error("Referral stats error:", err);
       res.status(500).json({ error: "Не удалось загрузить статистику" });
+    }
+  });
+
+  // ── VPN server reissue (смена сервера AmneziaWG) ──
+
+  app.post("/api/vpn/reissue", auth, requireChannelSubscription, async (req, res) => {
+    const tgUser = getUser(req);
+    try {
+      const dbUser = await createTelegramUserIfMissing(
+        tgUser.id,
+        normalizeTelegramNickname(tgUser.username),
+      );
+      const userRow = await getUserById(dbUser.id);
+      if (!userRow) {
+        res.status(404).json({ error: "Пользователь не найден" });
+        return;
+      }
+      const expiredAt = userRow.expired_at ? new Date(userRow.expired_at) : null;
+      if (!expiredAt || expiredAt.getTime() <= Date.now()) {
+        res.status(400).json({ error: "Подписка неактивна" });
+        return;
+      }
+
+      const clientName = getTelegramClientName(tgUser.id, tgUser.username);
+      const result = await reissueVpnConfig(userRow, clientName);
+      res.json({ ok: true, config: result.config });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "no_other_servers") {
+        res.status(409).json({ error: "Нет других доступных серверов для смены" });
+        return;
+      }
+      if (msg === "subscription_inactive") {
+        res.status(400).json({ error: "Подписка неактивна" });
+        return;
+      }
+      console.error("VPN reissue error:", err);
+      res.status(500).json({ error: "Не удалось сменить сервер. Попробуйте позже." });
     }
   });
 

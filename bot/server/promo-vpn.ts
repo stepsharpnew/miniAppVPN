@@ -14,7 +14,7 @@ import {
   updateUserVpnConfig,
 } from "./db";
 import { extendHapp, provisionHapp } from "./happ";
-import { extendVpnClient, provisionVpnClient } from "./vpn";
+import { deleteVpnClient, extendVpnClient, provisionVpnClient } from "./vpn";
 
 function getServerBaseUrl(server: ServerRow): string {
   const raw = server.domain_server_name;
@@ -160,6 +160,76 @@ async function extendVpnForParty(
     "Referral VPN extend: client not found on any server",
     { userId: party.userId, clientName },
   );
+}
+
+export interface ReissueVpnResult {
+  config: string;
+  /** null — клиент не найден ни на одном сервере (выдан как новый) */
+  deletedFromServerId: string | null;
+  newServerId: string;
+}
+
+/**
+ * Смена сервера: создать клиента на другом сервере с тем же сроком действия,
+ * затем удалить со старого.
+ *
+ * Порядок: сначала создать → потом удалить, чтобы при сбое удаления пользователь
+ * не остался без конфига. Старый клиент протухнет по expires_at.
+ */
+export async function reissueVpnConfig(
+  user: UserRow,
+  clientName: string,
+): Promise<ReissueVpnResult> {
+  const expiredAt = user.expired_at ? new Date(user.expired_at) : null;
+  if (!expiredAt || expiredAt.getTime() <= Date.now()) {
+    throw new Error("subscription_inactive");
+  }
+
+  const allServers = await getAllEnabledServers();
+  if (allServers.length < 2) {
+    throw new Error("no_other_servers");
+  }
+
+  // Шаг 1: найти старый сервер (обходим все, ищем клиента)
+  let oldWgServerId: string | null = null;
+  for (const srv of allServers) {
+    try {
+      const baseUrl = getServerBaseUrl(srv);
+      // findExistingClient ищет по всем WireGuard-серверам на этой VM,
+      // deleteVpnClient вернёт WG server_id если нашёл
+      const found = await deleteVpnClient(clientName, baseUrl).catch(() => null);
+      if (found !== null) {
+        // Запоминаем DB server_id (uuid) для исключения при выборе нового
+        oldWgServerId = srv.server_id;
+        break;
+      }
+    } catch {
+      // узел недоступен — пропускаем
+    }
+  }
+
+  // Шаг 2: выбрать новый сервер (исключить тот, на котором был клиент)
+  const candidates = allServers.filter((s) => s.server_id !== oldWgServerId);
+  if (candidates.length === 0) {
+    throw new Error("no_other_servers");
+  }
+  const newServer = candidates[Math.floor(Math.random() * candidates.length)];
+  const newBaseUrl = getServerBaseUrl(newServer);
+
+  // Шаг 3: провизионировать с abs:<unix_ts> чтобы срок совпал с DB
+  const absExpiry = `abs:${(expiredAt.getTime() / 1000).toFixed(3)}`;
+  const config = await provisionVpnClient(clientName, absExpiry, newServer.server_id, newBaseUrl);
+
+  // Шаг 4: сохранить новый конфиг в БД
+  saveConfig(user.id, config);
+  await updateUserVpnConfig(user.id, config);
+  await incrementServerUserCount(newServer.server_id).catch(() => {});
+
+  return {
+    config,
+    deletedFromServerId: oldWgServerId,
+    newServerId: newServer.server_id,
+  };
 }
 
 /**

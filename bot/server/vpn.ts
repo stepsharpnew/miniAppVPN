@@ -103,6 +103,33 @@ export async function provisionVpnClient(
 }
 
 /**
+ * Delete a VPN client by name from the server.
+ * Returns the WireGuard server ID the client was on, or null if not found.
+ */
+export async function deleteVpnClient(
+  clientName: string,
+  baseUrl: string,
+): Promise<string | null> {
+  const existing = await findExistingClient(clientName, baseUrl);
+  if (!existing) return null;
+
+  const resp = await fetch(
+    `${baseUrl}/api/servers/${existing.serverId}/clients/${existing.id}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: authHeader },
+    },
+  );
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "unknown");
+    throw new Error(`VPN delete API ${resp.status}: ${text}`);
+  }
+
+  return existing.serverId;
+}
+
+/**
  * Extend an existing VPN client's duration on the server.
  * Automatically detects which server the client lives on.
  * Throws if the client is not found or the API call fails.

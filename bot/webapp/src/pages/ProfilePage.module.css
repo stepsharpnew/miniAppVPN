@@ -319,3 +319,53 @@
 .happOpenBtn:active {
   opacity: 0.85;
 }
+
+/* ── Reissue (смена сервера) ── */
+
+.reissueBlock {
+  width: 100%;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.reissueHint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.reissueBtn {
+  width: 100%;
+  padding: 13px;
+  border-radius: var(--border-radius-sm);
+  border: 1px solid rgba(255, 171, 0, 0.3);
+  background: rgba(255, 171, 0, 0.08);
+  color: #ffd27d;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s;
+}
+
+.reissueBtn:hover {
+  background: rgba(255, 171, 0, 0.14);
+  border-color: rgba(255, 171, 0, 0.45);
+}
+
+.reissueBtn:active {
+  transform: scale(0.99);
+}
+
+.reissueBtn:disabled {
+  opacity: 0.55;
+}
+
+.reissueBtnOk {
+  border-color: rgba(136, 240, 179, 0.3);
+  background: rgba(136, 240, 179, 0.08);
+  color: #88f0b3;
+  pointer-events: none;
+}
