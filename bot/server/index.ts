@@ -36,6 +36,7 @@ import {
   updatePasswordHash,
 } from "./db";
 import bcrypt from "bcryptjs";
+import { SALT_ROUNDS } from "./web-auth";
 import crypto from "crypto";
 import { getTelegramClientName, syncVpnForPromoRedemption } from "./promo-vpn";
 import { sendGiftPromoAdminNotification } from "./promo-notifications";
@@ -221,7 +222,7 @@ bot.command("reset_password", async (ctx) => {
 
     // Криптостойкий случайный пароль (16 символов из URL-safe-алфавита).
     const tempPassword = crypto.randomBytes(12).toString("base64url").slice(0, 16);
-    const hash = await bcrypt.hash(tempPassword, 10);
+    const hash = await bcrypt.hash(tempPassword, SALT_ROUNDS);
     await updatePasswordHash(user.id, hash);
 
     await ctx.reply(

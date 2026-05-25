@@ -24,6 +24,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_source TEXT DEFAULT 'telegram';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code CHAR(8);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by_user_id UUID;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_applied_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_version INTEGER NOT NULL DEFAULT 0;
 
 -- Move existing web users from email to login, then drop email data.
 DO $$

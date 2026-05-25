@@ -1,7 +1,19 @@
 const forwardedMessages = new Map<string, number>();
+const FORWARD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const forwardTimestamps = new Map<string, number>();
 
 function makeForwardKey(adminChatId: string, adminMsgId: number): string {
   return `${adminChatId}:${adminMsgId}`;
+}
+
+function evictStaleForwards(): void {
+  const now = Date.now();
+  for (const [key, ts] of forwardTimestamps) {
+    if (now - ts > FORWARD_TTL_MS) {
+      forwardTimestamps.delete(key);
+      forwardedMessages.delete(key);
+    }
+  }
 }
 
 export function saveForwardedMessage(
@@ -9,7 +21,10 @@ export function saveForwardedMessage(
   adminMsgId: number,
   userChatId: number
 ): void {
-  forwardedMessages.set(makeForwardKey(adminChatId, adminMsgId), userChatId);
+  evictStaleForwards();
+  const key = makeForwardKey(adminChatId, adminMsgId);
+  forwardedMessages.set(key, userChatId);
+  forwardTimestamps.set(key, Date.now());
 }
 
 export function getUserChatId(
@@ -20,9 +35,23 @@ export function getUserChatId(
 }
 
 const activeDialogs = new Map<number, AdminChat>();
+const DIALOG_TTL_MS = 24 * 60 * 60 * 1000;
+const dialogTimestamps = new Map<number, number>();
+
+function evictStaleDialogs(): void {
+  const now = Date.now();
+  for (const [userId, ts] of dialogTimestamps) {
+    if (now - ts > DIALOG_TTL_MS) {
+      dialogTimestamps.delete(userId);
+      activeDialogs.delete(userId);
+    }
+  }
+}
 
 export function setActiveDialog(userChatId: number, adminChat: AdminChat): void {
+  evictStaleDialogs();
   activeDialogs.set(userChatId, adminChat);
+  dialogTimestamps.set(userChatId, Date.now());
 }
 
 export function getActiveDialog(userChatId: number): AdminChat | undefined {

@@ -7,7 +7,7 @@ export function getPool(): Pool {
   if (!pool) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is not set");
-    pool = new Pool({ connectionString: url, max: 10 });
+    pool = new Pool({ connectionString: url, max: 30 });
   }
   return pool;
 }
@@ -22,6 +22,9 @@ export async function initDb(): Promise<void> {
     );
     await client.query(
       "ALTER TABLE servers ADD COLUMN IF NOT EXISTS supports_happ BOOLEAN NOT NULL DEFAULT FALSE",
+    );
+    await client.query(
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_version INTEGER NOT NULL DEFAULT 0",
     );
     console.log("PostgreSQL connected");
   } finally {
@@ -52,6 +55,7 @@ export interface UserRow {
   is_notificated_d1?: boolean;
   is_notificated_expired?: boolean;
   is_notificated_cancelled?: boolean;
+  password_version?: number;
 }
 
 export interface ReferralInfo {
@@ -774,7 +778,10 @@ export async function updatePasswordHash(
   passwordHash: string,
 ): Promise<void> {
   await getPool().query(
-    "UPDATE users SET password_hash = $1 WHERE id = $2",
+    `UPDATE users
+     SET password_hash = $1,
+         password_version = COALESCE(password_version, 0) + 1
+     WHERE id = $2`,
     [passwordHash, userId],
   );
 }
