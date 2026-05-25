@@ -14,7 +14,12 @@ import {
   updateUserVpnConfig,
 } from "./db";
 import { extendHapp, provisionHapp } from "./happ";
-import { deleteVpnClient, extendVpnClient, provisionVpnClient } from "./vpn";
+import {
+  deleteVpnClient,
+  extendVpnClient,
+  provisionVpnClient,
+  provisionVpnClientUntilExpiry,
+} from "./vpn";
 
 function getServerBaseUrl(server: ServerRow): string {
   const raw = server.domain_server_name;
@@ -216,11 +221,13 @@ export async function reissueVpnConfig(
   const newServer = candidates[Math.floor(Math.random() * candidates.length)];
   const newBaseUrl = getServerBaseUrl(newServer);
 
-  // Шаг 3: провизионировать с остаточным сроком в днях (совместимо с любой версией app.py)
-  const remainingMs = expiredAt.getTime() - Date.now();
-  const remainingDays = Math.max(1, Math.ceil(remainingMs / (1000 * 60 * 60 * 24)));
-  const durationCode = `${remainingDays}d`;
-  const config = await provisionVpnClient(clientName, durationCode, newServer.server_id, newBaseUrl);
+  // Шаг 3: провизионировать с тем же сроком (ISO/abs для нового app.py, 1m–12m для старого)
+  const config = await provisionVpnClientUntilExpiry(
+    clientName,
+    expiredAt,
+    newServer.server_id,
+    newBaseUrl,
+  );
 
   // Шаг 4: сохранить новый конфиг в БД
   saveConfig(user.id, config);
