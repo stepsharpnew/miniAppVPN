@@ -28,6 +28,10 @@ interface SubData {
 
 type VpnClientKind = "amneziawg" | "happ";
 
+function buildHappDeepLink(subscriptionUrl: string): string {
+  return `happ://add/${subscriptionUrl}`;
+}
+
 function formatExpiry(iso: string): string {
   const d = new Date(iso);
   const now = new Date();
@@ -209,9 +213,18 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
     }).catch(() => {});
   }, [sub?.happ_subscription_url]);
 
+  const handleOpenHapp = useCallback(() => {
+    if (!sub?.happ_subscription_url) return;
+    navigator.clipboard.writeText(sub.happ_subscription_url).then(() => {
+      setHappCopied(true);
+      setTimeout(() => setHappCopied(false), 2000);
+    }).catch(() => {});
+  }, [sub?.happ_subscription_url]);
+
   if (!user) return null;
   const isTelegramLinked =
     user.auth_source === "both" || user.auth_source === "telegram";
+  const happUrl = sub?.happ_subscription_url ?? null;
 
   return (
     <div className={styles.page}>
@@ -304,18 +317,33 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
           {!loaded ? (
             <div className={styles.noConfig}>Загрузка...</div>
           ) : clientKind === "happ" ? (
-            sub?.active && sub.happ_subscription_url ? (
-              <div className={styles.happUrlRow}>
-                <input
-                  className={styles.happUrlInput}
-                  readOnly
-                  value={sub.happ_subscription_url}
-                  onFocus={(e) => e.target.select()}
-                />
-                <button className={styles.copyBtn} onClick={handleCopyHappUrl}>
-                  {happCopied ? "Скопировано" : "Копировать ссылку"}
-                </button>
-              </div>
+            sub?.active && happUrl ? (
+              <>
+                <div className={styles.happUrlRow}>
+                  <input
+                    className={styles.happUrlInput}
+                    readOnly
+                    value={happUrl}
+                    onFocus={(e) => e.target.select()}
+                  />
+                  <button className={styles.copyBtn} onClick={handleCopyHappUrl}>
+                    {happCopied ? "Скопировано" : "Копировать ссылку"}
+                  </button>
+                </div>
+                <a
+                  className={styles.happOpenBtn}
+                  href={buildHappDeepLink(happUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={handleOpenHapp}
+                >
+                  Открыть в HAPP
+                </a>
+                <div className={styles.configHint}>
+                  Если HAPP не открылся автоматически, ссылка уже скопирована:
+                  откройте приложение и добавьте подписку из буфера обмена.
+                </div>
+              </>
             ) : (
               <div className={styles.noConfig}>
                 После оплаты ссылка на HAPP-подписку появится здесь.

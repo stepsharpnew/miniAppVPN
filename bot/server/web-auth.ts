@@ -191,6 +191,16 @@ function getServerBaseUrl(server: ServerRow): string {
   return raw.replace(/\/+$/, "");
 }
 
+function getHappDurationCodeForExpiry(expiredAt: Date | null): string {
+  const daysLeft = expiredAt
+    ? Math.max(1, Math.ceil((expiredAt.getTime() - Date.now()) / 86_400_000))
+    : 30;
+  if (daysLeft > 180) return "6m";
+  if (daysLeft > 60) return "3m";
+  if (daysLeft > 25) return "1m";
+  return `${daysLeft}d`;
+}
+
 function mapReferralApplyError(error?: string): { status: number; message: string } {
   switch (error) {
     case "empty":
@@ -532,7 +542,8 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       try {
         const happPanel = await getHappPanelServer();
         if (happPanel) {
-          const result = await provisionHapp(happPanel, getWebClientName(user), "1m");
+          const durationCode = getHappDurationCodeForExpiry(expiredAt);
+          const result = await provisionHapp(happPanel, getWebClientName(user), durationCode);
           happUrl = result.url;
           await updateUserHappUrl(user.id, happUrl);
         }
