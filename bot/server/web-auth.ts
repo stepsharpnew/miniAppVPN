@@ -217,6 +217,10 @@ function mapPromoRedeemError(error?: string): { status: number; message: string 
       return { status: 429, message: "Слишком много попыток. Попробуйте позже." };
     case "already_used":
       return { status: 400, message: "Этот подарочный промокод уже использован" };
+    case "already_redeemed":
+      return { status: 400, message: "Вы уже применяли этот промокод" };
+    case "inactive":
+      return { status: 400, message: "Промокод больше не активен" };
     case "not_found":
       return { status: 400, message: "Промокод не найден" };
     default:
@@ -228,7 +232,9 @@ function mapUnifiedRedeemError(error: UnifiedRedeemError): { status: number; mes
   if (
     error === "daily_limit" ||
     error === "rate_limited" ||
-    error === "already_used"
+    error === "already_used" ||
+    error === "already_redeemed" ||
+    error === "inactive"
   ) {
     return mapPromoRedeemError(error);
   }

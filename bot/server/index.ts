@@ -29,10 +29,13 @@ import {
   initDb,
   applyReferralCode,
   createTelegramUserIfMissing,
+  deactivateSharedPromoCode,
   generatePromoCodes,
   getUserById,
   getUserByLogin,
+  normalizeSharedPromoCode,
   redeemPromoCode,
+  upsertSharedPromoCode,
   updatePasswordHash,
 } from "./db";
 import bcrypt from "bcryptjs";
@@ -102,6 +105,10 @@ function mapPromoRedeemError(error?: string): string | null {
       return "Слишком много попыток. Попробуйте позже.";
     case "already_used":
       return "Этот подарочный промокод уже использован.";
+    case "already_redeemed":
+      return "Вы уже применяли этот промокод.";
+    case "inactive":
+      return "Промокод больше не активен.";
     case "not_found":
       return null;
     default:
@@ -153,7 +160,7 @@ bot.command("start", async (ctx) => {
   });
 });
 
-// ────────────────── /promocode <count> <months> (только из админ-чата) ──────────────────
+// ────────────────── /promocode <count> <months> OR /promocode <CODE> <months> (админ) ──────────────────
 
 bot.command("promocode", async (ctx) => {
   const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
@@ -163,30 +170,103 @@ bot.command("promocode", async (ctx) => {
   if (ctx.chat.id.toString() !== chatId) return;
 
   const args = (ctx.match ?? "").trim().split(/\s+/).filter(Boolean);
-  const count = parseInt(args[0] ?? "", 10);
+  const firstArg = args[0] ?? "";
   const months = parseInt(args[1] ?? "", 10);
+  const usage =
+    "Использование:\n" +
+    "• <code>/promocode &lt;кол-во&gt; &lt;месяцев&gt;</code> — одноразовые коды\n" +
+    "• <code>/promocode EVENT 1</code> — общий код, один раз на пользователя\n\n" +
+    "Количество: от 1 до 50\n" +
+    "Месяцев: 1, 3 или 6\n" +
+    "Код: A-Z, 0-9, _ и -, 3–32 символа";
 
-  if (!count || count < 1 || count > 50 || ![1, 3, 6].includes(months)) {
+  if (!firstArg || ![1, 3, 6].includes(months)) {
+    await ctx.reply(usage, { parse_mode: "HTML" });
+    return;
+  }
+
+  try {
+    if (/^\d+$/.test(firstArg)) {
+      const count = parseInt(firstArg, 10);
+      if (count < 1 || count > 50) {
+        await ctx.reply(usage, { parse_mode: "HTML" });
+        return;
+      }
+
+      const codes = await generatePromoCodes(count, months as 1 | 3 | 6);
+      const list = codes.map((c) => `<code>${c}</code>`).join("\n");
+      await ctx.reply(
+        `🎟 <b>${count} промокод${count === 1 ? "" : count < 5 ? "а" : "ов"} на ${months} мес.:</b>\n\n${list}`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    const code = normalizeSharedPromoCode(firstArg);
+    if (!code) {
+      await ctx.reply(usage, { parse_mode: "HTML" });
+      return;
+    }
+
+    const promo = await upsertSharedPromoCode(code, months as 1 | 3 | 6);
+    if (!promo) {
+      await ctx.reply(usage, { parse_mode: "HTML" });
+      return;
+    }
+
     await ctx.reply(
-      "Использование: <code>/promocode &lt;кол-во&gt; &lt;месяцев&gt;</code>\n" +
-      "Количество: от 1 до 50\n" +
-      "Месяцев: 1, 3 или 6\n\n" +
-      "Пример: <code>/promocode 3 1</code>",
+      `🎟 <b>Общий промокод включён</b>\n\n` +
+        `Код: <code>${escapeHtml(promo.code)}</code>\n` +
+        `Срок: +${promo.months} мес.\n` +
+        `Лимит: один раз на пользователя\n\n` +
+        `Отключить: <code>/promocode_off ${escapeHtml(promo.code)}</code>`,
+      { parse_mode: "HTML" },
+    );
+  } catch (err) {
+    console.error("Ошибка настройки промокода:", err);
+    await ctx.reply("⚠️ Не удалось настроить промокод. Попробуй позже.");
+  }
+});
+
+// ────────────────── /promocode_off <CODE> (только из админ-чата) ──────────────────
+
+bot.command("promocode_off", async (ctx) => {
+  const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
+  if (!rawBuyChat) return;
+
+  const { chatId } = resolveAdminChat(rawBuyChat);
+  if (ctx.chat.id.toString() !== chatId) return;
+
+  const rawCode = (ctx.match ?? "").trim();
+  const code = normalizeSharedPromoCode(rawCode);
+  if (!code) {
+    await ctx.reply(
+      "Использование: <code>/promocode_off EVENT</code>\n" +
+        "Код: A-Z, 0-9, _ и -, 3–32 символа",
       { parse_mode: "HTML" },
     );
     return;
   }
 
   try {
-    const codes = await generatePromoCodes(count, months as 1 | 3 | 6);
-    const list = codes.map((c) => `<code>${c}</code>`).join("\n");
+    const promo = await deactivateSharedPromoCode(code);
+    if (!promo) {
+      await ctx.reply(
+        `❌ Общий промокод <code>${escapeHtml(code)}</code> не найден.`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
     await ctx.reply(
-      `🎟 <b>${count} промокод${count === 1 ? "" : count < 5 ? "а" : "ов"} на ${months} мес.:</b>\n\n${list}`,
+      `🛑 <b>Общий промокод отключён</b>\n\n` +
+        `Код: <code>${escapeHtml(promo.code)}</code>\n` +
+        `Новые применения больше не пройдут.`,
       { parse_mode: "HTML" },
     );
   } catch (err) {
-    console.error("Ошибка генерации промокодов:", err);
-    await ctx.reply("⚠️ Не удалось сгенерировать промокоды. Попробуй позже.");
+    console.error("Ошибка отключения промокода:", err);
+    await ctx.reply("⚠️ Не удалось отключить промокод. Попробуй позже.");
   }
 });
 

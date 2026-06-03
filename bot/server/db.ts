@@ -26,6 +26,65 @@ export async function initDb(): Promise<void> {
     await client.query(
       "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_version INTEGER NOT NULL DEFAULT 0",
     );
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS promo_codes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        code VARCHAR(32) NOT NULL UNIQUE,
+        months SMALLINT NOT NULL CHECK (months IN (1, 3, 6)),
+        kind TEXT NOT NULL DEFAULT 'single_use',
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        deactivated_at TIMESTAMP WITH TIME ZONE,
+        used_at TIMESTAMP WITH TIME ZONE,
+        used_by UUID REFERENCES users(id)
+      )`,
+    );
+    await client.query(
+      "ALTER TABLE promo_codes ALTER COLUMN code TYPE VARCHAR(32) USING btrim(code::text)",
+    );
+    await client.query(
+      "ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'single_use'",
+    );
+    await client.query(
+      "ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
+    );
+    await client.query(
+      "ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()",
+    );
+    await client.query(
+      "ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP WITH TIME ZONE",
+    );
+    await client.query(
+      `DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'promo_codes_kind_check'
+        ) THEN
+          ALTER TABLE promo_codes
+            ADD CONSTRAINT promo_codes_kind_check CHECK (kind IN ('single_use', 'multi_use'));
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'promo_codes_code_format_check'
+        ) THEN
+          ALTER TABLE promo_codes
+            ADD CONSTRAINT promo_codes_code_format_check CHECK (code ~ '^[A-Z0-9_-]{3,32}$');
+        END IF;
+      END $$`,
+    );
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS promo_redemptions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        promo_code_id UUID NOT NULL REFERENCES promo_codes(id),
+        user_id UUID NOT NULL REFERENCES users(id),
+        redeemed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        UNIQUE (promo_code_id, user_id)
+      )`,
+    );
+    await client.query(
+      "CREATE INDEX IF NOT EXISTS promo_redemptions_user_idx ON promo_redemptions (user_id, redeemed_at)",
+    );
     console.log("PostgreSQL connected");
   } finally {
     client.release();
@@ -1267,6 +1326,12 @@ export async function updateUserHappUrl(
 const PROMO_LENGTH = 8;
 const PROMO_RATE_LIMIT = 5;
 const PROMO_WINDOW_INTERVAL = "1 hour";
+const SHARED_PROMO_CODE_REGEX = /^[A-Z0-9_-]{3,32}$/;
+
+export function normalizeSharedPromoCode(rawCode: string): string | null {
+  const code = rawCode.trim().toUpperCase();
+  return SHARED_PROMO_CODE_REGEX.test(code) ? code : null;
+}
 
 export async function generatePromoCodes(
   count: number,
@@ -1292,9 +1357,100 @@ export async function generatePromoCodes(
   return codes;
 }
 
+export interface SharedPromoCodeResult {
+  code: string;
+  months: number;
+  isActive: boolean;
+}
+
+export async function upsertSharedPromoCode(
+  rawCode: string,
+  months: 1 | 3 | 6,
+): Promise<SharedPromoCodeResult | null> {
+  const code = normalizeSharedPromoCode(rawCode);
+  if (!code) return null;
+
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{
+      id: string;
+      code: string;
+      months: number;
+      is_active: boolean;
+      used_by: string | null;
+    }>(
+      `INSERT INTO promo_codes (code, months, kind, is_active, deactivated_at, updated_at)
+       VALUES ($1, $2, 'multi_use', TRUE, NULL, NOW())
+       ON CONFLICT (code) DO UPDATE
+         SET months = EXCLUDED.months,
+             kind = 'multi_use',
+             is_active = TRUE,
+             deactivated_at = NULL,
+             updated_at = NOW()
+       RETURNING id, code, months, is_active, used_by`,
+      [code, months],
+    );
+
+    const promo = rows[0];
+    if (promo.used_by) {
+      await client.query(
+        `INSERT INTO promo_redemptions (promo_code_id, user_id)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING`,
+        [promo.id, promo.used_by],
+      );
+    }
+
+    await client.query("COMMIT");
+    return {
+      code: promo.code,
+      months: promo.months,
+      isActive: promo.is_active,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deactivateSharedPromoCode(
+  rawCode: string,
+): Promise<SharedPromoCodeResult | null> {
+  const code = normalizeSharedPromoCode(rawCode);
+  if (!code) return null;
+
+  const { rows } = await getPool().query<{
+    code: string;
+    months: number;
+    is_active: boolean;
+  }>(
+    `UPDATE promo_codes
+     SET is_active = FALSE,
+         deactivated_at = NOW(),
+         updated_at = NOW()
+     WHERE code = $1
+       AND kind = 'multi_use'
+     RETURNING code, months, is_active`,
+    [code],
+  );
+
+  const promo = rows[0];
+  if (!promo) return null;
+  return {
+    code: promo.code,
+    months: promo.months,
+    isActive: promo.is_active,
+  };
+}
+
 export type PromoRedeemError =
   | "not_found"
   | "already_used"
+  | "already_redeemed"
+  | "inactive"
   | "rate_limited"
   | "daily_limit";
 
@@ -1319,20 +1475,6 @@ export async function redeemPromoCode(
   try {
     await client.query("BEGIN");
 
-    const { rows: dailyRows } = await client.query<{ found: string }>(
-      `SELECT '1' AS found
-       FROM promo_attempts
-       WHERE user_id = $1
-         AND success = TRUE
-         AND attempted_at > NOW() - INTERVAL '24 hours'
-       LIMIT 1`,
-      [userId],
-    );
-    if (dailyRows.length > 0) {
-      await client.query("ROLLBACK");
-      return { ok: false, error: "daily_limit" };
-    }
-
     const { rows: limitRows } = await client.query<{ cnt: string }>(
       `SELECT COUNT(*)::text AS cnt
        FROM promo_attempts
@@ -1349,9 +1491,14 @@ export async function redeemPromoCode(
     const { rows: codeRows } = await client.query<{
       id: string;
       months: number;
+      kind: "single_use" | "multi_use";
+      is_active: boolean;
       used_at: string | null;
     }>(
-      `SELECT id, months, used_at FROM promo_codes WHERE code = $1 FOR UPDATE`,
+      `SELECT id, months, kind, is_active, used_at
+       FROM promo_codes
+       WHERE code = $1
+       FOR UPDATE`,
       [code],
     );
 
@@ -1361,19 +1508,65 @@ export async function redeemPromoCode(
     }
 
     const promo = codeRows[0];
-    if (promo.used_at !== null) {
-      await client.query(
-        `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, FALSE)`,
-        [userId, code],
-      );
-      await client.query("COMMIT");
-      return { ok: false, error: "already_used" };
-    }
+    if (promo.kind === "multi_use") {
+      if (!promo.is_active) {
+        await client.query(
+          `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, FALSE)`,
+          [userId, code],
+        );
+        await client.query("COMMIT");
+        return { ok: false, error: "inactive" };
+      }
 
-    await client.query(
-      `UPDATE promo_codes SET used_at = NOW(), used_by = $1 WHERE id = $2`,
-      [userId, promo.id],
-    );
+      const { rows: redemptionRows } = await client.query<{ id: string }>(
+        `INSERT INTO promo_redemptions (promo_code_id, user_id)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING
+         RETURNING id`,
+        [promo.id, userId],
+      );
+
+      if (redemptionRows.length === 0) {
+        await client.query(
+          `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, FALSE)`,
+          [userId, code],
+        );
+        await client.query("COMMIT");
+        return { ok: false, error: "already_redeemed" };
+      }
+    } else {
+      const { rows: dailyRows } = await client.query<{ found: string }>(
+        `SELECT '1' AS found
+         FROM promo_attempts
+         WHERE user_id = $1
+           AND success = TRUE
+           AND attempted_at > NOW() - INTERVAL '24 hours'
+         LIMIT 1`,
+        [userId],
+      );
+      if (dailyRows.length > 0) {
+        await client.query("ROLLBACK");
+        return { ok: false, error: "daily_limit" };
+      }
+
+      if (promo.used_at !== null) {
+        await client.query(
+          `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, FALSE)`,
+          [userId, code],
+        );
+        await client.query("COMMIT");
+        return { ok: false, error: "already_used" };
+      }
+
+      await client.query(
+        `UPDATE promo_codes
+         SET used_at = NOW(),
+             used_by = $1,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [userId, promo.id],
+      );
+    }
 
     const { rows: userRows } = await client.query<{ expired_at: string | null }>(
       `SELECT expired_at FROM users WHERE id = $1`,

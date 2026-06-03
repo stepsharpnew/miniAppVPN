@@ -234,12 +234,39 @@ CREATE TABLE IF NOT EXISTS processed_payments (
 -- Promo codes.
 CREATE TABLE IF NOT EXISTS promo_codes (
     id          UUID                     PRIMARY KEY DEFAULT gen_random_uuid(),
-    code        CHAR(8)                  NOT NULL UNIQUE,
+    code        VARCHAR(32)              NOT NULL UNIQUE,
     months      SMALLINT                 NOT NULL CHECK (months IN (1, 3, 6)),
+    kind        TEXT                     NOT NULL DEFAULT 'single_use',
+    is_active   BOOLEAN                  NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    deactivated_at TIMESTAMP WITH TIME ZONE,
     used_at     TIMESTAMP WITH TIME ZONE,
     used_by     UUID                     REFERENCES users(id)
 );
+
+ALTER TABLE promo_codes ALTER COLUMN code TYPE VARCHAR(32) USING btrim(code::text);
+ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'single_use';
+ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW();
+ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP WITH TIME ZONE;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'promo_codes_kind_check'
+  ) THEN
+    ALTER TABLE promo_codes
+      ADD CONSTRAINT promo_codes_kind_check CHECK (kind IN ('single_use', 'multi_use'));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'promo_codes_code_format_check'
+  ) THEN
+    ALTER TABLE promo_codes
+      ADD CONSTRAINT promo_codes_code_format_check CHECK (code ~ '^[A-Z0-9_-]{3,32}$');
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS promo_attempts (
     id           UUID                     PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -252,6 +279,17 @@ CREATE TABLE IF NOT EXISTS promo_attempts (
 CREATE INDEX IF NOT EXISTS promo_attempts_user_window
     ON promo_attempts (user_id, attempted_at)
     WHERE success = FALSE;
+
+CREATE TABLE IF NOT EXISTS promo_redemptions (
+    id            UUID                     PRIMARY KEY DEFAULT gen_random_uuid(),
+    promo_code_id UUID                     NOT NULL REFERENCES promo_codes(id),
+    user_id       UUID                     NOT NULL REFERENCES users(id),
+    redeemed_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (promo_code_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS promo_redemptions_user_idx
+    ON promo_redemptions (user_id, redeemed_at);
 
 CREATE TABLE IF NOT EXISTS referral_rewards (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
