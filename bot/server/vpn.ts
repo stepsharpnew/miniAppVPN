@@ -70,6 +70,30 @@ async function findExistingClient(
   return null;
 }
 
+function isUnsupportedDurationError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes("Unsupported client duration");
+}
+
+/** Минимальный legacy-код (1m/3m/6m/12m) для старого app.py, покрывающий остаток подписки. */
+function legacyDurationForRemainingDays(remainingDays: number): string {
+  if (remainingDays <= 31) return "1m";
+  if (remainingDays <= 93) return "3m";
+  if (remainingDays <= 186) return "6m";
+  return "12m";
+}
+
+/** Варианты duration для Amnezia API: сначала точные (новый app.py), затем legacy. */
+export function vpnDurationCandidates(expiredAt: Date): string[] {
+  const remainingMs = expiredAt.getTime() - Date.now();
+  const remainingDays = Math.max(1, Math.ceil(remainingMs / (1000 * 60 * 60 * 24)));
+  const isoUtc = expiredAt.toISOString().slice(0, 19).replace("T", " ");
+  const absTs = `abs:${(expiredAt.getTime() / 1000).toFixed(3)}`;
+  const days = `${remainingDays}d`;
+  const legacy = legacyDurationForRemainingDays(remainingDays);
+  return [isoUtc, absTs, days, legacy];
+}
+
 /**
  * Provisions a VPN client: returns an existing config or creates a new one.
  * `serverId` — the WireGuard server to provision on (from the `servers` table).
@@ -80,9 +104,12 @@ export async function provisionVpnClient(
   durationCode: string,
   serverId: string,
   baseUrl: string,
+  options?: { allowExisting?: boolean },
 ): Promise<string> {
-  const existing = await findExistingClient(clientName, baseUrl);
-  if (existing) return existing.config;
+  if (options?.allowExisting !== false) {
+    const existing = await findExistingClient(clientName, baseUrl);
+    if (existing) return existing.config;
+  }
 
   const resp = await fetch(`${baseUrl}/api/servers/${serverId}/clients`, {
     method: "POST",
@@ -100,6 +127,63 @@ export async function provisionVpnClient(
 
   const json = await resp.json();
   return json.config as string;
+}
+
+/**
+ * Создаёт клиента с истечением не позже `expiredAt`.
+ * Перебирает форматы duration, пока панель Amnezia не примет один из них.
+ */
+export async function provisionVpnClientUntilExpiry(
+  clientName: string,
+  expiredAt: Date,
+  serverId: string,
+  baseUrl: string,
+): Promise<string> {
+  const candidates = vpnDurationCandidates(expiredAt);
+  let lastErr: Error | null = null;
+
+  for (const durationCode of candidates) {
+    try {
+      return await provisionVpnClient(clientName, durationCode, serverId, baseUrl, {
+        allowExisting: false,
+      });
+    } catch (err) {
+      if (isUnsupportedDurationError(err)) {
+        lastErr = err instanceof Error ? err : new Error(String(err));
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw lastErr ?? new Error("VPN provision failed: no compatible duration format");
+}
+
+/**
+ * Delete a VPN client by name from the server.
+ * Returns the WireGuard server ID the client was on, or null if not found.
+ */
+export async function deleteVpnClient(
+  clientName: string,
+  baseUrl: string,
+): Promise<string | null> {
+  const existing = await findExistingClient(clientName, baseUrl);
+  if (!existing) return null;
+
+  const resp = await fetch(
+    `${baseUrl}/api/servers/${existing.serverId}/clients/${existing.id}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: authHeader },
+    },
+  );
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "unknown");
+    throw new Error(`VPN delete API ${resp.status}: ${text}`);
+  }
+
+  return existing.serverId;
 }
 
 /**

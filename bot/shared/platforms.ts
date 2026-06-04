@@ -1,12 +1,23 @@
 export type PlatformId = 'android' | 'ios' | 'windows' | 'macos' | 'linux';
 
+export type VpnClientKind = 'amneziawg' | 'happ';
+
+export interface ClientVariant {
+  downloadUrl: string;
+  steps: string[];
+  botText: string;
+}
+
 export interface PlatformInfo {
   id: PlatformId;
   name: string;
   icon: string;
+  /** Primary variant (AmneziaWG) — kept as top-level fields for backward compat */
   downloadUrl: string;
   steps: string[];
   botText: string;
+  /** All client variants keyed by kind */
+  variants: Record<VpnClientKind, ClientVariant>;
 }
 
 export const PLATFORMS: PlatformInfo[] = [
@@ -30,6 +41,37 @@ export const PLATFORMS: PlatformInfo[] = [
 • Подтверждаем импорт и жмем «Подключиться».
 
 ✅ Готово: если ключик зеленый — ты в домике.`,
+    variants: {
+      amneziawg: {
+        downloadUrl: 'https://play.google.com/store/apps/details?id=org.amnezia.awg',
+        steps: [
+          'Скачайте AmneziaWG из Google Play по кнопке ниже',
+          'Откройте AmneziaWG и выберите «Сканировать QR»',
+          'Наведите камеру на QR-конфиг из раздела «Профиль»',
+          'Подтвердите импорт и нажмите «Подключиться»',
+        ],
+        botText: `🤖 Android | AmneziaWG
+
+• Скачиваем AmneziaWG из Google Play.
+• Сканируем QR-конфиг из раздела «Профиль».
+• Подтверждаем импорт и жмем «Подключиться».`,
+      },
+      happ: {
+        downloadUrl: 'https://play.google.com/store/apps/details?id=com.happproxy',
+        steps: [
+          'Скачайте HAPP из Google Play по кнопке ниже',
+          'Скопируйте HAPP-ссылку из раздела «Профиль»',
+          'Откройте HAPP и добавьте подписку из буфера обмена',
+          'Выберите сервер и нажмите «Подключиться»',
+        ],
+        botText: `🤖 Android | HAPP (VLESS)
+
+• Скачиваем HAPP из Google Play.
+• Копируем HAPP-ссылку из раздела «Профиль».
+• Добавляем подписку из буфера обмена.
+• Выбираем сервер и жмем «Подключиться».`,
+      },
+    },
   },
   {
     id: 'ios',
@@ -51,6 +93,37 @@ export const PLATFORMS: PlatformInfo[] = [
 • Разрешаем VPN-профиль в iOS и подключаемся.
 
 ✅ Готово: Safari летает, блоки плачут.`,
+    variants: {
+      amneziawg: {
+        downloadUrl: 'https://apps.apple.com/us/app/amneziawg/id6478942365',
+        steps: [
+          'Скачайте AmneziaWG из App Store по кнопке ниже',
+          'Откройте AmneziaWG и нажмите «Сканировать QR»',
+          'Наведите камеру на QR-конфиг из раздела «Профиль»',
+          'Разрешите VPN-профиль в iOS и подключитесь',
+        ],
+        botText: `🍎 iPhone | AmneziaWG
+
+• Скачиваем AmneziaWG из App Store.
+• Сканируем QR-конфиг из раздела «Профиль».
+• Разрешаем VPN-профиль и подключаемся.`,
+      },
+      happ: {
+        downloadUrl: 'https://apps.apple.com/us/app/happ-proxy-utility/id6504287215',
+        steps: [
+          'Скачайте HAPP из App Store по кнопке ниже',
+          'Скопируйте HAPP-ссылку из раздела «Профиль»',
+          'Откройте HAPP и добавьте подписку из буфера обмена',
+          'Выберите сервер и нажмите «Подключиться»',
+        ],
+        botText: `🍎 iPhone | HAPP (VLESS)
+
+• Скачиваем HAPP из App Store.
+• Копируем HAPP-ссылку из раздела «Профиль».
+• Добавляем подписку из буфера обмена.
+• Выбираем сервер и жмем «Подключиться».`,
+      },
+    },
   },
   {
     id: 'windows',
@@ -72,6 +145,36 @@ export const PLATFORMS: PlatformInfo[] = [
 • Сохраняем профиль и жмем «Connect».
 
 ✅ Готово: интернет снова как в 2012, но лучше.`,
+    variants: {
+      amneziawg: {
+        downloadUrl: 'https://t.me/MemeVPNbest/14',
+        steps: [
+          'Скачайте установщик AmneziaWG из нашего канала по кнопке ниже',
+          'Откройте программу и выберите «Импорт конфигурации»',
+          'Вставьте или загрузите выданный конфиг из раздела «Профиль»',
+          'Сохраните профиль и нажмите «Connect»',
+        ],
+        botText: `🪟 Windows | AmneziaWG
+
+• Скачиваем AmneziaWG из канала.
+• Импортируем .conf файл из раздела «Профиль».
+• Жмем «Connect».`,
+      },
+      happ: {
+        downloadUrl: 'https://github.com/Happ-proxy/happ-desktop/releases/latest',
+        steps: [
+          'Скачайте HAPP для Windows по кнопке ниже',
+          'Скопируйте HAPP-ссылку из раздела «Профиль»',
+          'Откройте HAPP и добавьте подписку из буфера обмена',
+          'Нажмите «Подключиться»',
+        ],
+        botText: `🪟 Windows | HAPP (VLESS)
+
+• Скачиваем HAPP.
+• Добавляем HAPP-ссылку из раздела «Профиль».
+• Жмем «Подключиться».`,
+      },
+    },
   },
   {
     id: 'macos',
@@ -93,6 +196,36 @@ export const PLATFORMS: PlatformInfo[] = [
 • Подтверждаем импорт и включаем VPN.
 
 ✅ Готово: соединение чистое, дзен достигнут.`,
+    variants: {
+      amneziawg: {
+        downloadUrl: 'https://apps.apple.com/us/app/amneziawg/id6478942365',
+        steps: [
+          'Скачайте AmneziaWG из App Store по кнопке ниже',
+          'Откройте AmneziaWG и нажмите «Сканировать QR»',
+          'Наведите камеру на QR-конфиг из раздела «Профиль»',
+          'Подтвердите импорт и включите VPN',
+        ],
+        botText: `🍏 macOS | AmneziaWG
+
+• Скачиваем AmneziaWG из App Store.
+• Сканируем QR-конфиг.
+• Включаем VPN.`,
+      },
+      happ: {
+        downloadUrl: 'https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973',
+        steps: [
+          'Скачайте HAPP из App Store по кнопке ниже',
+          'Скопируйте HAPP-ссылку из раздела «Профиль»',
+          'Откройте HAPP и добавьте подписку из буфера обмена',
+          'Нажмите «Подключиться»',
+        ],
+        botText: `🍏 macOS | HAPP (VLESS)
+
+• Скачиваем HAPP.
+• Добавляем HAPP-ссылку из раздела «Профиль».
+• Жмем «Подключиться».`,
+      },
+    },
   },
   {
     id: 'linux',
@@ -114,6 +247,36 @@ export const PLATFORMS: PlatformInfo[] = [
 • Активируем профиль и поднимаем туннель.
 
 ✅ Готово: пинг приятный, душа спокойна.`,
+    variants: {
+      amneziawg: {
+        downloadUrl: 'https://github.com/amnezia-vpn/amnezia-client/releases',
+        steps: [
+          'Скачайте AmneziaWG под свой дистрибутив по кнопке ниже',
+          'Запустите клиент и откройте «Сканировать QR»',
+          'Сканируйте QR-код (или загрузите скрин QR)',
+          'Активируйте профиль и поднимите туннель',
+        ],
+        botText: `🐧 Linux | AmneziaWG
+
+• Скачиваем AmneziaWG под свой дистрибутив.
+• Сканируем QR или импортируем конфиг.
+• Поднимаем туннель.`,
+      },
+      happ: {
+        downloadUrl: 'https://github.com/Happ-proxy/happ-desktop/releases/latest',
+        steps: [
+          'Скачайте HAPP для Linux по кнопке ниже',
+          'Скопируйте HAPP-ссылку из раздела «Профиль»',
+          'Откройте HAPP и добавьте подписку из буфера обмена',
+          'Нажмите «Подключиться»',
+        ],
+        botText: `🐧 Linux | HAPP (VLESS)
+
+• Скачиваем HAPP.
+• Добавляем HAPP-ссылку из раздела «Профиль».
+• Жмем «Подключиться».`,
+      },
+    },
   },
 ];
 

@@ -19,10 +19,17 @@ interface SubData {
   active: boolean;
   expired_at: string | null;
   config: string | null;
+  happ_subscription_url?: string | null;
   login: string | null;
   referred_by_applied: boolean;
   referred_by_code: string | null;
   referral_message: string | null;
+}
+
+type VpnClientKind = "amneziawg" | "happ";
+
+function buildHappDeepLink(subscriptionUrl: string): string {
+  return `happ://add/${subscriptionUrl}`;
 }
 
 function formatExpiry(iso: string): string {
@@ -46,14 +53,15 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [configCopied, setConfigCopied] = useState(false);
+  const [happCopied, setHappCopied] = useState(false);
   const [promoCode, setPromoCode] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoMessage, setPromoMessage] = useState<string | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
-  const [inviterCode, setInviterCode] = useState("");
-  const [inviterLoading, setInviterLoading] = useState(false);
-  const [inviterError, setInviterError] = useState<string | null>(null);
-  const [referralAppliedBanner, setReferralAppliedBanner] = useState<string | null>(null);
+  const [clientKind, setClientKind] = useState<VpnClientKind>("amneziawg");
+  const [reissuing, setReissuing] = useState(false);
+  const [reissueOk, setReissueOk] = useState(false);
+  const [reissueError, setReissueError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -114,6 +122,30 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
       .catch(() => {});
   }, []);
 
+  const handleReissue = useCallback(async () => {
+    if (reissuing) return;
+    const confirmed = window.confirm(
+      "Получить конфиг с другого сервера?\n\nТекущий конфиг перестанет работать.",
+    );
+    if (!confirmed) return;
+    setReissuing(true);
+    setReissueOk(false);
+    setReissueError(null);
+    try {
+      const data = await apiFetch<{ ok: boolean; config: string }>(
+        "/api/web/vpn/reissue",
+        { method: "POST" },
+      );
+      setSub((prev) => prev ? { ...prev, config: data.config } : prev);
+      setReissueOk(true);
+      window.setTimeout(() => setReissueOk(false), 4000);
+    } catch (err) {
+      setReissueError(err instanceof Error ? err.message : "Не удалось сменить сервер");
+    } finally {
+      setReissuing(false);
+    }
+  }, [reissuing]);
+
   const handleApplyPromo = useCallback(async () => {
     const code = promoCode.trim().toUpperCase();
     if (!code || promoLoading) return;
@@ -124,9 +156,12 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
 
     try {
       const data = await apiFetch<{
-        kind?: "gift";
+        kind?: "gift" | "referral";
         months?: number;
         subscription?: SubData;
+        referral_message?: string | null;
+        referred_by_applied?: boolean;
+        referred_by_code?: string | null;
       }>("/api/web/promocode", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -143,64 +178,53 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
         return;
       }
 
+      if (data.kind === "referral") {
+        setSub((prev) =>
+          prev
+            ? {
+                ...prev,
+                referred_by_applied: Boolean(data.referred_by_applied),
+                referred_by_code: data.referred_by_code ?? code,
+                referral_message: data.referral_message ?? prev.referral_message,
+              }
+            : prev,
+        );
+        setPromoMessage(data.referral_message ?? REFERRAL_INVITER_SUCCESS);
+        return;
+      }
+
       throw new Error("Не удалось активировать промокод");
     } catch (err) {
-      const message =
+      setPromoError(
         err instanceof Error && err.message
           ? err.message
-          : "Не удалось активировать промокод";
-      setPromoError(message);
+          : "Не удалось активировать промокод",
+      );
     } finally {
       setPromoLoading(false);
     }
   }, [promoCode, promoLoading]);
 
-  const handleApplyInviterReferral = useCallback(async () => {
-    const code = inviterCode.trim().toUpperCase();
-    if (!code || inviterLoading || sub?.referred_by_applied) return;
+  const handleCopyHappUrl = useCallback(() => {
+    if (!sub?.happ_subscription_url) return;
+    navigator.clipboard.writeText(sub.happ_subscription_url).then(() => {
+      setHappCopied(true);
+      setTimeout(() => setHappCopied(false), 2000);
+    }).catch(() => {});
+  }, [sub?.happ_subscription_url]);
 
-    setInviterLoading(true);
-    setInviterError(null);
-
-    try {
-      const data = await apiFetch<{
-        referral_message?: string | null;
-        referred_by_applied?: boolean;
-        referred_by_code?: string | null;
-      }>("/api/web/referral-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-
-      setInviterCode("");
-      setSub((prev) =>
-        prev
-          ? {
-              ...prev,
-              referred_by_applied: Boolean(data.referred_by_applied),
-              referred_by_code: data.referred_by_code ?? code,
-              referral_message: data.referral_message ?? prev.referral_message,
-            }
-          : prev,
-      );
-      const msg = data.referral_message ?? REFERRAL_INVITER_SUCCESS;
-      setReferralAppliedBanner(msg);
-      window.setTimeout(() => setReferralAppliedBanner(null), 8000);
-    } catch (err) {
-      const message =
-        err instanceof Error && err.message
-          ? err.message
-          : "Не удалось применить реферальный код";
-      setInviterError(message);
-    } finally {
-      setInviterLoading(false);
-    }
-  }, [inviterCode, inviterLoading, sub?.referred_by_applied]);
+  const handleOpenHapp = useCallback(() => {
+    if (!sub?.happ_subscription_url) return;
+    navigator.clipboard.writeText(sub.happ_subscription_url).then(() => {
+      setHappCopied(true);
+      setTimeout(() => setHappCopied(false), 2000);
+    }).catch(() => {});
+  }, [sub?.happ_subscription_url]);
 
   if (!user) return null;
   const isTelegramLinked =
     user.auth_source === "both" || user.auth_source === "telegram";
+  const happUrl = sub?.happ_subscription_url ?? null;
 
   return (
     <div className={styles.page}>
@@ -224,104 +248,107 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
           </div>
         </div>
 
-        <div className={styles.divider} />
-
-        <div className={styles.telegramSyncBlock}>
-          <div className={styles.sectionHeader}>Синхронизация Telegram</div>
-          <div
-            className={`${styles.syncStatus} ${isTelegramLinked ? styles.syncLinked : styles.syncNotLinked}`}
-          >
-            {isTelegramLinked
-              ? "Аккаунт привязан к Telegram"
-              : "Аккаунт не привязан к Telegram"}
-          </div>
-        </div>
-
-        <div className={styles.divider} />
-
-        <div className={styles.promoBlock}>
-          <div className={styles.sectionHeader}>Промокод</div>
-          <div className={styles.referralHint}>
-            Сюда только подарочный промокод — подписка продлится сразу после активации.
-          </div>
-          <div className={styles.promoRow}>
-            <input
-              type="text"
-              value={promoCode}
-              onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
-              className={styles.promoInput}
-              placeholder="Введите промокод"
-              disabled={promoLoading}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void handleApplyPromo();
-                }
-              }}
-            />
-            <button
-              type="button"
-              className={styles.promoBtn}
-              disabled={!promoCode.trim() || promoLoading}
-              onClick={() => void handleApplyPromo()}
+        <div className={styles.compactGrid}>
+          <div className={styles.telegramSyncBlock}>
+            <div className={styles.sectionHeader}>Telegram</div>
+            <div
+              className={`${styles.syncStatus} ${isTelegramLinked ? styles.syncLinked : styles.syncNotLinked}`}
             >
-              {promoLoading ? "Проверяем..." : "Применить"}
-            </button>
-          </div>
-          {promoMessage ? <div className={styles.promoSuccess}>{promoMessage}</div> : null}
-          {promoError ? <div className={styles.promoError}>{promoError}</div> : null}
-        </div>
-
-        {referralAppliedBanner ? (
-          <div className={styles.promoSuccess}>{referralAppliedBanner}</div>
-        ) : null}
-
-        {!sub?.referred_by_applied ? (
-          <>
-            <div className={styles.divider} />
-
-            <div className={styles.promoBlock}>
-              <div className={styles.sectionHeader}>Реферальный код</div>
-              <div className={styles.referralHint}>
-                Вводится один раз. После успешной оплаты по подписке вам и пригласившему начислится по
-                1 месяцу.
-              </div>
-              <div className={styles.promoRow}>
-                <input
-                  type="text"
-                  value={inviterCode}
-                  onChange={(e) => setInviterCode(e.target.value.toUpperCase())}
-                  className={styles.promoInput}
-                  placeholder="Реферальный код"
-                  disabled={inviterLoading}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      void handleApplyInviterReferral();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className={styles.promoBtn}
-                  disabled={!inviterCode.trim() || inviterLoading}
-                  onClick={() => void handleApplyInviterReferral()}
-                >
-                  {inviterLoading ? "Проверяем..." : "Применить"}
-                </button>
-              </div>
-              {inviterError ? <div className={styles.promoError}>{inviterError}</div> : null}
+              {isTelegramLinked ? "Привязан" : "Не привязан"}
             </div>
-          </>
-        ) : null}
+          </div>
+
+          <div className={styles.promoBlock}>
+            <div className={styles.sectionHeader}>Промокод</div>
+            <div className={styles.promoRow}>
+              <input
+                type="text"
+                value={promoCode}
+                onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                className={styles.promoInput}
+                placeholder="Подарочный или реферальный"
+                disabled={promoLoading}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleApplyPromo();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className={styles.promoBtn}
+                disabled={!promoCode.trim() || promoLoading}
+                onClick={() => void handleApplyPromo()}
+              >
+                {promoLoading ? "..." : "OK"}
+              </button>
+            </div>
+            {sub?.referred_by_applied && sub.referred_by_code ? (
+              <div className={styles.referralHint}>
+                Реферальный код применён: {sub.referred_by_code}
+              </div>
+            ) : null}
+            {promoMessage ? <div className={styles.promoSuccess}>{promoMessage}</div> : null}
+            {promoError ? <div className={styles.promoError}>{promoError}</div> : null}
+          </div>
+        </div>
 
         <div className={styles.divider} />
 
         <div className={styles.configBlock}>
-          <div className={styles.sectionHeader}>VPN конфиг</div>
+          <div className={styles.kindToggle}>
+            <button
+              type="button"
+              className={`${styles.kindTab} ${clientKind === "amneziawg" ? styles.kindTabActive : ""}`}
+              onClick={() => setClientKind("amneziawg")}
+            >
+              AmneziaWG
+            </button>
+            <button
+              type="button"
+              className={`${styles.kindTab} ${clientKind === "happ" ? styles.kindTabActive : ""}`}
+              onClick={() => setClientKind("happ")}
+            >
+              HAPP
+            </button>
+          </div>
 
           {!loaded ? (
             <div className={styles.noConfig}>Загрузка...</div>
+          ) : clientKind === "happ" ? (
+            sub?.active && happUrl ? (
+              <>
+                <div className={styles.happUrlRow}>
+                  <input
+                    className={styles.happUrlInput}
+                    readOnly
+                    value={happUrl}
+                    onFocus={(e) => e.target.select()}
+                  />
+                  <button className={styles.copyBtn} onClick={handleCopyHappUrl}>
+                    {happCopied ? "Скопировано" : "Копировать ссылку"}
+                  </button>
+                </div>
+                <a
+                  className={styles.happOpenBtn}
+                  href={buildHappDeepLink(happUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={handleOpenHapp}
+                >
+                  Открыть в HAPP
+                </a>
+                <div className={styles.configHint}>
+                  Если HAPP не открылся автоматически, ссылка уже скопирована:
+                  откройте приложение и добавьте подписку из буфера обмена.
+                </div>
+              </>
+            ) : (
+              <div className={styles.noConfig}>
+                После оплаты ссылка на HAPP-подписку появится здесь.
+              </div>
+            )
           ) : sub?.active && sub.config && qrDataUrl ? (
             <>
               <img
@@ -331,11 +358,29 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
               />
               <div className={styles.configActions}>
                 <button className={styles.copyBtn} onClick={handleCopyConfig}>
-                  {configCopied ? "✅ Скопировано!" : "📋 Скопировать конфиг"}
+                  {configCopied ? "Скопировано!" : "Скопировать конфиг"}
                 </button>
                 <button className={styles.downloadBtn} onClick={handleDownloadConf}>
-                  📥 Скачать .conf
+                  Скачать .conf
                 </button>
+              </div>
+              <div className={styles.reissueBlock}>
+                <div className={styles.reissueHint}>Этот сервер не работает?</div>
+                <button
+                  type="button"
+                  className={`${styles.reissueBtn} ${reissueOk ? styles.reissueBtnOk : ""}`}
+                  onClick={() => void handleReissue()}
+                  disabled={reissuing}
+                >
+                  {reissuing
+                    ? "Переключаем..."
+                    : reissueOk
+                      ? "✓ Сервер сменён"
+                      : "🔄 Сменить сервер"}
+                </button>
+                {reissueError && (
+                  <div className={styles.reissueError}>{reissueError}</div>
+                )}
               </div>
             </>
           ) : (
@@ -346,6 +391,7 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
             </div>
           )}
         </div>
+
       </div>
 
       {!sub?.active && (

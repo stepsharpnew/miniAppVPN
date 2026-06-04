@@ -14,9 +14,10 @@ import {
   getRandomEnabledServer,
   getAllEnabledServers,
   getUserReferralInfoForWeb,
-  redeemPromoCode,
+  getHappPanelServer,
   incrementServerUserCount,
   markPaymentProcessed,
+  updateUserHappUrl,
   type UserRow,
   type ServerRow,
 } from "./db";
@@ -40,47 +41,100 @@ import { sendReferralRewardNotifications } from "./referral-notifications";
 import { sendGiftPromoAdminNotification } from "./promo-notifications";
 import {
   getWebClientName,
+  reissueVpnConfig,
   syncVpnForPromoRedemption,
   syncVpnForReferralReward,
 } from "./promo-vpn";
+import { extendHapp, provisionHapp } from "./happ";
+import { redeemUnifiedCode, type UnifiedRedeemError } from "./redeem-code";
+import {
+  authRateLimiter,
+  isValidPaymentId,
+  paymentCreateRateLimiter,
+  promoRateLimiter,
+} from "./security";
 
 const ACCESS_TTL = "15m";
-const REFRESH_TTL = "30d";
-const SALT_ROUNDS = 10;
+const REFRESH_TTL = "7d";
+export const SALT_ROUNDS = 12;
 
 // Логин: case-insensitive, 3–64 символа, латиница/цифры/точка/подчёркивание/дефис/собака.
 // `@` оставляем разрешённым, чтобы не отбраковать существующих пользователей,
 // у которых login = их прежний email.
 const LOGIN_REGEX = /^[A-Za-z0-9._@-]{3,64}$/;
 
-function getSecrets() {
-  const secret = process.env.JWT_SECRET || "dev-jwt-secret-change-me";
-  const refreshSecret = process.env.JWT_REFRESH_SECRET || secret + "-refresh";
-  return { secret, refreshSecret };
+function getSecrets(): { secret: string; refreshSecret: string } {
+  const secret = process.env.JWT_SECRET?.trim();
+  const refreshSecret = process.env.JWT_REFRESH_SECRET?.trim();
+  const isProd = process.env.NODE_ENV === "production";
+
+  if (isProd) {
+    if (!secret || secret.length < 32) {
+      throw new Error("JWT_SECRET must be set (min 32 chars) in production");
+    }
+    if (!refreshSecret || refreshSecret.length < 32) {
+      throw new Error("JWT_REFRESH_SECRET must be set (min 32 chars) in production");
+    }
+    return { secret, refreshSecret };
+  }
+
+  const devSecret = secret || "dev-jwt-secret-change-me-in-production";
+  const devRefresh = refreshSecret || `${devSecret}-refresh`;
+  return { secret: devSecret, refreshSecret: devRefresh };
 }
 
-export function generateTokens(userId: string) {
+export function generateTokens(userId: string, passwordVersion = 0) {
   const { secret, refreshSecret } = getSecrets();
-  const accessToken = jwt.sign({ sub: userId }, secret, { expiresIn: ACCESS_TTL });
-  const refreshToken = jwt.sign({ sub: userId }, refreshSecret, { expiresIn: REFRESH_TTL });
+  const accessToken = jwt.sign({ sub: userId, pv: passwordVersion }, secret, {
+    expiresIn: ACCESS_TTL,
+  });
+  const refreshToken = jwt.sign({ sub: userId, pv: passwordVersion }, refreshSecret, {
+    expiresIn: REFRESH_TTL,
+  });
   return { accessToken, refreshToken };
+}
+
+export async function getUserPasswordVersion(userId: string): Promise<number> {
+  const { rows } = await getPool().query<{ password_version: number }>(
+    "SELECT COALESCE(password_version, 0)::int AS password_version FROM users WHERE id = $1",
+    [userId],
+  );
+  return rows[0]?.password_version ?? 0;
 }
 
 export function verifyAccessToken(token: string): string | null {
   try {
     const { secret } = getSecrets();
-    const payload = jwt.verify(token, secret) as jwt.JwtPayload;
+    const payload = jwt.verify(token, secret) as jwt.JwtPayload & { pv?: number };
     return payload.sub as string;
   } catch {
     return null;
   }
 }
 
-function verifyRefreshToken(token: string): string | null {
+/** Проверяет access-токен и что password_version в JWT совпадает с БД. */
+export async function verifyAccessTokenStrict(token: string): Promise<string | null> {
+  try {
+    const { secret } = getSecrets();
+    const payload = jwt.verify(token, secret) as jwt.JwtPayload & { pv?: number };
+    const userId = payload.sub as string;
+    if (!userId) return null;
+    const dbPv = await getUserPasswordVersion(userId);
+    const tokenPv = typeof payload.pv === "number" ? payload.pv : 0;
+    if (tokenPv !== dbPv) return null;
+    return userId;
+  } catch {
+    return null;
+  }
+}
+
+function verifyRefreshToken(token: string): { userId: string; pv: number } | null {
   try {
     const { refreshSecret } = getSecrets();
-    const payload = jwt.verify(token, refreshSecret) as jwt.JwtPayload;
-    return payload.sub as string;
+    const payload = jwt.verify(token, refreshSecret) as jwt.JwtPayload & { pv?: number };
+    const userId = payload.sub as string;
+    if (!userId) return null;
+    return { userId, pv: typeof payload.pv === "number" ? payload.pv : 0 };
   } catch {
     return null;
   }
@@ -96,13 +150,18 @@ export function webAuth(
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-  const userId = verifyAccessToken(header.slice(7));
-  if (!userId) {
-    res.status(401).json({ error: "Token expired or invalid" });
-    return;
-  }
-  (req as any).webUserId = userId;
-  next();
+  void verifyAccessTokenStrict(header.slice(7))
+    .then((userId) => {
+      if (!userId) {
+        res.status(401).json({ error: "Token expired or invalid" });
+        return;
+      }
+      (req as any).webUserId = userId;
+      next();
+    })
+    .catch(() => {
+      res.status(401).json({ error: "Token expired or invalid" });
+    });
 }
 
 export function getWebUserId(req: express.Request): string {
@@ -132,6 +191,16 @@ function getServerBaseUrl(server: ServerRow): string {
   return raw.replace(/\/+$/, "");
 }
 
+function getHappDurationCodeForExpiry(expiredAt: Date | null): string {
+  const daysLeft = expiredAt
+    ? Math.max(1, Math.ceil((expiredAt.getTime() - Date.now()) / 86_400_000))
+    : 30;
+  if (daysLeft > 180) return "6m";
+  if (daysLeft > 60) return "3m";
+  if (daysLeft > 25) return "1m";
+  return `${daysLeft}d`;
+}
+
 function mapReferralApplyError(error?: string): { status: number; message: string } {
   switch (error) {
     case "empty":
@@ -149,15 +218,37 @@ function mapReferralApplyError(error?: string): { status: number; message: strin
 
 function mapPromoRedeemError(error?: string): { status: number; message: string } {
   switch (error) {
+    case "daily_limit":
+      return {
+        status: 429,
+        message: "Промокод можно применить раз в сутки. Попробуйте завтра.",
+      };
     case "rate_limited":
       return { status: 429, message: "Слишком много попыток. Попробуйте позже." };
     case "already_used":
       return { status: 400, message: "Этот подарочный промокод уже использован" };
+    case "already_redeemed":
+      return { status: 400, message: "Вы уже применяли этот промокод" };
+    case "inactive":
+      return { status: 400, message: "Промокод больше не активен" };
     case "not_found":
       return { status: 400, message: "Промокод не найден" };
     default:
       return { status: 500, message: "Не удалось активировать промокод" };
   }
+}
+
+function mapUnifiedRedeemError(error: UnifiedRedeemError): { status: number; message: string } {
+  if (
+    error === "daily_limit" ||
+    error === "rate_limited" ||
+    error === "already_used" ||
+    error === "already_redeemed" ||
+    error === "inactive"
+  ) {
+    return mapPromoRedeemError(error);
+  }
+  return mapReferralApplyError(error);
 }
 
 // ── Web payment processing (shared between polling and webhook) ──
@@ -225,6 +316,26 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
     console.error("DB upsert after web payment failed:", err);
   }
 
+  if (paidUser) {
+    try {
+      const happPanel = await getHappPanelServer();
+      if (happPanel) {
+        let happUrl = paidUser.happ_subscription_url ?? null;
+        if (happUrl) {
+          await extendHapp(happPanel, clientName, pending.durationCode);
+        } else {
+          const result = await provisionHapp(happPanel, clientName, pending.durationCode);
+          happUrl = result.url;
+        }
+        if (happUrl) {
+          await updateUserHappUrl(paidUser.id, happUrl);
+        }
+      }
+    } catch (err) {
+      console.error("Web HAPP sync after payment failed:", err);
+    }
+  }
+
   if (paidUser && api) {
     try {
       const referralReward = await applyReferralRewardsForPayment(paymentId, paidUser.id);
@@ -281,7 +392,7 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
   //  Auth: register, login, refresh, me, change-password
   // ════════════════════════════════════════════════════════════
 
-  app.post("/api/web/register", async (req, res) => {
+  app.post("/api/web/register", authRateLimiter, async (req, res) => {
     const { login, password } = req.body ?? {};
     if (!login || !password) {
       res.status(400).json({ error: "Логин и пароль обязательны" });
@@ -307,12 +418,12 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
 
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
     const user = await createWebUser(normalizedLogin, hash);
-    const tokens = generateTokens(user.id);
+    const tokens = generateTokens(user.id, 0);
 
     res.json({ user: sanitizeUser(user), ...tokens });
   });
 
-  app.post("/api/web/login", async (req, res) => {
+  app.post("/api/web/login", authRateLimiter, async (req, res) => {
     const { login, password } = req.body ?? {};
     if (!login || !password) {
       res.status(400).json({ error: "Логин и пароль обязательны" });
@@ -331,30 +442,37 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       return;
     }
 
-    const tokens = generateTokens(user.id);
+    const pv = await getUserPasswordVersion(user.id);
+    const tokens = generateTokens(user.id, pv);
     res.json({ user: sanitizeUser(user), ...tokens });
   });
 
-  app.post("/api/web/refresh", async (req, res) => {
+  app.post("/api/web/refresh", authRateLimiter, async (req, res) => {
     const { refreshToken } = req.body ?? {};
     if (!refreshToken) {
       res.status(400).json({ error: "refreshToken обязателен" });
       return;
     }
 
-    const userId = verifyRefreshToken(refreshToken);
-    if (!userId) {
+    const parsed = verifyRefreshToken(refreshToken);
+    if (!parsed) {
       res.status(401).json({ error: "Refresh token невалиден или истёк" });
       return;
     }
 
-    const user = await getUserById(userId);
+    const user = await getUserById(parsed.userId);
     if (!user) {
       res.status(401).json({ error: "Пользователь не найден" });
       return;
     }
 
-    const tokens = generateTokens(user.id);
+    const dbPv = await getUserPasswordVersion(user.id);
+    if (parsed.pv !== dbPv) {
+      res.status(401).json({ error: "Refresh token невалиден или истёк" });
+      return;
+    }
+
+    const tokens = generateTokens(user.id, dbPv);
     res.json({ user: sanitizeUser(user), ...tokens });
   });
 
@@ -393,9 +511,17 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     }
 
     const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-    await getPool().query("UPDATE users SET password_hash = $1 WHERE id = $2", [hash, userId]);
-
-    res.json({ ok: true });
+    const { rows } = await getPool().query<{ password_version: number }>(
+      `UPDATE users
+       SET password_hash = $1,
+           password_version = COALESCE(password_version, 0) + 1
+       WHERE id = $2
+       RETURNING password_version`,
+      [hash, userId],
+    );
+    const pv = rows[0]?.password_version ?? 0;
+    const tokens = generateTokens(userId, pv);
+    res.json({ ok: true, ...tokens });
   });
 
   // ════════════════════════════════════════════════════════════
@@ -411,11 +537,26 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     const referralInfo = await getUserReferralInfoForWeb(user.id);
     const expiredAt = user.expired_at ? new Date(user.expired_at) : null;
     const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
+    let happUrl = user.happ_subscription_url ?? null;
+    if (active && !happUrl) {
+      try {
+        const happPanel = await getHappPanelServer();
+        if (happPanel) {
+          const durationCode = getHappDurationCodeForExpiry(expiredAt);
+          const result = await provisionHapp(happPanel, getWebClientName(user), durationCode);
+          happUrl = result.url;
+          await updateUserHappUrl(user.id, happUrl);
+        }
+      } catch (err) {
+        console.error("Lazy web HAPP backfill failed:", err);
+      }
+    }
     res.json({
       active,
       expired_at: user.expired_at,
       is_blocked: user.is_blocked,
       config: active ? user.vpn_config : null,
+      happ_subscription_url: active ? happUrl : null,
       created_at: user.created_at,
       login: user.login,
       referred_by_applied: referralInfo.referred_by_applied,
@@ -441,7 +582,7 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     res.send(user.vpn_config);
   });
 
-  app.post("/api/web/promocode", webAuth, async (req, res) => {
+  app.post("/api/web/promocode", webAuth, promoRateLimiter, async (req, res) => {
     const userId = getWebUserId(req);
     const user = await getUserById(userId);
     if (!user) {
@@ -456,18 +597,18 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     }
 
     try {
-      const promo = await redeemPromoCode(user.id, code);
-      if (promo.ok && promo.months != null) {
+      const redeemed = await redeemUnifiedCode(user.id, code);
+      if (redeemed.ok && redeemed.kind === "gift") {
         let userRow = await getUserById(user.id);
         if (!userRow) throw new Error(`User missing after promo redeem: ${user.id}`);
         const { config } = await syncVpnForPromoRedemption(
           userRow,
-          promo.months,
+          redeemed.months,
           getWebClientName(userRow),
         );
         userRow = await getUserById(user.id);
         if (!userRow) throw new Error(`User missing after VPN promo sync: ${user.id}`);
-        if (api && promo.newExpiredAt != null) {
+        if (api) {
           const userName = userRow.login ?? "Веб-пользователь";
           const userTag = userRow.telegram_nickname
             ? `@${userRow.telegram_nickname}`
@@ -480,23 +621,50 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
             telegramId: userRow.telegram_id,
             dbUserId: user.id,
             code,
-            months: promo.months,
-            oldExpiredAt: promo.oldExpiredAt,
-            newExpiredAt: promo.newExpiredAt,
+            months: redeemed.months,
+            oldExpiredAt: redeemed.oldExpiredAt,
+            newExpiredAt: redeemed.newExpiredAt,
           });
         }
+
+        try {
+          const happPanel = await getHappPanelServer();
+          if (happPanel) {
+            const durationCode =
+              PRICING.find((p) => p.months === redeemed.months)?.durationCode ?? "1m";
+            let happUrl = userRow.happ_subscription_url ?? null;
+            if (happUrl) {
+              await extendHapp(happPanel, getWebClientName(userRow), durationCode);
+            } else {
+              const result = await provisionHapp(
+                happPanel,
+                getWebClientName(userRow),
+                durationCode,
+              );
+              happUrl = result.url;
+            }
+            if (happUrl) {
+              await updateUserHappUrl(user.id, happUrl);
+              userRow = { ...userRow, happ_subscription_url: happUrl };
+            }
+          }
+        } catch (err) {
+          console.error("Web HAPP sync after promo failed:", err);
+        }
+
         const referralInfo = await getUserReferralInfoForWeb(user.id);
         const expiredAt = userRow.expired_at ? new Date(userRow.expired_at) : null;
         const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
         res.json({
           ok: true,
           kind: "gift" as const,
-          months: promo.months,
+          months: redeemed.months,
           subscription: {
             active,
             expired_at: userRow.expired_at,
             is_blocked: userRow.is_blocked,
             config: active ? (userRow.vpn_config ?? config ?? null) : null,
+            happ_subscription_url: active ? (userRow.happ_subscription_url ?? null) : null,
             login: userRow.login,
             referred_by_applied: referralInfo.referred_by_applied,
             referred_by_code: referralInfo.referred_by_code,
@@ -506,8 +674,20 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
         return;
       }
 
-      const promoErr = mapPromoRedeemError(promo.error);
-      res.status(promoErr.status).json({ error: promoErr.message });
+      if (redeemed.ok && redeemed.kind === "referral") {
+        const referralInfo = await getUserReferralInfoForWeb(user.id);
+        res.json({
+          ok: true,
+          kind: "referral" as const,
+          referral_message: redeemed.referral_message,
+          referred_by_applied: referralInfo.referred_by_applied,
+          referred_by_code: referralInfo.referred_by_code,
+        });
+        return;
+      }
+
+      const mapped = mapUnifiedRedeemError(redeemed.error ?? "not_found");
+      res.status(mapped.status).json({ error: mapped.message });
     } catch (err) {
       console.error("Apply web promocode failed:", err);
       res.status(500).json({ error: "Не удалось применить промокод" });
@@ -549,6 +729,40 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     }
   });
 
+  // ── VPN server reissue (смена сервера AmneziaWG, веб) ──
+
+  app.post("/api/web/vpn/reissue", webAuth, async (req, res) => {
+    const userId = getWebUserId(req);
+    try {
+      const userRow = await getUserById(userId);
+      if (!userRow) {
+        res.status(404).json({ error: "Пользователь не найден" });
+        return;
+      }
+      const expiredAt = userRow.expired_at ? new Date(userRow.expired_at) : null;
+      if (!expiredAt || expiredAt.getTime() <= Date.now()) {
+        res.status(400).json({ error: "Подписка неактивна" });
+        return;
+      }
+
+      const clientName = getWebClientName(userRow);
+      const result = await reissueVpnConfig(userRow, clientName);
+      res.json({ ok: true, config: result.config });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "no_other_servers") {
+        res.status(409).json({ error: "Нет других доступных серверов для смены" });
+        return;
+      }
+      if (msg === "subscription_inactive") {
+        res.status(400).json({ error: "Подписка неактивна" });
+        return;
+      }
+      console.error("Web VPN reissue error:", err);
+      res.status(500).json({ error: "Не удалось сменить сервер. Попробуйте позже." });
+    }
+  });
+
   // ════════════════════════════════════════════════════════════
   //  Payments (YooKassa)
   // ════════════════════════════════════════════════════════════
@@ -557,7 +771,7 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
   const secretKey = (process.env.MERCHANT_KEY ?? "").trim();
   const yookassaAuth = Buffer.from(`${shopId}:${secretKey}`).toString("base64");
 
-  app.post("/api/web/payments/create", webAuth, async (req, res) => {
+  app.post("/api/web/payments/create", webAuth, paymentCreateRateLimiter, async (req, res) => {
     if (!shopId || !secretKey) {
       res.status(503).json({ error: "Payments not configured" });
       return;
@@ -594,9 +808,11 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     };
 
     const siteOrigin = (process.env.WEB_SITE_URL ?? "").trim();
-    const returnUrl = siteOrigin
-      ? `${siteOrigin}?payment_return=1`
-      : "https://example.com";
+    if (!siteOrigin) {
+      res.status(503).json({ error: "WEB_SITE_URL is not configured" });
+      return;
+    }
+    const returnUrl = `${siteOrigin}?payment_return=1`;
 
     const description = isRenewal
       ? `${BRAND_NAME} — Продление: ${plan.label}`
@@ -659,8 +875,8 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
   app.get("/api/web/payments/status/:paymentId", webAuth, async (req, res) => {
     const raw = req.params.paymentId;
     const paymentId = typeof raw === "string" ? raw : raw?.[0];
-    if (!paymentId) {
-      res.status(400).json({ error: "Missing paymentId" });
+    if (!paymentId || !isValidPaymentId(paymentId)) {
+      res.status(400).json({ error: "Invalid paymentId" });
       return;
     }
 

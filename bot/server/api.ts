@@ -1,10 +1,31 @@
 import crypto from "crypto";
+import fs from "fs";
 import https from "https";
+import os from "os";
+import path from "path";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import multer from "multer";
 import { type Api, InputFile } from "grammy";
-import { addMessage, getMessages, hasMessages } from "./chat-store";
+import {
+  addMessage,
+  canAccessSupportFile,
+  getMessages,
+  hasMessages,
+} from "./chat-store";
+import {
+  getCachedChannelMembership,
+  getCorsAllowedOrigins,
+  isAllowedSupportUploadMime,
+  isValidPaymentId,
+  paymentCreateRateLimiter,
+  promoRateLimiter,
+  setCachedChannelMembership,
+  timingSafeEqualHex,
+  webhookRateLimiter,
+} from "./security";
 import { resolveAdminChat, saveForwardedMessage, setActiveDialog } from "./store";
 import {
   BRAND_NAME,
@@ -30,24 +51,30 @@ import {
   createTelegramUserIfMissing,
   getUserById,
   getUserReferralInfo,
-  redeemPromoCode,
+  getReferralStats,
   type ServerRow,
   type UserRow,
   getAllEnabledServers,
+  getHappPanelServer,
   getRandomEnabledServer,
   getUserSubscription,
+  extendSubscriptionById,
   incrementServerUserCount,
   markPaymentProcessed,
+  updateUserHappUrl,
   upsertUserSubscription,
 } from "./db";
 import {
   getTelegramClientName,
+  reissueVpnConfig,
   syncVpnForPromoRedemption,
   syncVpnForReferralReward,
 } from "./promo-vpn";
+import { redeemUnifiedCode, type UnifiedRedeemError } from "./redeem-code";
+import { extendHapp, provisionHapp } from "./happ";
 import { mountWebAuthRoutes } from "./web-auth";
 import { mountSyncRoutes } from "./sync-routes";
-import { PLATFORM_BOT_TEXTS, type PlatformId } from "../shared/platforms";
+import { PLATFORMS, type PlatformId, type VpnClientKind } from "../shared/platforms";
 import {
   getSupportMessages,
   sendSupportTextMessage,
@@ -94,15 +121,37 @@ function mapReferralApplyError(error?: string): { status: number; message: strin
 
 function mapPromoRedeemError(error?: string): { status: number; message: string } {
   switch (error) {
+    case "daily_limit":
+      return {
+        status: 429,
+        message: "Промокод можно применить раз в сутки. Попробуйте завтра.",
+      };
     case "rate_limited":
       return { status: 429, message: "Слишком много попыток. Попробуйте позже." };
     case "already_used":
       return { status: 400, message: "Этот подарочный промокод уже использован" };
+    case "already_redeemed":
+      return { status: 400, message: "Вы уже применяли этот промокод" };
+    case "inactive":
+      return { status: 400, message: "Промокод больше не активен" };
     case "not_found":
       return { status: 400, message: "Промокод не найден" };
     default:
       return { status: 500, message: "Не удалось активировать промокод" };
   }
+}
+
+function mapUnifiedRedeemError(error: UnifiedRedeemError): { status: number; message: string } {
+  if (
+    error === "daily_limit" ||
+    error === "rate_limited" ||
+    error === "already_used" ||
+    error === "already_redeemed" ||
+    error === "inactive"
+  ) {
+    return mapPromoRedeemError(error);
+  }
+  return mapReferralApplyError(error);
 }
 
 /** @MemeVPNbest — подписка на канал; пусто = не требовать (удобно для локальной разработки). */
@@ -119,6 +168,13 @@ function isChannelMemberStatus(status: string): boolean {
   );
 }
 
+/**
+ * Telegram initData валиден ограниченное время. Без этой проверки украденный
+ * (через расширение, прокси, лог-файл) initData даёт атакующему доступ к
+ * аккаунту жертвы навсегда — пока не сменишь BOT_TOKEN.
+ */
+const INIT_DATA_MAX_AGE_SEC = 24 * 60 * 60;
+
 function verifyInitData(
   initData: string,
   botToken: string,
@@ -127,6 +183,14 @@ function verifyInitData(
     const params = new URLSearchParams(initData);
     const hash = params.get("hash");
     if (!hash) return null;
+
+    const authDateStr = params.get("auth_date");
+    if (!authDateStr) return null;
+    const authDate = parseInt(authDateStr, 10);
+    if (!Number.isFinite(authDate) || authDate <= 0) return null;
+    const ageSec = Math.floor(Date.now() / 1000) - authDate;
+    // Небольшой запас на расхождение часов клиента (-60s).
+    if (ageSec < -60 || ageSec > INIT_DATA_MAX_AGE_SEC) return null;
 
     params.delete("hash");
     const dataCheckString = [...params.entries()]
@@ -143,7 +207,7 @@ function verifyInitData(
       .update(dataCheckString)
       .digest("hex");
 
-    if (calculated !== hash) return null;
+    if (!timingSafeEqualHex(calculated, hash)) return null;
 
     const userStr = params.get("user");
     if (!userStr) return null;
@@ -155,12 +219,53 @@ function verifyInitData(
 
 export function createApiServer(api: Api, botToken: string) {
   const app = express();
-  app.use(cors());
-  app.use(express.json());
 
+  const allowedOrigins = getCorsAllowedOrigins();
+  app.use(
+    cors({
+      origin(origin, callback) {
+        if (!origin) {
+          callback(null, true);
+          return;
+        }
+        if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+          callback(null, true);
+          return;
+        }
+        callback(null, false);
+      },
+    }),
+  );
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
+  app.use(express.json({ limit: "64kb" }));
+
+  app.get("/healthz", (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  const uploadDir = path.join(os.tmpdir(), "meme-support-uploads");
+  fs.mkdirSync(uploadDir, { recursive: true });
   const upload = multer({
-    storage: multer.memoryStorage(),
+    storage: multer.diskStorage({
+      destination: uploadDir,
+      filename: (_req, file, cb) => {
+        const ext = path.extname(file.originalname || "").slice(0, 16);
+        cb(null, `${crypto.randomUUID()}${ext}`);
+      },
+    }),
     limits: { fileSize: 20 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      if (!isAllowedSupportUploadMime(file.mimetype)) {
+        cb(new Error("unsupported_file_type"));
+        return;
+      }
+      cb(null, true);
+    },
   });
 
   function auth(
@@ -197,10 +302,25 @@ export function createApiServer(api: Api, botToken: string) {
       return;
     }
     const user = getUser(req);
+    const cached = getCachedChannelMembership(user.id);
+    if (cached === false) {
+      res.status(403).json({
+        error: "channel_subscription_required",
+        subscribed: false,
+      });
+      return;
+    }
+    if (cached === true) {
+      next();
+      return;
+    }
+
     const chatId = ch.startsWith("@") ? ch : `@${ch}`;
     try {
       const member = await api.getChatMember(chatId, user.id);
-      if (!isChannelMemberStatus(member.status)) {
+      const subscribed = isChannelMemberStatus(member.status);
+      setCachedChannelMembership(user.id, subscribed);
+      if (!subscribed) {
         res.status(403).json({
           error: "channel_subscription_required",
           subscribed: false,
@@ -244,7 +364,11 @@ export function createApiServer(api: Api, botToken: string) {
     const platformIdRaw =
       typeof req.body?.platformId === "string" ? req.body.platformId : "";
     const platformId = platformIdRaw as PlatformId;
-    const instructionText = PLATFORM_BOT_TEXTS[platformId];
+    const clientKindRaw =
+      typeof req.body?.clientKind === "string" ? req.body.clientKind : "amneziawg";
+    const clientKind: VpnClientKind = clientKindRaw === "happ" ? "happ" : "amneziawg";
+    const platform = PLATFORMS.find((item) => item.id === platformId);
+    const instructionText = platform?.variants[clientKind]?.botText;
 
     if (!instructionText) {
       res.status(400).json({ error: "Unknown platform" });
@@ -323,7 +447,8 @@ export function createApiServer(api: Api, botToken: string) {
       const isImage = file.mimetype.startsWith("image/");
 
       try {
-        const inputFile = new InputFile(file.buffer, file.originalname);
+        const buffer = fs.readFileSync(file.path);
+        const inputFile = new InputFile(buffer, file.originalname);
         let sent;
 
         if (isImage) {
@@ -351,8 +476,14 @@ export function createApiServer(api: Api, botToken: string) {
 
         res.json({ message });
       } catch (error) {
+        if (error instanceof Error && error.message === "unsupported_file_type") {
+          res.status(400).json({ error: "Неподдерживаемый тип файла" });
+          return;
+        }
         console.error("API upload error:", error);
         res.status(500).json({ error: "Failed to upload" });
+      } finally {
+        fs.unlink(file.path, () => {});
       }
     },
   );
@@ -365,6 +496,11 @@ export function createApiServer(api: Api, botToken: string) {
       const fileId = typeof raw === "string" ? raw : raw?.[0];
       if (!fileId) {
         res.status(400).json({ error: "Missing file id" });
+        return;
+      }
+      const user = getUser(req);
+      if (!canAccessSupportFile(fileId, user.id)) {
+        res.status(403).json({ error: "Forbidden" });
         return;
       }
       const tgFile = await api.getFile(fileId);
@@ -446,16 +582,40 @@ export function createApiServer(api: Api, botToken: string) {
       const referralInfo = await getUserReferralInfo(row.id);
       const expiredAt = row.expired_at ? new Date(row.expired_at) : null;
       const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
+
+      // ── Lazy HAPP backfill for active users without a subscription URL ──
+      let happUrl = row.happ_subscription_url ?? null;
+      if (active && !happUrl) {
+        try {
+          const happPanel = await getHappPanelServer();
+          if (happPanel) {
+            const clientName = getTelegramClientName(user.id, user.username);
+            const daysLeft = expiredAt
+              ? Math.max(1, Math.ceil((expiredAt.getTime() - Date.now()) / 86_400_000))
+              : 30;
+            const durationCode =
+              daysLeft > 180 ? "6m" : daysLeft > 60 ? "3m" : daysLeft > 25 ? "1m" : `${daysLeft}d`;
+            const result = await provisionHapp(happPanel, clientName, durationCode);
+            happUrl = result.url;
+            await updateUserHappUrl(row.id, happUrl);
+          }
+        } catch (err) {
+          console.error("Lazy HAPP backfill failed:", err);
+        }
+      }
+
       res.json({
         active,
         expired_at: row.expired_at,
         is_blocked: row.is_blocked,
         telegram_nickname: row.telegram_nickname,
         config: active ? row.vpn_config : null,
+        happ_subscription_url: active ? happUrl : null,
         created_at: row.created_at,
         my_referral_code: referralInfo.my_referral_code,
         referred_by_applied: referralInfo.referred_by_applied,
         referred_by_code: referralInfo.referred_by_code,
+        referred_by_nickname: referralInfo.referred_by_nickname,
         referral_message: referralInfo.referral_message,
       });
     } catch (err) {
@@ -464,7 +624,12 @@ export function createApiServer(api: Api, botToken: string) {
     }
   });
 
-  app.post("/api/promocode", auth, requireChannelSubscription, async (req, res) => {
+  app.post(
+    "/api/promocode",
+    auth,
+    requireChannelSubscription,
+    promoRateLimiter,
+    async (req, res) => {
     const tgUser = getUser(req);
     const code = typeof req.body?.code === "string" ? req.body.code.trim().toUpperCase() : "";
     if (!code) {
@@ -478,43 +643,66 @@ export function createApiServer(api: Api, botToken: string) {
         normalizeTelegramNickname(tgUser.username),
       );
 
-      const promo = await redeemPromoCode(dbUser.id, code);
-      if (promo.ok && promo.months != null) {
+      const redeemed = await redeemUnifiedCode(dbUser.id, code);
+      if (redeemed.ok && redeemed.kind === "gift") {
         let userRow = await getUserById(dbUser.id);
         if (!userRow) throw new Error(`User missing after promo redeem: ${dbUser.id}`);
         const { config } = await syncVpnForPromoRedemption(
           userRow,
-          promo.months,
+          redeemed.months,
           getTelegramClientName(tgUser.id, tgUser.username),
         );
         userRow = await getUserById(dbUser.id);
         if (!userRow) throw new Error(`User missing after VPN promo sync: ${dbUser.id}`);
-        if (promo.newExpiredAt != null) {
-          const userName = tgUser.first_name ?? "Аноним";
-          const userTag = tgUser.username ? `@${tgUser.username}` : "без @ника";
-          await sendGiftPromoAdminNotification(api, {
-            userName,
-            userTag,
-            telegramId: tgUser.id,
-            dbUserId: dbUser.id,
-            code,
-            months: promo.months,
-            oldExpiredAt: promo.oldExpiredAt,
-            newExpiredAt: promo.newExpiredAt,
-          });
+        const userName = tgUser.first_name ?? "Аноним";
+        const userTag = tgUser.username ? `@${tgUser.username}` : "без @ника";
+        await sendGiftPromoAdminNotification(api, {
+          userName,
+          userTag,
+          telegramId: tgUser.id,
+          dbUserId: dbUser.id,
+          code,
+          months: redeemed.months,
+          oldExpiredAt: redeemed.oldExpiredAt,
+          newExpiredAt: redeemed.newExpiredAt,
+        });
+
+        // ── HAPP extend/provision after promo ──
+        try {
+          const happPanel = await getHappPanelServer();
+          if (happPanel) {
+            const clientName = getTelegramClientName(tgUser.id, tgUser.username);
+            const promoDurationCode =
+              PRICING.find((p) => p.months === redeemed.months)?.durationCode ?? "1m";
+            let happUrl = userRow.happ_subscription_url ?? null;
+            if (happUrl) {
+              await extendHapp(happPanel, clientName, promoDurationCode);
+            } else {
+              const result = await provisionHapp(happPanel, clientName, promoDurationCode);
+              happUrl = result.url;
+            }
+            if (happUrl) {
+              await updateUserHappUrl(dbUser.id, happUrl);
+              userRow = { ...userRow, happ_subscription_url: happUrl };
+            }
+          }
+        } catch (err) {
+          console.error("HAPP sync after promo failed:", err);
         }
+
         const referralInfo = await getUserReferralInfo(dbUser.id);
         const expiredAt = userRow.expired_at ? new Date(userRow.expired_at) : null;
         const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
         res.json({
           ok: true,
           kind: "gift" as const,
-          months: promo.months,
+          months: redeemed.months,
           subscription: {
             active,
             expired_at: userRow.expired_at,
             is_blocked: userRow.is_blocked,
             config: active ? (userRow.vpn_config ?? config ?? null) : null,
+            happ_subscription_url: active ? (userRow.happ_subscription_url ?? null) : null,
             my_referral_code: referralInfo.my_referral_code,
             referred_by_applied: referralInfo.referred_by_applied,
             referred_by_code: referralInfo.referred_by_code,
@@ -524,8 +712,22 @@ export function createApiServer(api: Api, botToken: string) {
         return;
       }
 
-      const promoErr = mapPromoRedeemError(promo.error);
-      res.status(promoErr.status).json({ error: promoErr.message });
+      if (redeemed.ok && redeemed.kind === "referral") {
+        const referralInfo = await getUserReferralInfo(dbUser.id);
+        res.json({
+          ok: true,
+          kind: "referral" as const,
+          referral_message: redeemed.referral_message,
+          my_referral_code: referralInfo.my_referral_code,
+          referred_by_applied: referralInfo.referred_by_applied,
+          referred_by_code: referralInfo.referred_by_code,
+          referred_by_nickname: referralInfo.referred_by_nickname,
+        });
+        return;
+      }
+
+      const mapped = mapUnifiedRedeemError(redeemed.error ?? "not_found");
+      res.status(mapped.status).json({ error: mapped.message });
     } catch (err) {
       console.error("Promocode apply error:", err);
       res.status(500).json({ error: "Не удалось применить промокод" });
@@ -559,10 +761,64 @@ export function createApiServer(api: Api, botToken: string) {
         my_referral_code: referralInfo.my_referral_code,
         referred_by_applied: referralInfo.referred_by_applied,
         referred_by_code: referralInfo.referred_by_code,
+        referred_by_nickname: referralInfo.referred_by_nickname,
       });
     } catch (err) {
       console.error("Referral code apply error:", err);
       res.status(500).json({ error: "Не удалось применить реферальный код" });
+    }
+  });
+
+  app.get("/api/referral/stats", auth, requireChannelSubscription, async (req, res) => {
+    const tgUser = getUser(req);
+    try {
+      const dbUser = await createTelegramUserIfMissing(
+        tgUser.id,
+        normalizeTelegramNickname(tgUser.username),
+      );
+      const stats = await getReferralStats(dbUser.id);
+      res.json(stats);
+    } catch (err) {
+      console.error("Referral stats error:", err);
+      res.status(500).json({ error: "Не удалось загрузить статистику" });
+    }
+  });
+
+  // ── VPN server reissue (смена сервера AmneziaWG) ──
+
+  app.post("/api/vpn/reissue", auth, requireChannelSubscription, async (req, res) => {
+    const tgUser = getUser(req);
+    try {
+      const dbUser = await createTelegramUserIfMissing(
+        tgUser.id,
+        normalizeTelegramNickname(tgUser.username),
+      );
+      const userRow = await getUserById(dbUser.id);
+      if (!userRow) {
+        res.status(404).json({ error: "Пользователь не найден" });
+        return;
+      }
+      const expiredAt = userRow.expired_at ? new Date(userRow.expired_at) : null;
+      if (!expiredAt || expiredAt.getTime() <= Date.now()) {
+        res.status(400).json({ error: "Подписка неактивна" });
+        return;
+      }
+
+      const clientName = getTelegramClientName(tgUser.id, tgUser.username);
+      const result = await reissueVpnConfig(userRow, clientName);
+      res.json({ ok: true, config: result.config });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "no_other_servers") {
+        res.status(409).json({ error: "Нет других доступных серверов для смены" });
+        return;
+      }
+      if (msg === "subscription_inactive") {
+        res.status(400).json({ error: "Подписка неактивна" });
+        return;
+      }
+      console.error("VPN reissue error:", err);
+      res.status(500).json({ error: "Не удалось сменить сервер. Попробуйте позже." });
     }
   });
 
@@ -584,7 +840,12 @@ export function createApiServer(api: Api, botToken: string) {
     return cachedBotUsername;
   }
 
-  app.post("/api/payments/create-payment", auth, requireChannelSubscription, async (req, res) => {
+  app.post(
+    "/api/payments/create-payment",
+    auth,
+    requireChannelSubscription,
+    paymentCreateRateLimiter,
+    async (req, res) => {
     if (!shopId || !secretKey) {
       res.status(503).json({ error: "Payments not configured" });
       return;
@@ -773,6 +1034,27 @@ export function createApiServer(api: Api, botToken: string) {
       } catch (err) {
         console.error("Referral rewards after payment failed:", err);
       }
+
+      // ── HAPP (VLESS/Reality) provision/extend ──
+      try {
+        const happPanel = await getHappPanelServer();
+        if (happPanel) {
+          const clientName = pending.username || `tg_${userId}`;
+          const existingHappUrl = paidUser.happ_subscription_url ?? null;
+          let happUrl = existingHappUrl;
+          if (existingHappUrl) {
+            await extendHapp(happPanel, clientName, pending.durationCode);
+          } else {
+            const result = await provisionHapp(happPanel, clientName, pending.durationCode);
+            happUrl = result.url;
+          }
+          if (happUrl) {
+            await updateUserHappUrl(paidUser.id, happUrl);
+          }
+        }
+      } catch (err) {
+        console.error("HAPP sync after payment failed:", err);
+      }
     }
 
     const plan = PRICING.find((p) => p.months === pending.months);
@@ -818,8 +1100,8 @@ export function createApiServer(api: Api, botToken: string) {
   app.get("/api/payments/status/:paymentId", auth, requireChannelSubscription, async (req, res) => {
     const raw = req.params.paymentId;
     const paymentId = typeof raw === "string" ? raw : raw?.[0];
-    if (!paymentId) {
-      res.status(400).json({ error: "Missing paymentId" });
+    if (!paymentId || !isValidPaymentId(paymentId)) {
+      res.status(400).json({ error: "Invalid paymentId" });
       return;
     }
     const pending = getPendingPayment(paymentId);
@@ -862,7 +1144,7 @@ export function createApiServer(api: Api, botToken: string) {
 
   // ── YooKassa: webhook (payment.succeeded / payment.canceled) ──
 
-  app.post("/api/payments/webhook", async (req, res) => {
+  app.post("/api/payments/webhook", webhookRateLimiter, async (req, res) => {
     const event = req.body?.event;
     const paymentObj = req.body?.object;
     if (!paymentObj?.id) {
@@ -871,7 +1153,10 @@ export function createApiServer(api: Api, botToken: string) {
     }
 
     const paymentId: string = paymentObj.id;
-    const meta = paymentObj.metadata as PaymentMetadata | undefined;
+    if (!isValidPaymentId(paymentId)) {
+      res.status(400).json({ error: "Invalid payment id" });
+      return;
+    }
 
     if (event === "payment.canceled") {
       markPaymentCanceled(paymentId);
@@ -884,26 +1169,33 @@ export function createApiServer(api: Api, botToken: string) {
       return;
     }
 
-    // Verify payment status via YooKassa API
-    let verifiedStatus = paymentObj.status;
+    // Всегда перепроверяем платёж через API ЮКассы; metadata берём только из ответа API,
+    // а не из тела webhook (иначе атакующий может подменить months / user id).
+    let verifiedPayment: {
+      status: string;
+      metadata?: PaymentMetadata;
+      amount?: { value: string };
+    } | null = null;
+
     if (shopId && secretKey) {
       try {
         const check = await fetch(`https://api.yookassa.ru/v3/payments/${paymentId}`, {
           headers: { Authorization: `Basic ${yookassaAuth}` },
         });
         if (check.ok) {
-          const verified = await check.json();
-          verifiedStatus = verified.status;
+          verifiedPayment = await check.json();
         }
       } catch (e) {
         console.error("YooKassa verify fetch error:", e);
       }
     }
 
-    if (verifiedStatus !== "succeeded") {
+    if (!verifiedPayment || verifiedPayment.status !== "succeeded") {
       res.json({ ok: true });
       return;
     }
+
+    const meta = verifiedPayment.metadata;
 
     // If payment is in local store, use shared processing path
     const pending = getPendingPayment(paymentId);
@@ -918,39 +1210,57 @@ export function createApiServer(api: Api, botToken: string) {
       return;
     }
 
-    // Fallback: payment not in local store (e.g. server restarted) — use webhook metadata.
-    // Atomic claim guarantees the body below runs at most once per payment_id even
-    // when YooKassa retries the webhook.
+    // Fallback: payment not in local store (e.g. server restarted).
     const claimed = await markPaymentProcessed(paymentId);
     if (!claimed) {
       res.json({ ok: true });
       return;
     }
 
-    const userId = meta ? Number(meta.telegram_user_id) : 0;
-    if (!userId) {
-      console.error("Webhook: cannot resolve userId for payment", paymentId);
+    const rawUserId = meta?.telegram_user_id?.trim() ?? "";
+    if (!rawUserId) {
+      console.error("Webhook fallback: missing telegram_user_id in verified metadata", paymentId);
+      res.json({ ok: true });
+      return;
+    }
+
+    const monthsRaw = meta ? Number(meta.months) : NaN;
+    const plan = PRICING.find((p) => p.months === monthsRaw);
+    if (!plan) {
+      console.error("Webhook fallback: invalid months in verified metadata", paymentId, meta?.months);
       res.json({ ok: true });
       return;
     }
 
     const username = meta?.username ?? "";
     const firstName = meta?.first_name ?? "Аноним";
-    const months = meta ? Number(meta.months) : 0;
-    const durationCode = meta?.duration_code ?? "1m";
+    const months = plan.months;
+    const durationCode = plan.durationCode;
     const isRenewal = meta?.is_renewal === "1";
-    const amount = paymentObj.amount ? Number(paymentObj.amount.value) : 0;
+    const amount = verifiedPayment.amount
+      ? Number(verifiedPayment.amount.value)
+      : 0;
 
-    let config = getConfig(userId) ?? undefined;
+    const isTelegramId = /^\d+$/.test(rawUserId);
+    const telegramId = isTelegramId ? Number(rawUserId) : 0;
+    const webUserId = isTelegramId ? null : rawUserId;
+
+    const configKey: number | string = isTelegramId ? telegramId : webUserId!;
+    let config = getConfig(configKey) ?? undefined;
     let provisionOk = !!config;
+
+    const clientName = isTelegramId
+      ? username || `tg_${telegramId}`
+      : username.replace(/[^a-zA-Z0-9_-]/g, "_") || `web_${webUserId!.slice(0, 8)}`;
 
     if (!config) {
       try {
-        const existingUser = await getUserSubscription(userId);
+        const existingUser = isTelegramId
+          ? await getUserSubscription(telegramId)
+          : await getUserById(webUserId!);
         if (existingUser?.vpn_config) {
           config = existingUser.vpn_config;
           provisionOk = true;
-          const clientName = username || `tg_${userId}`;
           try {
             const servers = await getAllEnabledServers();
             let extended = false;
@@ -961,7 +1271,9 @@ export function createApiServer(api: Api, botToken: string) {
                 break;
               } catch { /* client not on this VM, try next */ }
             }
-            if (!extended) console.error("VPN extend (webhook renewal): client not found on any server");
+            if (!extended) {
+              console.error("VPN extend (webhook renewal): client not found on any server");
+            }
           } catch (err) {
             console.error("VPN extend (webhook renewal) failed:", err);
           }
@@ -976,10 +1288,14 @@ export function createApiServer(api: Api, botToken: string) {
         const server = await getRandomEnabledServer();
         if (!server?.server_id) throw new Error("No enabled VPN servers in DB");
         const baseUrl = getServerBaseUrl(server);
-        const clientName = username || `tg_${userId}`;
-        config = await provisionVpnClient(clientName, durationCode, server.server_id, baseUrl);
+        config = await provisionVpnClient(
+          clientName,
+          durationCode,
+          server.server_id,
+          baseUrl,
+        );
         provisionOk = true;
-        saveConfig(userId, config);
+        saveConfig(configKey, config);
         await incrementServerUserCount(server.server_id).catch(() => {});
       } catch (err) {
         console.error("VPN provisioning after webhook failed:", err);
@@ -988,12 +1304,16 @@ export function createApiServer(api: Api, botToken: string) {
 
     let paidUser: UserRow | null = null;
     try {
-      paidUser = await upsertUserSubscription(
-        userId,
-        months,
-        config,
-        normalizeTelegramNickname(username),
-      );
+      if (isTelegramId) {
+        paidUser = await upsertUserSubscription(
+          telegramId,
+          months,
+          config,
+          normalizeTelegramNickname(username),
+        );
+      } else {
+        paidUser = await extendSubscriptionById(webUserId!, months, config);
+      }
     } catch (err) {
       console.error("DB upsert after webhook payment failed:", err);
     }
@@ -1002,35 +1322,71 @@ export function createApiServer(api: Api, botToken: string) {
       try {
         const referralReward = await applyReferralRewardsForPayment(paymentId, paidUser.id);
         if (referralReward.applied) {
-          // Без VPN-extend expires_at в БД и в AmneziaWG расходятся на 1 мес.
           await syncVpnForReferralReward(referralReward);
           await sendReferralRewardNotifications(api, referralReward);
         }
       } catch (err) {
         console.error("Referral rewards after webhook payment failed:", err);
       }
+
+      try {
+        const happPanel = await getHappPanelServer();
+        if (happPanel) {
+          const existingHappUrl = paidUser.happ_subscription_url ?? null;
+          let happUrl = existingHappUrl;
+          if (existingHappUrl) {
+            await extendHapp(happPanel, clientName, durationCode);
+          } else {
+            const result = await provisionHapp(happPanel, clientName, durationCode);
+            happUrl = result.url;
+          }
+          if (happUrl) {
+            await updateUserHappUrl(paidUser.id, happUrl);
+          }
+        }
+      } catch (err) {
+        console.error("HAPP sync after webhook payment failed:", err);
+      }
     }
 
-    const plan = PRICING.find((p) => p.months === months);
-    const planLabel = plan?.label ?? `${months} мес.`;
+    const planLabel = plan.label;
     const amountStr = `${amount.toFixed(0)}₽`;
-    const userTag = username && username !== `tg_${userId}` ? `@${username}` : "без @ника";
+    const userTag = isTelegramId
+      ? username && username !== `tg_${telegramId}`
+        ? `@${username}`
+        : "без @ника"
+      : username
+        ? `login:${username}`
+        : "без логина";
 
-    try {
-      await api.sendMessage(userId, PAYMENT_SUCCESS_USER(planLabel, amountStr, isRenewal), {
-        parse_mode: "HTML",
-      });
-    } catch (err) {
-      console.error("User payment notification (webhook) failed:", userId, err);
+    if (isTelegramId) {
+      try {
+        await api.sendMessage(
+          telegramId,
+          PAYMENT_SUCCESS_USER(planLabel, amountStr, isRenewal),
+          { parse_mode: "HTML" },
+        );
+      } catch (err) {
+        console.error("User payment notification (webhook) failed:", telegramId, err);
+      }
     }
 
     const rawBuyChat = process.env.ADMIN_CHAT_ID_BUY;
     if (rawBuyChat) {
       const admin = resolveAdminChat(rawBuyChat);
+      const notifyUserId = isTelegramId ? telegramId : webUserId!;
       try {
         await api.sendMessage(
           admin.chatId,
-          PAYMENT_ADMIN_NOTIFY(firstName, userTag, userId, planLabel, amountStr, provisionOk, isRenewal),
+          PAYMENT_ADMIN_NOTIFY(
+            firstName,
+            userTag,
+            notifyUserId,
+            planLabel,
+            amountStr,
+            provisionOk,
+            isRenewal,
+          ),
           {
             parse_mode: "HTML",
             ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
@@ -1039,7 +1395,7 @@ export function createApiServer(api: Api, botToken: string) {
       } catch (err) {
         console.error(
           "Admin payment notification (webhook) failed:",
-          { chatId: admin.chatId, topicId: admin.topicId, paymentId, userId },
+          { chatId: admin.chatId, topicId: admin.topicId, paymentId, notifyUserId },
           err,
         );
       }

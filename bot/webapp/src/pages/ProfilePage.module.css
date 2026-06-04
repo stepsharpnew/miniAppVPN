@@ -1,5 +1,43 @@
 .page {
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.helpLink {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 223, 238, 0.22);
+  background: rgba(0, 223, 238, 0.08);
+  color: #b8f6ff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.helpLink:hover {
+  background: rgba(0, 223, 238, 0.14);
+  border-color: rgba(0, 223, 238, 0.38);
+}
+
+.helpLink:active {
+  transform: scale(0.99);
+}
+
+.helpLinkIcon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.helpLinkText {
+  line-height: 1.2;
 }
 
 .profileCard {
@@ -52,14 +90,53 @@
   min-width: 0;
 }
 
-.sectionHeader {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 14px;
+/* ── Compact sync badge ── */
+
+.syncBadgeRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
 }
+
+.syncBadgeOk {
+  font-size: 11px;
+  font-weight: 600;
+  color: #88f0b3;
+  background: rgba(136, 240, 179, 0.1);
+  border: 1px solid rgba(136, 240, 179, 0.22);
+  border-radius: 20px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.syncBadgeLogin {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.syncBadgeLink {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  background: rgba(77, 139, 255, 0.1);
+  border: 1px solid rgba(77, 139, 255, 0.25);
+  border-radius: 20px;
+  padding: 3px 10px;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.syncBadgeLink:active {
+  opacity: 0.7;
+}
+
+/* ── Subscription status ── */
 
 .statusWrap {
   display: flex;
@@ -85,8 +162,10 @@
 .divider {
   height: 1px;
   background: rgba(255, 255, 255, 0.06);
-  margin: 12px 0;
+  margin: 14px 0;
 }
+
+/* ── VPN config block ── */
 
 .configBlock {
   display: flex;
@@ -94,131 +173,49 @@
   align-items: center;
 }
 
-.syncStatusCard {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(77, 139, 255, 0.2);
-  background: rgba(77, 139, 255, 0.08);
+/* ── VPN client toggle ── */
+
+.kindToggleWrap {
+  width: 100%;
+  margin-bottom: 16px;
 }
 
-.syncStatusTitle {
-  font-size: 13px;
-  font-weight: 700;
-  color: #d9e7ff;
-}
-
-.syncStatusOk {
-  font-size: 13px;
-  font-weight: 700;
-  color: #88f0b3;
-}
-
-.syncStatusText {
+.kindToggleLabel {
   font-size: 12px;
-  color: #c4d6ff;
-  line-height: 1.45;
-}
-
-.promoBlock {
-  display: flex;
-  flex-direction: column;
-}
-
-.referralCodeCard {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.referralCodeValue {
-  flex: 1;
-  min-width: 0;
-  padding: 14px 12px;
-  border-radius: var(--border-radius-sm);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  text-align: center;
-}
-
-.promoRow {
-  display: flex;
-  gap: 10px;
-}
-
-.referralHint {
-  margin-bottom: 10px;
-  font-size: 12px;
+  font-weight: 600;
   color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-.promoInput {
-  flex: 1;
-  min-width: 0;
-  padding: 14px 12px;
-  border-radius: var(--border-radius-sm);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-  font-size: 14px;
   text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 8px;
 }
 
-.promoInput::placeholder {
-  color: var(--text-secondary);
-  text-transform: none;
+.kindToggle {
+  display: flex;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 4px;
+  gap: 4px;
 }
 
-.promoBtn {
-  padding: 0 16px;
-  border-radius: var(--border-radius-sm);
+.kindTab {
+  flex: 1;
+  padding: 12px 6px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.35);
+  transition: color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.kindTabActive {
   background: var(--btn-gradient);
   color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  white-space: nowrap;
+  box-shadow: 0 2px 14px rgba(77, 139, 255, 0.35);
 }
 
-.promoBtn:disabled {
-  opacity: 0.6;
-}
-
-.secondaryBtn {
-  padding: 0 16px;
-  height: 48px;
-  border-radius: var(--border-radius-sm);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.secondaryBtn:disabled {
-  opacity: 0.6;
-}
-
-.promoSuccess {
-  margin-top: 10px;
-  color: #7df5ab;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.promoError {
-  margin-top: 10px;
-  color: #ff8e8e;
-  font-size: 12px;
-  line-height: 1.5;
-}
+/* ── Misc config ── */
 
 .noConfig {
   font-size: 13px;
@@ -226,6 +223,14 @@
   line-height: 1.6;
   text-align: center;
   padding: 6px 4px 2px;
+}
+
+.configHint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  text-align: center;
 }
 
 .qr {
@@ -255,61 +260,112 @@
   pointer-events: none;
 }
 
-.syncBtn {
-  flex: 1;
-  min-width: 0;
-  padding: 14px;
+.secondaryBtn {
+  padding: 0 16px;
+  height: 48px;
   border-radius: var(--border-radius-sm);
-  background: rgba(77, 139, 255, 0.12);
-  color: var(--accent-blue);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
   font-size: 14px;
   font-weight: 700;
-  transition: opacity 0.15s, background 0.15s;
+  white-space: nowrap;
 }
 
-.syncBtn:active {
-  opacity: 0.8;
-  background: rgba(77, 139, 255, 0.2);
+.secondaryBtn:disabled {
+  opacity: 0.6;
 }
 
-.syncActionRow {
+/* ── HAPP subscription block ── */
+
+.happUrlRow {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-}
-
-.syncInfoWrap {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.syncInfoBtn {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 1px solid rgba(77, 139, 255, 0.35);
-  background: rgba(77, 139, 255, 0.12);
-  color: var(--accent-blue);
-  font-size: 13px;
-  font-weight: 700;
-  display: inline-flex;
   align-items: center;
-  justify-content: center;
+  margin-bottom: 12px;
 }
 
-.syncTooltip {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  width: min(280px, calc(100vw - 56px));
+.happUrlInput {
+  flex: 1;
+  min-width: 0;
   padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(77, 139, 255, 0.28);
-  background: #1a1a33;
-  color: #d7e6ff;
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+  user-select: all;
+}
+
+.happOpenBtn {
+  width: 100%;
+  padding: 14px;
+  border-radius: var(--border-radius-sm);
+  background: linear-gradient(135deg, #7b2fff 0%, #5b4afe 100%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  transition: opacity 0.15s;
+  display: block;
+  text-align: center;
+  text-decoration: none;
+}
+
+.happOpenBtn:active {
+  opacity: 0.85;
+}
+
+/* ── Reissue (смена сервера) ── */
+
+.reissueBlock {
+  width: 100%;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.reissueHint {
   font-size: 12px;
-  line-height: 1.45;
-  z-index: 5;
-  text-align: left;
+  color: var(--text-secondary);
+}
+
+.reissueBtn {
+  width: 100%;
+  padding: 13px;
+  border-radius: var(--border-radius-sm);
+  border: 1px solid rgba(255, 171, 0, 0.3);
+  background: rgba(255, 171, 0, 0.08);
+  color: #ffd27d;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s;
+}
+
+.reissueBtn:hover {
+  background: rgba(255, 171, 0, 0.14);
+  border-color: rgba(255, 171, 0, 0.45);
+}
+
+.reissueBtn:active {
+  transform: scale(0.99);
+}
+
+.reissueBtn:disabled {
+  opacity: 0.55;
+}
+
+.reissueBtnOk {
+  border-color: rgba(136, 240, 179, 0.3);
+  background: rgba(136, 240, 179, 0.08);
+  color: #88f0b3;
+  pointer-events: none;
 }

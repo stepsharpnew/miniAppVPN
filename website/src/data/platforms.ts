@@ -5,7 +5,11 @@ export interface PlatformInfo {
   name: string;
   downloadUrl: string;
   steps: string[];
+  happDownloadUrl: string;
+  happSteps: string[];
 }
+
+export type VpnClientKind = "amneziawg" | "happ";
 
 export const PLATFORMS: PlatformInfo[] = [
   {
@@ -19,6 +23,14 @@ export const PLATFORMS: PlatformInfo[] = [
       "Наведите камеру на QR-конфиг из личного кабинета",
       "Подтвердите импорт и нажмите «Подключиться»",
     ],
+    happDownloadUrl:
+      "https://play.google.com/store/apps/details?id=com.happproxy",
+    happSteps: [
+      "Скачайте HAPP из Google Play по кнопке ниже",
+      "Скопируйте HAPP-ссылку из профиля",
+      "Откройте HAPP и добавьте подписку из буфера обмена",
+      "Выберите сервер и нажмите «Подключиться»",
+    ],
   },
   {
     id: "ios",
@@ -29,6 +41,14 @@ export const PLATFORMS: PlatformInfo[] = [
       "Откройте AmneziaWG и нажмите «Сканировать QR»",
       "Наведите камеру на QR-конфиг из личного кабинета",
       "Разрешите VPN-профиль в iOS и подключитесь",
+    ],
+    happDownloadUrl:
+      "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+    happSteps: [
+      "Скачайте HAPP из App Store по кнопке ниже",
+      "Скопируйте HAPP-ссылку из профиля",
+      "Откройте HAPP и добавьте подписку из буфера обмена",
+      "Выберите сервер и нажмите «Подключиться»",
     ],
   },
   {
@@ -41,6 +61,13 @@ export const PLATFORMS: PlatformInfo[] = [
       "Вставьте или загрузите выданный конфиг",
       "Сохраните профиль и нажмите «Connect»",
     ],
+    happDownloadUrl: "https://github.com/Happ-proxy/happ-desktop/releases/latest",
+    happSteps: [
+      "Скачайте HAPP для Windows по кнопке ниже",
+      "Скопируйте HAPP-ссылку из профиля",
+      "Откройте HAPP и добавьте подписку из буфера обмена",
+      "Выберите сервер и нажмите «Подключиться»",
+    ],
   },
   {
     id: "macos",
@@ -52,6 +79,14 @@ export const PLATFORMS: PlatformInfo[] = [
       "Наведите камеру на QR-конфиг из личного кабинета",
       "Подтвердите импорт и включите VPN",
     ],
+    happDownloadUrl:
+      "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+    happSteps: [
+      "Скачайте HAPP из App Store по кнопке ниже",
+      "Скопируйте HAPP-ссылку из профиля",
+      "Откройте HAPP и добавьте подписку из буфера обмена",
+      "Выберите сервер и нажмите «Подключиться»",
+    ],
   },
   {
     id: "linux",
@@ -62,6 +97,13 @@ export const PLATFORMS: PlatformInfo[] = [
       "Запустите клиент и откройте «Сканировать QR»",
       "Сканируйте QR-код или загрузите конфиг",
       "Активируйте профиль и поднимите туннель",
+    ],
+    happDownloadUrl: "https://github.com/Happ-proxy/happ-desktop/releases/latest",
+    happSteps: [
+      "Скачайте HAPP для Linux по кнопке ниже",
+      "Скопируйте HAPP-ссылку из профиля",
+      "Откройте HAPP и добавьте подписку из буфера обмена",
+      "Выберите сервер и нажмите «Подключиться»",
     ],
   },
 ];

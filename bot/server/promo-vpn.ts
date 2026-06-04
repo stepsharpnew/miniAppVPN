@@ -2,15 +2,24 @@ import { PRICING } from "../shared/plans";
 import { getConfig, saveConfig } from "./config-store";
 import {
   getAllEnabledServers,
+  getHappPanelServer,
+  getPool,
   getRandomEnabledServer,
   incrementServerUserCount,
   type ReferralRewardParty,
   type ReferralRewardResult,
   type ServerRow,
   type UserRow,
+  updateUserHappUrl,
   updateUserVpnConfig,
 } from "./db";
-import { extendVpnClient, provisionVpnClient } from "./vpn";
+import { extendHapp, provisionHapp } from "./happ";
+import {
+  deleteVpnClient,
+  extendVpnClient,
+  provisionVpnClient,
+  provisionVpnClientUntilExpiry,
+} from "./vpn";
 
 function getServerBaseUrl(server: ServerRow): string {
   const raw = server.domain_server_name;
@@ -101,6 +110,35 @@ function partyVpnClientName(party: ReferralRewardParty): string | null {
   return null;
 }
 
+async function extendHappForParty(
+  party: ReferralRewardParty,
+  months: number,
+): Promise<void> {
+  const happPanel = await getHappPanelServer();
+  if (!happPanel) return;
+
+  const clientName = partyVpnClientName(party);
+  if (!clientName) return;
+
+  const durationCode = getDurationCode(months);
+  try {
+    const { rows } = await getPool().query<{ happ_subscription_url: string | null }>(
+      "SELECT happ_subscription_url FROM users WHERE id = $1",
+      [party.userId],
+    );
+    const existingHappUrl = rows[0]?.happ_subscription_url ?? null;
+
+    if (existingHappUrl) {
+      await extendHapp(happPanel, clientName, durationCode);
+    } else {
+      const result = await provisionHapp(happPanel, clientName, durationCode);
+      await updateUserHappUrl(party.userId, result.url);
+    }
+  } catch (err) {
+    console.error("HAPP extend for referral party failed:", { userId: party.userId, err });
+  }
+}
+
 async function extendVpnForParty(
   party: ReferralRewardParty,
   months: number,
@@ -129,6 +167,80 @@ async function extendVpnForParty(
   );
 }
 
+export interface ReissueVpnResult {
+  config: string;
+  /** null — клиент не найден ни на одном сервере (выдан как новый) */
+  deletedFromServerId: string | null;
+  newServerId: string;
+}
+
+/**
+ * Смена сервера: создать клиента на другом сервере с тем же сроком действия,
+ * затем удалить со старого.
+ *
+ * Порядок: сначала создать → потом удалить, чтобы при сбое удаления пользователь
+ * не остался без конфига. Старый клиент протухнет по expires_at.
+ */
+export async function reissueVpnConfig(
+  user: UserRow,
+  clientName: string,
+): Promise<ReissueVpnResult> {
+  const expiredAt = user.expired_at ? new Date(user.expired_at) : null;
+  if (!expiredAt || expiredAt.getTime() <= Date.now()) {
+    throw new Error("subscription_inactive");
+  }
+
+  const allServers = await getAllEnabledServers();
+  if (allServers.length < 2) {
+    throw new Error("no_other_servers");
+  }
+
+  // Шаг 1: найти старый сервер (обходим все, ищем клиента)
+  let oldWgServerId: string | null = null;
+  for (const srv of allServers) {
+    try {
+      const baseUrl = getServerBaseUrl(srv);
+      // findExistingClient ищет по всем WireGuard-серверам на этой VM,
+      // deleteVpnClient вернёт WG server_id если нашёл
+      const found = await deleteVpnClient(clientName, baseUrl).catch(() => null);
+      if (found !== null) {
+        // Запоминаем DB server_id (uuid) для исключения при выборе нового
+        oldWgServerId = srv.server_id;
+        break;
+      }
+    } catch {
+      // узел недоступен — пропускаем
+    }
+  }
+
+  // Шаг 2: выбрать новый сервер (исключить тот, на котором был клиент)
+  const candidates = allServers.filter((s) => s.server_id !== oldWgServerId);
+  if (candidates.length === 0) {
+    throw new Error("no_other_servers");
+  }
+  const newServer = candidates[Math.floor(Math.random() * candidates.length)];
+  const newBaseUrl = getServerBaseUrl(newServer);
+
+  // Шаг 3: провизионировать с тем же сроком (ISO/abs для нового app.py, 1m–12m для старого)
+  const config = await provisionVpnClientUntilExpiry(
+    clientName,
+    expiredAt,
+    newServer.server_id,
+    newBaseUrl,
+  );
+
+  // Шаг 4: сохранить новый конфиг в БД
+  saveConfig(user.id, config);
+  await updateUserVpnConfig(user.id, config);
+  await incrementServerUserCount(newServer.server_id).catch(() => {});
+
+  return {
+    config,
+    deletedFromServerId: oldWgServerId,
+    newServerId: newServer.server_id,
+  };
+}
+
 /**
  * Sync VPN expiry with the bonus months granted by a referral reward.
  * Without this, the DB's expired_at drifts ahead of the VPN server's
@@ -141,8 +253,10 @@ export async function syncVpnForReferralReward(
 
   if (reward.invitedUser && reward.invitedBonusMonths > 0) {
     await extendVpnForParty(reward.invitedUser, reward.invitedBonusMonths);
+    await extendHappForParty(reward.invitedUser, reward.invitedBonusMonths);
   }
   if (reward.referrerUser && reward.referrerBonusMonths > 0) {
     await extendVpnForParty(reward.referrerUser, reward.referrerBonusMonths);
+    await extendHappForParty(reward.referrerUser, reward.referrerBonusMonths);
   }
 }

@@ -72,7 +72,14 @@
 .divider {
   height: 1px;
   background: rgba(255, 255, 255, 0.06);
-  margin: 16px 0;
+  margin: 14px 0;
+}
+
+.compactGrid {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+  margin-top: 16px;
 }
 
 .telegramSyncBlock {
@@ -165,6 +172,30 @@
   font-size: 12px;
 }
 
+.kindToggle {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.kindTab {
+  flex: 1;
+  padding: 10px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.kindTabActive {
+  background: var(--btn-gradient);
+  border-color: transparent;
+  color: #fff;
+}
+
 .configBlock {
   display: flex;
   flex-direction: column;
@@ -186,6 +217,14 @@
   line-height: 1.6;
   text-align: center;
   padding: 6px 4px 2px;
+}
+
+.configHint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  text-align: center;
 }
 
 .qr {
@@ -238,6 +277,44 @@
   opacity: 0.85;
 }
 
+.happUrlRow {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.happUrlInput {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 12px;
+  outline: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.happOpenBtn {
+  width: 100%;
+  padding: 14px;
+  margin-top: 12px;
+  border-radius: var(--border-radius-sm);
+  background: linear-gradient(135deg, #7b2fff 0%, #5b4afe 100%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+
+.happOpenBtn:active {
+  opacity: 0.85;
+}
+
 .buyBtn {
   width: 100%;
   padding: 16px;
@@ -275,4 +352,64 @@
   color: #ff6b6b;
   border-color: rgba(255, 107, 107, 0.2);
   background: rgba(255, 107, 107, 0.06);
+}
+
+/* ── Reissue (смена сервера) ── */
+
+.reissueBlock {
+  width: 100%;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.reissueHint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.reissueBtn {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 171, 0, 0.3);
+  background: rgba(255, 171, 0, 0.07);
+  color: #ffd27d;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s;
+}
+
+.reissueBtn:hover {
+  background: rgba(255, 171, 0, 0.13);
+  border-color: rgba(255, 171, 0, 0.45);
+}
+
+.reissueBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.reissueBtnOk {
+  border-color: rgba(136, 240, 179, 0.3);
+  background: rgba(136, 240, 179, 0.07);
+  color: #7df5ab;
+  pointer-events: none;
+}
+
+.reissueError {
+  font-size: 12px;
+  color: #ff8e8e;
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .compactGrid {
+    grid-template-columns: 1fr;
+  }
 }

@@ -143,19 +143,15 @@ export async function runSubscriptionExpiryRemindersOnce(
 }
 
 /**
- * Каждый час в 0 минут по Москве проверяем окна напоминаний.
- *
- * Раньше запуск был раз в сутки в 11:00 МСК — если процесс был не запущен
- * именно в это время (рестарт, деплой, краш), целый день пропускался, и
- * пользователи могли проскочить мимо узких окон `d1` / `expired` (1–2 дня).
- * Запросы уже фильтруют по флагам и окнам, так что лишних отправок не будет.
+ * Ежедневно в 11:00 по Москве. При рестарте/деплое catch-up в index.ts
+ * компенсирует пропущенный запуск в это окно.
  */
 export function scheduleSubscriptionExpiryReminders(
   api: Api,
   getRenewKeyboard: () => InlineKeyboard | undefined,
 ): ScheduledTask {
   return schedule(
-    "0 * * * *",
+    "0 11 * * *",
     () => {
       void runSubscriptionExpiryRemindersOnce(api, getRenewKeyboard).catch(
         (e) => console.error("subscription-reminder: job error", e),

@@ -7,6 +7,7 @@ import { Preloader } from "./components/Preloader";
 import { InstructionsPage } from "./pages/InstructionsPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { PurchasePage } from "./pages/PurchasePage";
+import { ReferralPage } from "./pages/ReferralPage";
 import { SupportPage } from "./pages/SupportPage";
 import { SyncPage } from "./pages/SyncPage";
 import { waitForTelegramInitData } from "./utils/telegramInitData";
@@ -14,7 +15,7 @@ import { waitForTelegramInitData } from "./utils/telegramInitData";
 function initialTabFromLocation(): TabId {
   if (typeof window === "undefined") return "profile";
   const raw = window.location.hash.replace(/^#/, "").split(/[?&]/)[0];
-  const valid: TabId[] = ["purchase", "profile", "instructions", "support"];
+  const valid: TabId[] = ["purchase", "profile", "referral", "instructions", "support"];
   return valid.includes(raw as TabId) ? (raw as TabId) : "profile";
 }
 
@@ -133,13 +134,19 @@ export default function App() {
               {showSync ? (
                 <SyncPage onBack={() => setShowSync(false)} />
               ) : (
-                <ProfilePage onOpenSync={() => setShowSync(true)} />
+                <ProfilePage
+                  onOpenSync={() => setShowSync(true)}
+                  onOpenInstructions={() => setActiveTab("instructions")}
+                />
               )}
             </div>
             <div
               style={activeTab === "instructions" ? visibleStyle : hiddenStyle}
             >
               <InstructionsPage />
+            </div>
+            <div style={activeTab === "referral" ? visibleStyle : hiddenStyle}>
+              <ReferralPage />
             </div>
             <div style={activeTab === "support" ? visibleStyle : hiddenStyle}>
               <SupportPage active={activeTab === "support"} />

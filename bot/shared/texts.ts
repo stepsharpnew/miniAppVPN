@@ -1,10 +1,17 @@
 export const BRAND_NAME = "MEME VPN";
 
+export const TELEGRAM_BOT_USERNAME = "meme_tunnel_bot";
+export const TELEGRAM_BOT_URL = `https://t.me/${TELEGRAM_BOT_USERNAME}`;
+/** Публичная ссылка на Mini App (подарочный VPN). */
+export const MINI_APP_URL = "https://app.memeinternet.site";
+
 export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // ── Admin-facing: new ticket from Mini App ──

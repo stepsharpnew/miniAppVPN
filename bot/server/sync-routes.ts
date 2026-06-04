@@ -8,9 +8,19 @@ import {
   mergeAccounts,
   updatePasswordHash,
 } from "./db";
-import { generateTokens, normalizeLogin, validateLogin } from "./web-auth";
+import {
+  SALT_ROUNDS,
+  generateTokens,
+  getUserPasswordVersion,
+  normalizeLogin,
+  validateLogin,
+} from "./web-auth";
+import { authRateLimiter } from "./security";
 
-const SALT_ROUNDS = 10;
+async function tokensForUser(userId: string) {
+  const pv = await getUserPasswordVersion(userId);
+  return generateTokens(userId, pv);
+}
 const MIN_PASSWORD_LENGTH = 8;
 
 interface TelegramUser {
@@ -66,7 +76,7 @@ export function mountSyncRoutes(
   });
 
   // Регистрация веб-аккаунта изнутри Mini App: создаём логин/пароль и привязываем к TG.
-  app.post("/api/sync/register", auth, async (req, res) => {
+  app.post("/api/sync/register", auth, authRateLimiter, async (req, res) => {
     const tg = getTgUser(req);
     const { login, password } = req.body ?? {};
 
@@ -114,7 +124,7 @@ export function mountSyncRoutes(
         return;
       }
 
-      const tokens = generateTokens(user.id);
+      const tokens = await tokensForUser(user.id);
       res.json({ ok: true, ...tokens });
     } catch (err) {
       console.error("Sync register error:", err);
@@ -124,7 +134,7 @@ export function mountSyncRoutes(
 
   // Привязка существующего веб-аккаунта к текущему Telegram-юзеру.
   // Знание пароля = доказательство владения веб-аккаунтом, initData = доказательство TG.
-  app.post("/api/sync/link", auth, async (req, res) => {
+  app.post("/api/sync/link", auth, authRateLimiter, async (req, res) => {
     const tg = getTgUser(req);
     const { login, password } = req.body ?? {};
 
@@ -151,7 +161,7 @@ export function mountSyncRoutes(
 
       // Уже привязан к этому же TG — просто отдаём токены.
       if (webUser.telegram_id === tg.id) {
-        const tokens = generateTokens(webUser.id);
+        const tokens = await tokensForUser(webUser.id);
         res.json({ ok: true, ...tokens });
         return;
       }
@@ -173,7 +183,7 @@ export function mountSyncRoutes(
         tg.username ?? null,
       );
 
-      const tokens = generateTokens(merged.id);
+      const tokens = await tokensForUser(merged.id);
       res.json({ ok: true, ...tokens });
     } catch (err) {
       console.error("Sync link error:", err);
@@ -214,7 +224,7 @@ export function mountSyncRoutes(
       const hash = await bcrypt.hash(password, SALT_ROUNDS);
       await updatePasswordHash(user.id, hash);
 
-      const tokens = generateTokens(user.id);
+      const tokens = await tokensForUser(user.id);
       res.json({ ok: true, ...tokens });
     } catch (err) {
       console.error("Sync set-password error:", err);

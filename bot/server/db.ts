@@ -7,7 +7,7 @@ export function getPool(): Pool {
   if (!pool) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is not set");
-    pool = new Pool({ connectionString: url, max: 10 });
+    pool = new Pool({ connectionString: url, max: 30 });
   }
   return pool;
 }
@@ -16,6 +16,75 @@ export async function initDb(): Promise<void> {
   const client = await getPool().connect();
   try {
     await client.query("SELECT 1");
+    // Safety net if create_tables.sql did not reach the HAPP section (e.g. failed mid-file).
+    await client.query(
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS happ_subscription_url TEXT",
+    );
+    await client.query(
+      "ALTER TABLE servers ADD COLUMN IF NOT EXISTS supports_happ BOOLEAN NOT NULL DEFAULT FALSE",
+    );
+    await client.query(
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_version INTEGER NOT NULL DEFAULT 0",
+    );
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS promo_codes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        code VARCHAR(32) NOT NULL UNIQUE,
+        months SMALLINT NOT NULL CHECK (months IN (1, 3, 6)),
+        kind TEXT NOT NULL DEFAULT 'single_use',
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        deactivated_at TIMESTAMP WITH TIME ZONE,
+        used_at TIMESTAMP WITH TIME ZONE,
+        used_by UUID REFERENCES users(id)
+      )`,
+    );
+    await client.query(
+      "ALTER TABLE promo_codes ALTER COLUMN code TYPE VARCHAR(32) USING btrim(code::text)",
+    );
+    await client.query(
+      "ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'single_use'",
+    );
+    await client.query(
+      "ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
+    );
+    await client.query(
+      "ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()",
+    );
+    await client.query(
+      "ALTER TABLE promo_codes ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP WITH TIME ZONE",
+    );
+    await client.query(
+      `DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'promo_codes_kind_check'
+        ) THEN
+          ALTER TABLE promo_codes
+            ADD CONSTRAINT promo_codes_kind_check CHECK (kind IN ('single_use', 'multi_use'));
+        END IF;
+
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'promo_codes_code_format_check'
+        ) THEN
+          ALTER TABLE promo_codes
+            ADD CONSTRAINT promo_codes_code_format_check CHECK (code ~ '^[A-Z0-9_-]{3,32}$');
+        END IF;
+      END $$`,
+    );
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS promo_redemptions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        promo_code_id UUID NOT NULL REFERENCES promo_codes(id),
+        user_id UUID NOT NULL REFERENCES users(id),
+        redeemed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        UNIQUE (promo_code_id, user_id)
+      )`,
+    );
+    await client.query(
+      "CREATE INDEX IF NOT EXISTS promo_redemptions_user_idx ON promo_redemptions (user_id, redeemed_at)",
+    );
     console.log("PostgreSQL connected");
   } finally {
     client.release();
@@ -36,6 +105,7 @@ export interface UserRow {
   telegram_nickname: string | null;
   expired_at: string | null;
   vpn_config: string | null;
+  happ_subscription_url: string | null;
   created_at: string;
   referral_code: string | null;
   referred_by_user_id: string | null;
@@ -44,6 +114,7 @@ export interface UserRow {
   is_notificated_d1?: boolean;
   is_notificated_expired?: boolean;
   is_notificated_cancelled?: boolean;
+  password_version?: number;
 }
 
 export interface ReferralInfo {
@@ -51,6 +122,7 @@ export interface ReferralInfo {
   my_referral_code: string | null;
   referred_by_applied: boolean;
   referred_by_code: string | null;
+  referred_by_nickname: string | null;
   referral_message: string | null;
   referred_by_user_id: string | null;
 }
@@ -85,6 +157,8 @@ export interface ReferralRewardResult {
   paymentId: string;
   invitedBonusMonths: number;
   referrerBonusMonths: number;
+  invitedBonusDays: number;
+  referrerBonusDays: number;
   isFirstPaidConversion: boolean;
   invitedUserId: string;
   referrerUserId: string | null;
@@ -100,11 +174,25 @@ export interface SubscriptionReminderRow {
 }
 
 export const REFERRAL_APPLY_SUCCESS_MESSAGE =
-  "Промокод успешно применен, при покупке вам будет в подарок 1 месяц";
+  "Промокод успешно применен, при покупке вам будет в подарок 30 дней";
 
 const CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const REFERRAL_CODE_LENGTH = 8;
+/** Legacy constant — kept only for the invited-user fixed bonus. */
 const REFERRAL_BONUS_MONTHS = 1;
+
+/** Tiered bonus days awarded to the referrer on each paid conversion. */
+const REFERRAL_TIER1_DAYS = 30; // conversions 1-3
+const REFERRAL_TIER2_DAYS = 45; // conversions 4-10
+const REFERRAL_TIER3_DAYS = 60; // conversions 11+
+/** Fixed bonus days for the invited user (always Tier 1). */
+const REFERRAL_INVITED_BONUS_DAYS = 30;
+
+function getReferralBonusDaysByRank(rank: number): number {
+  if (rank <= 3) return REFERRAL_TIER1_DAYS;
+  if (rank <= 10) return REFERRAL_TIER2_DAYS;
+  return REFERRAL_TIER3_DAYS;
+}
 
 function generateRandomCode(length: number): string {
   const bytes = crypto.randomBytes(length);
@@ -749,7 +837,10 @@ export async function updatePasswordHash(
   passwordHash: string,
 ): Promise<void> {
   await getPool().query(
-    "UPDATE users SET password_hash = $1 WHERE id = $2",
+    `UPDATE users
+     SET password_hash = $1,
+         password_version = COALESCE(password_version, 0) + 1
+     WHERE id = $2`,
     [passwordHash, userId],
   );
 }
@@ -778,6 +869,27 @@ async function extendSubscriptionWithClient(
   );
 }
 
+async function extendSubscriptionWithClientByDays(
+  client: Pick<Pool, "query">,
+  userId: string,
+  days: number,
+): Promise<void> {
+  await client.query(
+    `UPDATE users
+     SET expired_at = CASE
+       WHEN expired_at IS NOT NULL AND expired_at > NOW()
+         THEN expired_at + make_interval(days => $2)
+         ELSE NOW() + make_interval(days => $2)
+     END,
+     is_notificated_d3 = FALSE,
+     is_notificated_d1 = FALSE,
+     is_notificated_expired = FALSE,
+     is_notificated_cancelled = FALSE
+     WHERE id = $1`,
+    [userId, days],
+  );
+}
+
 function mapReferralParty(
   user: Pick<
     UserRow,
@@ -802,8 +914,11 @@ export async function getUserReferralInfo(userId: string): Promise<ReferralInfo>
   const { rows } = await getPool().query<{
     referred_by_user_id: string | null;
     referred_by_code: string | null;
+    referred_by_nickname: string | null;
   }>(
-    `SELECT u.referred_by_user_id, ref.referral_code AS referred_by_code
+    `SELECT u.referred_by_user_id,
+            ref.referral_code AS referred_by_code,
+            ref.telegram_nickname AS referred_by_nickname
      FROM users u
      LEFT JOIN users ref ON ref.id = u.referred_by_user_id
      WHERE u.id = $1`,
@@ -816,6 +931,7 @@ export async function getUserReferralInfo(userId: string): Promise<ReferralInfo>
     my_referral_code: myReferralCode,
     referred_by_applied: rows[0].referred_by_user_id !== null,
     referred_by_code: rows[0].referred_by_code ?? null,
+    referred_by_nickname: rows[0].referred_by_nickname ?? null,
     referral_message:
       rows[0].referred_by_user_id !== null ? REFERRAL_APPLY_SUCCESS_MESSAGE : null,
     referred_by_user_id: rows[0].referred_by_user_id,
@@ -828,8 +944,11 @@ export async function getUserReferralInfoForWeb(userId: string): Promise<Referra
   const { rows } = await getPool().query<{
     referred_by_user_id: string | null;
     referred_by_code: string | null;
+    referred_by_nickname: string | null;
   }>(
-    `SELECT u.referred_by_user_id, ref.referral_code AS referred_by_code
+    `SELECT u.referred_by_user_id,
+            ref.referral_code AS referred_by_code,
+            ref.telegram_nickname AS referred_by_nickname
      FROM users u
      LEFT JOIN users ref ON ref.id = u.referred_by_user_id
      WHERE u.id = $1`,
@@ -842,6 +961,7 @@ export async function getUserReferralInfoForWeb(userId: string): Promise<Referra
     my_referral_code: myReferralCode,
     referred_by_applied: rows[0].referred_by_user_id !== null,
     referred_by_code: rows[0].referred_by_code ?? null,
+    referred_by_nickname: rows[0].referred_by_nickname ?? null,
     referral_message:
       rows[0].referred_by_user_id !== null ? REFERRAL_APPLY_SUCCESS_MESSAGE : null,
     referred_by_user_id: rows[0].referred_by_user_id,
@@ -955,6 +1075,8 @@ export async function applyReferralRewardsForPayment(
         paymentId,
         invitedBonusMonths: REFERRAL_BONUS_MONTHS,
         referrerBonusMonths: REFERRAL_BONUS_MONTHS,
+        invitedBonusDays: REFERRAL_INVITED_BONUS_DAYS,
+        referrerBonusDays: REFERRAL_TIER1_DAYS,
         isFirstPaidConversion: false,
         invitedUserId,
         referrerUserId: null,
@@ -980,6 +1102,8 @@ export async function applyReferralRewardsForPayment(
         paymentId,
         invitedBonusMonths: REFERRAL_BONUS_MONTHS,
         referrerBonusMonths: REFERRAL_BONUS_MONTHS,
+        invitedBonusDays: REFERRAL_INVITED_BONUS_DAYS,
+        referrerBonusDays: REFERRAL_TIER1_DAYS,
         isFirstPaidConversion: false,
         invitedUserId,
         referrerUserId: null,
@@ -988,9 +1112,21 @@ export async function applyReferralRewardsForPayment(
       };
     }
 
+    // Count referrer's prior paid conversions (before this payment) to determine tier.
+    const { rows: convCountRows } = await client.query<{ cnt: string }>(
+      `SELECT COUNT(*)::TEXT AS cnt FROM referral_rewards WHERE referrer_user_id = $1`,
+      [referrerUser.id],
+    );
+    const priorConversions = parseInt(convCountRows[0]?.cnt ?? "0", 10);
+    // This payment will be the (priorConversions + 1)-th conversion (1-indexed).
+    const referrerBonusDays = getReferralBonusDaysByRank(priorConversions + 1);
+    const invitedBonusDays = REFERRAL_INVITED_BONUS_DAYS;
+
     const { rows: insertedRows } = await client.query<{
       invited_bonus_months: number;
       referrer_bonus_months: number;
+      invited_bonus_days: number;
+      referrer_bonus_days: number;
       is_first_paid_conversion: boolean;
     }>(
       `WITH prior_reward AS (
@@ -1008,30 +1144,38 @@ export async function applyReferralRewardsForPayment(
            referrer_user_id,
            invited_bonus_months,
            referrer_bonus_months,
+           invited_bonus_days,
+           referrer_bonus_days,
            is_first_paid_conversion
          )
          SELECT
            $1,
            $2,
            $3,
+           1,
+           1,
            $4,
-           $4,
+           $5,
            NOT has_prior_reward
          FROM prior_reward
          ON CONFLICT (payment_id) DO NOTHING
-         RETURNING invited_bonus_months, referrer_bonus_months, is_first_paid_conversion
+         RETURNING invited_bonus_months, referrer_bonus_months,
+                   invited_bonus_days, referrer_bonus_days, is_first_paid_conversion
        )
        SELECT * FROM inserted`,
-      [paymentId, invitedUserId, referrerUser.id, REFERRAL_BONUS_MONTHS],
+      [paymentId, invitedUserId, referrerUser.id, invitedBonusDays, referrerBonusDays],
     );
 
     if (!insertedRows[0]) {
       const { rows: existingRows } = await client.query<{
         invited_bonus_months: number;
         referrer_bonus_months: number;
+        invited_bonus_days: number;
+        referrer_bonus_days: number;
         is_first_paid_conversion: boolean;
       }>(
-        `SELECT invited_bonus_months, referrer_bonus_months, is_first_paid_conversion
+        `SELECT invited_bonus_months, referrer_bonus_months,
+                invited_bonus_days, referrer_bonus_days, is_first_paid_conversion
          FROM referral_rewards
          WHERE payment_id = $1`,
         [paymentId],
@@ -1047,6 +1191,8 @@ export async function applyReferralRewardsForPayment(
           existingRows[0]?.invited_bonus_months ?? REFERRAL_BONUS_MONTHS,
         referrerBonusMonths:
           existingRows[0]?.referrer_bonus_months ?? REFERRAL_BONUS_MONTHS,
+        invitedBonusDays: existingRows[0]?.invited_bonus_days ?? REFERRAL_INVITED_BONUS_DAYS,
+        referrerBonusDays: existingRows[0]?.referrer_bonus_days ?? REFERRAL_TIER1_DAYS,
         isFirstPaidConversion: existingRows[0]?.is_first_paid_conversion ?? false,
         invitedUserId,
         referrerUserId: referrerUser.id,
@@ -1055,17 +1201,17 @@ export async function applyReferralRewardsForPayment(
       };
     }
 
-    // Keep reward insert and month extensions in one transaction so duplicate
+    // Keep reward insert and subscription extensions in one transaction so duplicate
     // webhooks/status polls cannot ever grant the same referral bonus twice.
-    await extendSubscriptionWithClient(
+    await extendSubscriptionWithClientByDays(
       client,
       invitedUser.id,
-      insertedRows[0].invited_bonus_months,
+      insertedRows[0].invited_bonus_days,
     );
-    await extendSubscriptionWithClient(
+    await extendSubscriptionWithClientByDays(
       client,
       referrerUser.id,
-      insertedRows[0].referrer_bonus_months,
+      insertedRows[0].referrer_bonus_days,
     );
 
     await client.query("COMMIT");
@@ -1075,6 +1221,8 @@ export async function applyReferralRewardsForPayment(
       paymentId,
       invitedBonusMonths: insertedRows[0].invited_bonus_months,
       referrerBonusMonths: insertedRows[0].referrer_bonus_months,
+      invitedBonusDays: insertedRows[0].invited_bonus_days,
+      referrerBonusDays: insertedRows[0].referrer_bonus_days,
       isFirstPaidConversion: insertedRows[0].is_first_paid_conversion,
       invitedUserId,
       referrerUserId: referrerUser.id,
@@ -1130,6 +1278,7 @@ export interface ServerRow {
   enable: boolean;
   domain_server_name: string | null;
   user_count: number;
+  supports_happ: boolean;
 }
 
 export async function getRandomEnabledServer(): Promise<ServerRow | null> {
@@ -1155,11 +1304,34 @@ export async function incrementServerUserCount(
   );
 }
 
+export async function getHappPanelServer(): Promise<ServerRow | null> {
+  const { rows } = await getPool().query<ServerRow>(
+    "SELECT * FROM servers WHERE enable = TRUE AND supports_happ = TRUE LIMIT 1",
+  );
+  return rows[0] ?? null;
+}
+
+export async function updateUserHappUrl(
+  userId: string,
+  url: string,
+): Promise<void> {
+  await getPool().query(
+    "UPDATE users SET happ_subscription_url = $2 WHERE id = $1",
+    [userId, url],
+  );
+}
+
 // ── Promo codes ──
 
 const PROMO_LENGTH = 8;
 const PROMO_RATE_LIMIT = 5;
 const PROMO_WINDOW_INTERVAL = "1 hour";
+const SHARED_PROMO_CODE_REGEX = /^[A-Z0-9_-]{3,32}$/;
+
+export function normalizeSharedPromoCode(rawCode: string): string | null {
+  const code = rawCode.trim().toUpperCase();
+  return SHARED_PROMO_CODE_REGEX.test(code) ? code : null;
+}
 
 export async function generatePromoCodes(
   count: number,
@@ -1185,7 +1357,102 @@ export async function generatePromoCodes(
   return codes;
 }
 
-export type PromoRedeemError = "not_found" | "already_used" | "rate_limited";
+export interface SharedPromoCodeResult {
+  code: string;
+  months: number;
+  isActive: boolean;
+}
+
+export async function upsertSharedPromoCode(
+  rawCode: string,
+  months: 1 | 3 | 6,
+): Promise<SharedPromoCodeResult | null> {
+  const code = normalizeSharedPromoCode(rawCode);
+  if (!code) return null;
+
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{
+      id: string;
+      code: string;
+      months: number;
+      is_active: boolean;
+      used_by: string | null;
+    }>(
+      `INSERT INTO promo_codes (code, months, kind, is_active, deactivated_at, updated_at)
+       VALUES ($1, $2, 'multi_use', TRUE, NULL, NOW())
+       ON CONFLICT (code) DO UPDATE
+         SET months = EXCLUDED.months,
+             kind = 'multi_use',
+             is_active = TRUE,
+             deactivated_at = NULL,
+             updated_at = NOW()
+       RETURNING id, code, months, is_active, used_by`,
+      [code, months],
+    );
+
+    const promo = rows[0];
+    if (promo.used_by) {
+      await client.query(
+        `INSERT INTO promo_redemptions (promo_code_id, user_id)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING`,
+        [promo.id, promo.used_by],
+      );
+    }
+
+    await client.query("COMMIT");
+    return {
+      code: promo.code,
+      months: promo.months,
+      isActive: promo.is_active,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deactivateSharedPromoCode(
+  rawCode: string,
+): Promise<SharedPromoCodeResult | null> {
+  const code = normalizeSharedPromoCode(rawCode);
+  if (!code) return null;
+
+  const { rows } = await getPool().query<{
+    code: string;
+    months: number;
+    is_active: boolean;
+  }>(
+    `UPDATE promo_codes
+     SET is_active = FALSE,
+         deactivated_at = NOW(),
+         updated_at = NOW()
+     WHERE code = $1
+       AND kind = 'multi_use'
+     RETURNING code, months, is_active`,
+    [code],
+  );
+
+  const promo = rows[0];
+  if (!promo) return null;
+  return {
+    code: promo.code,
+    months: promo.months,
+    isActive: promo.is_active,
+  };
+}
+
+export type PromoRedeemError =
+  | "not_found"
+  | "already_used"
+  | "already_redeemed"
+  | "inactive"
+  | "rate_limited"
+  | "daily_limit";
 
 export interface PromoRedeemResult {
   ok: boolean;
@@ -1224,35 +1491,82 @@ export async function redeemPromoCode(
     const { rows: codeRows } = await client.query<{
       id: string;
       months: number;
+      kind: "single_use" | "multi_use";
+      is_active: boolean;
       used_at: string | null;
     }>(
-      `SELECT id, months, used_at FROM promo_codes WHERE code = $1 FOR UPDATE`,
+      `SELECT id, months, kind, is_active, used_at
+       FROM promo_codes
+       WHERE code = $1
+       FOR UPDATE`,
       [code],
     );
 
     if (codeRows.length === 0) {
-      await client.query(
-        `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, FALSE)`,
-        [userId, code],
-      );
       await client.query("COMMIT");
       return { ok: false, error: "not_found" };
     }
 
     const promo = codeRows[0];
-    if (promo.used_at !== null) {
-      await client.query(
-        `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, FALSE)`,
-        [userId, code],
-      );
-      await client.query("COMMIT");
-      return { ok: false, error: "already_used" };
-    }
+    if (promo.kind === "multi_use") {
+      if (!promo.is_active) {
+        await client.query(
+          `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, FALSE)`,
+          [userId, code],
+        );
+        await client.query("COMMIT");
+        return { ok: false, error: "inactive" };
+      }
 
-    await client.query(
-      `UPDATE promo_codes SET used_at = NOW(), used_by = $1 WHERE id = $2`,
-      [userId, promo.id],
-    );
+      const { rows: redemptionRows } = await client.query<{ id: string }>(
+        `INSERT INTO promo_redemptions (promo_code_id, user_id)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING
+         RETURNING id`,
+        [promo.id, userId],
+      );
+
+      if (redemptionRows.length === 0) {
+        await client.query(
+          `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, FALSE)`,
+          [userId, code],
+        );
+        await client.query("COMMIT");
+        return { ok: false, error: "already_redeemed" };
+      }
+    } else {
+      const { rows: dailyRows } = await client.query<{ found: string }>(
+        `SELECT '1' AS found
+         FROM promo_attempts
+         WHERE user_id = $1
+           AND success = TRUE
+           AND attempted_at > NOW() - INTERVAL '24 hours'
+         LIMIT 1`,
+        [userId],
+      );
+      if (dailyRows.length > 0) {
+        await client.query("ROLLBACK");
+        return { ok: false, error: "daily_limit" };
+      }
+
+      if (promo.used_at !== null) {
+        await client.query(
+          `INSERT INTO promo_attempts (user_id, code, success) VALUES ($1, $2, FALSE)`,
+          [userId, code],
+        );
+        await client.query("COMMIT");
+        return { ok: false, error: "already_used" };
+      }
+
+      await client.query(
+        `UPDATE promo_codes
+         SET used_at = NOW(),
+             used_by = $1,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [userId, promo.id],
+      );
+    }
 
     const { rows: userRows } = await client.query<{ expired_at: string | null }>(
       `SELECT expired_at FROM users WHERE id = $1`,
@@ -1294,4 +1608,102 @@ export async function redeemPromoCode(
   } finally {
     client.release();
   }
+}
+
+// ── Referral statistics ──
+
+function formatReferralInviteeDisplayName(row: {
+  telegram_nickname: string | null;
+  login: string | null;
+}): string {
+  const nick = row.telegram_nickname?.trim();
+  if (nick) return nick.startsWith("@") ? nick : `@${nick}`;
+  const login = row.login?.trim();
+  if (login) return login;
+  return "Участник";
+}
+
+export interface ReferralInvitee {
+  displayName: string;
+  appliedAt: string;
+  hasConverted: boolean;
+  purchaseCount: number;
+}
+
+export interface ReferralStats {
+  totalInvited: number;
+  totalConverted: number;
+  daysEarned: number;
+  pending: number;
+  currentTier: 1 | 2 | 3;
+  invitees: ReferralInvitee[];
+}
+
+export async function getReferralStats(userId: string): Promise<ReferralStats> {
+  const pool = getPool();
+
+  const { rows: statsRows } = await pool.query<{
+    total_invited: string;
+    total_converted: string;
+    days_earned: string;
+  }>(
+    `SELECT
+       (SELECT COUNT(*)::TEXT FROM (
+          SELECT id FROM users WHERE referred_by_user_id = $1
+          UNION
+          SELECT invited_user_id FROM referral_rewards WHERE referrer_user_id = $1
+        ) AS all_invitees) AS total_invited,
+       (SELECT COUNT(DISTINCT invited_user_id)::TEXT FROM referral_rewards WHERE referrer_user_id = $1) AS total_converted,
+       (SELECT COALESCE(SUM(COALESCE(referrer_bonus_days, 30)), 0)::TEXT FROM referral_rewards WHERE referrer_user_id = $1) AS days_earned`,
+    [userId],
+  );
+
+  const totalInvited = Math.max(
+    0,
+    parseInt(statsRows[0]?.total_invited ?? "0", 10),
+  );
+  const totalConverted = Math.max(
+    0,
+    parseInt(statsRows[0]?.total_converted ?? "0", 10),
+  );
+  const daysEarned = parseInt(statsRows[0]?.days_earned ?? "0", 10);
+  const pending = Math.max(0, totalInvited - totalConverted);
+  const currentTier: 1 | 2 | 3 =
+    totalConverted >= 11 ? 3 : totalConverted >= 4 ? 2 : 1;
+
+  const { rows: inviteeRows } = await pool.query<{
+    telegram_nickname: string | null;
+    login: string | null;
+    referral_applied_at: string | null;
+    has_converted: boolean;
+    purchase_count: string;
+  }>(
+    `SELECT
+       inv.telegram_nickname,
+       inv.login,
+       inv.referral_applied_at,
+       COUNT(rr.id) > 0 AS has_converted,
+       COUNT(rr.id)::TEXT AS purchase_count
+     FROM users inv
+     LEFT JOIN referral_rewards rr
+            ON rr.invited_user_id = inv.id
+           AND rr.referrer_user_id = $1
+     WHERE inv.referred_by_user_id = $1
+        OR inv.id IN (
+          SELECT invited_user_id FROM referral_rewards WHERE referrer_user_id = $1
+        )
+     GROUP BY inv.id, inv.telegram_nickname, inv.login, inv.referral_applied_at
+     ORDER BY inv.referral_applied_at DESC NULLS LAST, inv.id
+     LIMIT 20`,
+    [userId],
+  );
+
+  const invitees: ReferralInvitee[] = inviteeRows.map((row) => ({
+    displayName: formatReferralInviteeDisplayName(row),
+    appliedAt: row.referral_applied_at ?? "",
+    hasConverted: Boolean(row.has_converted),
+    purchaseCount: parseInt(row.purchase_count, 10),
+  }));
+
+  return { totalInvited, totalConverted, daysEarned, pending, currentTier, invitees };
 }
