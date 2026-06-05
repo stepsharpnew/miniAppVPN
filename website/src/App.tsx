@@ -29,7 +29,9 @@ export default function App() {
         {activeTab === "profile" && (
           <ProfilePage user={auth.user} onLogout={auth.logout} onNavigate={setActiveTab as (tab: "pricing") => void} />
         )}
-        {activeTab === "pricing" && <PricingPage user={auth.user} />}
+        {activeTab === "pricing" && (
+          <PricingPage user={auth.user} onPaymentSuccess={() => setActiveTab("profile")} />
+        )}
         {activeTab === "instructions" && <InstructionsPage />}
         {activeTab === "support" && <SupportPage user={auth.user} />}
       </main>

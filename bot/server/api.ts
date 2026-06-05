@@ -651,13 +651,23 @@ export function createApiServer(api: Api, botToken: string) {
       if (redeemed.ok && redeemed.kind === "gift") {
         let userRow = await getUserById(dbUser.id);
         if (!userRow) throw new Error(`User missing after promo redeem: ${dbUser.id}`);
-        const { config } = await syncVpnForPromoRedemption(
-          userRow,
-          redeemed.months,
-          getTelegramClientName(tgUser.id, tgUser.username),
-        );
-        userRow = await getUserById(dbUser.id);
-        if (!userRow) throw new Error(`User missing after VPN promo sync: ${dbUser.id}`);
+        let config: string | null = userRow.vpn_config ?? null;
+        const clientName = getTelegramClientName(tgUser.id, tgUser.username);
+        try {
+          const synced = await syncVpnForPromoRedemption(
+            userRow,
+            redeemed.months,
+            clientName,
+          );
+          config = synced.config;
+          userRow = await getUserById(dbUser.id);
+          if (!userRow) throw new Error(`User missing after VPN promo sync: ${dbUser.id}`);
+        } catch (err) {
+          console.error("VPN sync after promo failed:", err);
+          userRow = (await getUserById(dbUser.id)) ?? userRow;
+        }
+        if (!userRow) throw new Error(`User missing after promo sync fallback: ${dbUser.id}`);
+        config = config ?? userRow.vpn_config ?? null;
         const userName = tgUser.first_name ?? "Аноним";
         const userTag = tgUser.username ? `@${tgUser.username}` : "без @ника";
         await sendGiftPromoAdminNotification(api, {
@@ -675,7 +685,6 @@ export function createApiServer(api: Api, botToken: string) {
         try {
           const happPanel = await getHappPanelServer();
           if (happPanel) {
-            const clientName = getTelegramClientName(tgUser.id, tgUser.username);
             const promoDurationCode =
               PRICING.find((p) => p.months === redeemed.months)?.durationCode ?? "1m";
             let happUrl = userRow.happ_subscription_url ?? null;

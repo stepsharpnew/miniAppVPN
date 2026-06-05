@@ -1,6 +1,7 @@
 import WebApp from "@twa-dev/sdk";
 import { useCallback, useEffect, useState } from "react";
 import { BRAND_NAME, MINI_APP_URL, TELEGRAM_BOT_URL } from "../../../shared/texts";
+import { saveVpnConfig } from "../hooks/useVpnConfig";
 import styles from "./ReferralPage.module.css";
 
 const REFERRAL_INVITER_SUCCESS =
@@ -87,6 +88,11 @@ interface ReferralStats {
 }
 
 interface SubInfo {
+  active?: boolean;
+  expired_at?: string | null;
+  is_blocked?: boolean;
+  config?: string | null;
+  happ_subscription_url?: string | null;
   my_referral_code?: string;
   referred_by_applied?: boolean;
   referred_by_code?: string | null;
@@ -171,6 +177,15 @@ export function ReferralPage() {
       if (!res.ok) throw new Error(data?.error ?? "Не удалось активировать промокод.");
       setPromoCode("");
       if (data?.kind === "gift") {
+        if (data.subscription) {
+          setSub((prev) => ({ ...(prev ?? {}), ...data.subscription }));
+          if (data.subscription.config) saveVpnConfig(data.subscription.config);
+          window.dispatchEvent(
+            new CustomEvent("memevpn:subscription-updated", {
+              detail: data.subscription,
+            }),
+          );
+        }
         setPromoMessage(
           `Подарочный промокод активирован. Подписка продлена на ${data.months ?? 0} мес.`,
         );

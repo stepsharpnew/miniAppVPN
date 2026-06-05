@@ -1,5 +1,4 @@
 import WebApp from "@twa-dev/sdk";
-import QRCode from "qrcode";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PRICING, type PricingOption } from "../../../shared/plans";
 import {
@@ -9,7 +8,6 @@ import {
 import { Header } from "../components/Header";
 import { PlatformSelect } from "../components/PlatformSelect";
 import { PriceList } from "../components/PriceList";
-import { QrModal } from "../components/QrModal";
 import { useVpnConfig } from "../hooks/useVpnConfig";
 import styles from "./PurchasePage.module.css";
 
@@ -26,6 +24,7 @@ type PaymentStatus = "idle" | "loading" | "polling" | "error";
 
 interface PurchasePageProps {
   active: boolean;
+  onPaymentSuccess?: () => void;
 }
 
 function getSavedPlatform(): PlatformInfo {
@@ -39,12 +38,11 @@ function getSavedPlatform(): PlatformInfo {
   return PURCHASE_PLATFORMS[0];
 }
 
-export function PurchasePage({ active }: PurchasePageProps) {
+export function PurchasePage({ active, onPaymentSuccess }: PurchasePageProps) {
   const [selectedPlatform, setSelectedPlatform] =
     useState<PlatformInfo>(getSavedPlatform);
   const [selected, setSelected] = useState<PricingOption>(PRICING[0]);
   const [status, setStatus] = useState<PaymentStatus>("idle");
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const { save: saveConfig } = useVpnConfig();
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [hasActiveSub, setHasActiveSub] = useState(false);
@@ -90,7 +88,7 @@ export function PurchasePage({ active }: PurchasePageProps) {
     }
   }, []);
 
-  const showConfig = useCallback(
+  const completePayment = useCallback(
     async (config: string) => {
       try {
         sessionStorage.removeItem(PENDING_KEY);
@@ -99,14 +97,9 @@ export function PurchasePage({ active }: PurchasePageProps) {
       }
       pendingIdRef.current = null;
       saveConfig(config);
-      const dataUrl = await QRCode.toDataURL(config, {
-        width: 260,
-        margin: 2,
-        color: { dark: "#000000", light: "#FFFFFF" },
-      });
-      setQrDataUrl(dataUrl);
+      onPaymentSuccess?.();
     },
-    [saveConfig],
+    [saveConfig, onPaymentSuccess],
   );
 
   const cancelPaymentWait = useCallback(() => {
@@ -135,7 +128,9 @@ export function PurchasePage({ active }: PurchasePageProps) {
         if (data.status === "succeeded") {
           stopPolling();
           if (data.config) {
-            await showConfig(data.config);
+            await completePayment(data.config);
+          } else {
+            onPaymentSuccess?.();
           }
           refreshSubscription();
           try {
@@ -157,7 +152,7 @@ export function PurchasePage({ active }: PurchasePageProps) {
       }
       return "continue";
     },
-    [showConfig, stopPolling, refreshSubscription, cancelPaymentWait],
+    [completePayment, onPaymentSuccess, stopPolling, refreshSubscription, cancelPaymentWait],
   );
 
   const startPollingLoop = useCallback(
@@ -362,14 +357,6 @@ export function PurchasePage({ active }: PurchasePageProps) {
           </p>
         )}
       </section>
-
-      {qrDataUrl && (
-        <QrModal
-          qrDataUrl={qrDataUrl}
-          platform={selectedPlatform}
-          onClose={() => setQrDataUrl(null)}
-        />
-      )}
     </>
   );
 }

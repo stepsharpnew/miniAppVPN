@@ -128,13 +128,17 @@ export default function App() {
             hidden={splash}
           >
             <div style={activeTab === "purchase" ? visibleStyle : hiddenStyle}>
-              <PurchasePage active={activeTab === "purchase"} />
+              <PurchasePage
+                active={activeTab === "purchase"}
+                onPaymentSuccess={() => setActiveTab("profile")}
+              />
             </div>
             <div style={activeTab === "profile" ? visibleStyle : hiddenStyle}>
               {showSync ? (
                 <SyncPage onBack={() => setShowSync(false)} />
               ) : (
                 <ProfilePage
+                  active={activeTab === "profile"}
                   onOpenSync={() => setShowSync(true)}
                   onOpenInstructions={() => setActiveTab("instructions")}
                 />

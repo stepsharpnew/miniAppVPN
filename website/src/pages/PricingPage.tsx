@@ -9,9 +9,10 @@ import styles from "./PricingPage.module.css";
 
 interface PricingPageProps {
   user: WebUser | null;
+  onPaymentSuccess?: () => void;
 }
 
-export function PricingPage({ user }: PricingPageProps) {
+export function PricingPage({ user, onPaymentSuccess }: PricingPageProps) {
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformInfo>(
     PURCHASE_PLATFORMS[0],
   );
@@ -76,6 +77,7 @@ export function PricingPage({ user }: PricingPageProps) {
         if (data.status === "succeeded") {
           clearInterval(interval);
           setPolling(false);
+          onPaymentSuccess?.();
         } else if (data.status === "canceled") {
           clearInterval(interval);
           setPolling(false);

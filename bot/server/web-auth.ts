@@ -603,13 +603,23 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       if (redeemed.ok && redeemed.kind === "gift") {
         let userRow = await getUserById(user.id);
         if (!userRow) throw new Error(`User missing after promo redeem: ${user.id}`);
-        const { config } = await syncVpnForPromoRedemption(
-          userRow,
-          redeemed.months,
-          getWebClientName(userRow),
-        );
-        userRow = await getUserById(user.id);
-        if (!userRow) throw new Error(`User missing after VPN promo sync: ${user.id}`);
+        let config: string | null = userRow.vpn_config ?? null;
+        const clientName = getWebClientName(userRow);
+        try {
+          const synced = await syncVpnForPromoRedemption(
+            userRow,
+            redeemed.months,
+            clientName,
+          );
+          config = synced.config;
+          userRow = await getUserById(user.id);
+          if (!userRow) throw new Error(`User missing after VPN promo sync: ${user.id}`);
+        } catch (err) {
+          console.error("Web VPN sync after promo failed:", err);
+          userRow = (await getUserById(user.id)) ?? userRow;
+        }
+        if (!userRow) throw new Error(`User missing after web promo sync fallback: ${user.id}`);
+        config = config ?? userRow.vpn_config ?? null;
         if (api) {
           const userName = userRow.login ?? "Веб-пользователь";
           const userTag = userRow.telegram_nickname
@@ -636,11 +646,11 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
               PRICING.find((p) => p.months === redeemed.months)?.durationCode ?? "1m";
             let happUrl = userRow.happ_subscription_url ?? null;
             if (happUrl) {
-              await extendHapp(happPanel, getWebClientName(userRow), durationCode);
+              await extendHapp(happPanel, clientName, durationCode);
             } else {
               const result = await provisionHapp(
                 happPanel,
-                getWebClientName(userRow),
+                clientName,
                 durationCode,
               );
               happUrl = result.url;

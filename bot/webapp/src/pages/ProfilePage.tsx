@@ -33,6 +33,7 @@ function formatExpiry(iso: string): string {
 }
 
 interface ProfilePageProps {
+  active?: boolean;
   onOpenSync?: () => void;
   onOpenInstructions?: () => void;
 }
@@ -41,7 +42,7 @@ function buildHappDeepLink(subscriptionUrl: string): string {
   return `happ://add/${subscriptionUrl}`;
 }
 
-export function ProfilePage({ onOpenSync, onOpenInstructions }: ProfilePageProps) {
+export function ProfilePage({ active = true, onOpenSync, onOpenInstructions }: ProfilePageProps) {
   const user = useTelegramUser();
   const { config: localConfig, save: saveLocalConfig } = useVpnConfig();
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -58,6 +59,7 @@ export function ProfilePage({ onOpenSync, onOpenInstructions }: ProfilePageProps
   const [reissueOk, setReissueOk] = useState(false);
 
   useEffect(() => {
+    if (!active) return;
     let alive = true;
     fetch("/api/subscription", {
       headers: { "X-Telegram-Init-Data": WebApp.initData },
@@ -80,7 +82,21 @@ export function ProfilePage({ onOpenSync, onOpenInstructions }: ProfilePageProps
         }
       });
     return () => { alive = false; };
-  }, []);
+  }, [active, saveLocalConfig]);
+
+  useEffect(() => {
+    const onSubscriptionUpdated = (event: Event) => {
+      const next = (event as CustomEvent<SubscriptionInfo>).detail;
+      if (!next) return;
+      setSub(next);
+      setLoaded(true);
+      if (next.config) saveLocalConfig(next.config);
+    };
+    window.addEventListener("memevpn:subscription-updated", onSubscriptionUpdated);
+    return () => {
+      window.removeEventListener("memevpn:subscription-updated", onSubscriptionUpdated);
+    };
+  }, [saveLocalConfig]);
 
   useEffect(() => {
     let alive = true;
