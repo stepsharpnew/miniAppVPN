@@ -81,12 +81,12 @@ import {
 } from "./support-service";
 import { sendReferralRewardNotifications } from "./referral-notifications";
 import { sendGiftPromoAdminNotification } from "./promo-notifications";
-
-function getServerBaseUrl(server: ServerRow): string {
-  const raw = server.domain_server_name;
-  if (!raw) throw new Error(`Server ${server.server_id} has no domain_server_name (base URL)`);
-  return raw.replace(/\/+$/, "");
-}
+import { getServerBaseUrl } from "./panel-url";
+import {
+  canAttemptLazyHappBackfill,
+  recordLazyHappBackfillFailure,
+  recordLazyHappBackfillSuccess,
+} from "./happ-backfill";
 
 interface TelegramUser {
   id: number;
@@ -219,6 +219,8 @@ function verifyInitData(
 
 export function createApiServer(api: Api, botToken: string) {
   const app = express();
+  const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS ?? "1", 10);
+  app.set("trust proxy", Number.isFinite(trustProxyHops) && trustProxyHops > 0 ? trustProxyHops : 1);
 
   const allowedOrigins = getCorsAllowedOrigins();
   app.use(
@@ -585,7 +587,8 @@ export function createApiServer(api: Api, botToken: string) {
 
       // ── Lazy HAPP backfill for active users without a subscription URL ──
       let happUrl = row.happ_subscription_url ?? null;
-      if (active && !happUrl) {
+      const happBackfillKey = `telegram:${row.id}`;
+      if (active && !happUrl && canAttemptLazyHappBackfill(happBackfillKey)) {
         try {
           const happPanel = await getHappPanelServer();
           if (happPanel) {
@@ -598,9 +601,10 @@ export function createApiServer(api: Api, botToken: string) {
             const result = await provisionHapp(happPanel, clientName, durationCode);
             happUrl = result.url;
             await updateUserHappUrl(row.id, happUrl);
+            recordLazyHappBackfillSuccess(happBackfillKey);
           }
         } catch (err) {
-          console.error("Lazy HAPP backfill failed:", err);
+          recordLazyHappBackfillFailure(happBackfillKey, "Lazy HAPP backfill failed", err);
         }
       }
 

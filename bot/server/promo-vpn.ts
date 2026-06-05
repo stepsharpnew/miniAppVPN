@@ -20,12 +20,7 @@ import {
   provisionVpnClient,
   provisionVpnClientUntilExpiry,
 } from "./vpn";
-
-function getServerBaseUrl(server: ServerRow): string {
-  const raw = server.domain_server_name;
-  if (!raw) throw new Error(`Server ${server.server_id} has no domain_server_name`);
-  return raw.replace(/\/+$/, "");
-}
+import { getServerBaseUrl } from "./panel-url";
 
 function getDurationCode(months: number): string {
   const plan = PRICING.find((p) => p.months === months);

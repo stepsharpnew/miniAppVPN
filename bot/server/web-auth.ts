@@ -53,6 +53,12 @@ import {
   paymentCreateRateLimiter,
   promoRateLimiter,
 } from "./security";
+import { getServerBaseUrl } from "./panel-url";
+import {
+  canAttemptLazyHappBackfill,
+  recordLazyHappBackfillFailure,
+  recordLazyHappBackfillSuccess,
+} from "./happ-backfill";
 
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "7d";
@@ -183,12 +189,6 @@ function validatePassword(password: string): string | null {
   if (password.length < 8) return "Пароль должен быть минимум 8 символов";
   if (password.length > 128) return "Пароль слишком длинный";
   return null;
-}
-
-function getServerBaseUrl(server: ServerRow): string {
-  const raw = server.domain_server_name;
-  if (!raw) throw new Error(`Server ${server.server_id} has no domain_server_name`);
-  return raw.replace(/\/+$/, "");
 }
 
 function getHappDurationCodeForExpiry(expiredAt: Date | null): string {
@@ -538,7 +538,8 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     const expiredAt = user.expired_at ? new Date(user.expired_at) : null;
     const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
     let happUrl = user.happ_subscription_url ?? null;
-    if (active && !happUrl) {
+    const happBackfillKey = `web:${user.id}`;
+    if (active && !happUrl && canAttemptLazyHappBackfill(happBackfillKey)) {
       try {
         const happPanel = await getHappPanelServer();
         if (happPanel) {
@@ -546,9 +547,10 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
           const result = await provisionHapp(happPanel, getWebClientName(user), durationCode);
           happUrl = result.url;
           await updateUserHappUrl(user.id, happUrl);
+          recordLazyHappBackfillSuccess(happBackfillKey);
         }
       } catch (err) {
-        console.error("Lazy web HAPP backfill failed:", err);
+        recordLazyHappBackfillFailure(happBackfillKey, "Lazy web HAPP backfill failed", err);
       }
     }
     res.json({
