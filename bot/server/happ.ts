@@ -1,15 +1,10 @@
 import type { ServerRow } from "./db";
+import { getServerBaseUrl } from "./panel-url";
 
 const VPN_USER = process.env.VPN_API_USER ?? "";
 const VPN_PASS = process.env.VPN_API_PASSWORD ?? "";
 
 const authHeader = `Basic ${Buffer.from(`${VPN_USER}:${VPN_PASS}`).toString("base64")}`;
-
-function getPanelBaseUrl(panel: ServerRow): string {
-  const raw = panel.domain_server_name;
-  if (!raw) throw new Error(`HAPP panel server ${panel.id} has no domain_server_name`);
-  return raw.replace(/\/+$/, "");
-}
 
 /**
  * Provision a user on the HAPP panel if they don't exist yet, or extend them if
@@ -24,7 +19,7 @@ export async function provisionHapp(
   clientName: string,
   durationCode: string,
 ): Promise<{ url: string }> {
-  const base = getPanelBaseUrl(panel);
+  const base = getServerBaseUrl(panel);
   const resp = await fetch(`${base}/api/users/${encodeURIComponent(clientName)}/provision`, {
     method: "POST",
     headers: {
@@ -57,7 +52,7 @@ export async function extendHapp(
   clientName: string,
   durationCode: string,
 ): Promise<void> {
-  const base = getPanelBaseUrl(panel);
+  const base = getServerBaseUrl(panel);
   const resp = await fetch(`${base}/api/users/${encodeURIComponent(clientName)}/extend`, {
     method: "POST",
     headers: {
@@ -81,7 +76,7 @@ export async function deleteHapp(
   panel: ServerRow,
   clientName: string,
 ): Promise<void> {
-  const base = getPanelBaseUrl(panel);
+  const base = getServerBaseUrl(panel);
   const resp = await fetch(`${base}/api/users/${encodeURIComponent(clientName)}`, {
     method: "DELETE",
     headers: { Authorization: authHeader },
