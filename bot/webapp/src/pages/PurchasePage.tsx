@@ -9,6 +9,7 @@ import { Header } from "../components/Header";
 import { PlatformSelect } from "../components/PlatformSelect";
 import { PriceList } from "../components/PriceList";
 import { useVpnConfig } from "../hooks/useVpnConfig";
+import { waitForTelegramInitData } from "../utils/telegramInitData";
 import styles from "./PurchasePage.module.css";
 
 try {
@@ -49,10 +50,14 @@ export function PurchasePage({ active, onPaymentSuccess }: PurchasePageProps) {
   const [subExpiredAt, setSubExpiredAt] = useState<string | null>(null);
 
   const refreshSubscription = useCallback(() => {
-    fetch("/api/subscription", {
-      headers: { "X-Telegram-Init-Data": WebApp.initData },
-    })
-      .then((r) => (r.ok ? r.json() : null))
+    waitForTelegramInitData()
+      .then((initData) =>
+        initData
+          ? fetch("/api/subscription", {
+              headers: { "X-Telegram-Init-Data": initData },
+            }).then((r) => (r.ok ? r.json() : null))
+          : null,
+      )
       .then((data) => {
         if (data?.active) setHasActiveSub(true);
         else setHasActiveSub(false);

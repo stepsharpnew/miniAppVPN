@@ -539,18 +539,27 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
     let happUrl = user.happ_subscription_url ?? null;
     const happBackfillKey = `web:${user.id}`;
-    if (active && !happUrl && canAttemptLazyHappBackfill(happBackfillKey)) {
-      try {
-        const happPanel = await getHappPanelServer();
-        if (happPanel) {
-          const durationCode = getHappDurationCodeForExpiry(expiredAt);
-          const result = await provisionHapp(happPanel, getWebClientName(user), durationCode);
-          happUrl = result.url;
-          await updateUserHappUrl(user.id, happUrl);
-          recordLazyHappBackfillSuccess(happBackfillKey);
+    if (active && !happUrl) {
+      if (!canAttemptLazyHappBackfill(happBackfillKey)) {
+        console.info(`Lazy web HAPP backfill skipped: retry cooldown for ${happBackfillKey}`);
+      } else {
+        try {
+          const happPanel = await getHappPanelServer();
+          if (!happPanel) {
+            console.info(`Lazy web HAPP backfill skipped: no enabled supports_happ server for ${happBackfillKey}`);
+          } else {
+            const durationCode = getHappDurationCodeForExpiry(expiredAt);
+            const clientName = getWebClientName(user);
+            console.info(`Lazy web HAPP backfill started for ${happBackfillKey} (${clientName}, ${durationCode})`);
+            const result = await provisionHapp(happPanel, clientName, durationCode);
+            happUrl = result.url;
+            await updateUserHappUrl(user.id, happUrl);
+            recordLazyHappBackfillSuccess(happBackfillKey);
+            console.info(`Lazy web HAPP backfill succeeded for ${happBackfillKey}`);
+          }
+        } catch (err) {
+          recordLazyHappBackfillFailure(happBackfillKey, "Lazy web HAPP backfill failed", err);
         }
-      } catch (err) {
-        recordLazyHappBackfillFailure(happBackfillKey, "Lazy web HAPP backfill failed", err);
       }
     }
     res.json({

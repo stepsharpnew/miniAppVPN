@@ -2,6 +2,7 @@ import WebApp from "@twa-dev/sdk";
 import { useCallback, useEffect, useState } from "react";
 import { BRAND_NAME, MINI_APP_URL, TELEGRAM_BOT_URL } from "../../../shared/texts";
 import { saveVpnConfig } from "../hooks/useVpnConfig";
+import { waitForTelegramInitData } from "../utils/telegramInitData";
 import styles from "./ReferralPage.module.css";
 
 const REFERRAL_INVITER_SUCCESS =
@@ -117,10 +118,14 @@ export function ReferralPage() {
 
   useEffect(() => {
     let alive = true;
-    fetch("/api/subscription", {
-      headers: { "X-Telegram-Init-Data": WebApp.initData },
-    })
-      .then((r) => (r.ok ? r.json() : null))
+    waitForTelegramInitData()
+      .then((initData) =>
+        initData
+          ? fetch("/api/subscription", {
+              headers: { "X-Telegram-Init-Data": initData },
+            }).then((r) => (r.ok ? r.json() : null))
+          : null,
+      )
       .then((data) => { if (alive) setSub(data ?? {}); })
       .catch(() => { if (alive) setSub({}); });
     return () => { alive = false; };
@@ -128,10 +133,14 @@ export function ReferralPage() {
 
   useEffect(() => {
     let alive = true;
-    fetch("/api/referral/stats", {
-      headers: { "X-Telegram-Init-Data": WebApp.initData },
-    })
-      .then((r) => (r.ok ? r.json() : null))
+    waitForTelegramInitData()
+      .then((initData) =>
+        initData
+          ? fetch("/api/referral/stats", {
+              headers: { "X-Telegram-Init-Data": initData },
+            }).then((r) => (r.ok ? r.json() : null))
+          : null,
+      )
       .then((data) => { if (alive && data) setStats(data as ReferralStats); })
       .catch(() => {});
     return () => { alive = false; };

@@ -588,23 +588,31 @@ export function createApiServer(api: Api, botToken: string) {
       // ── Lazy HAPP backfill for active users without a subscription URL ──
       let happUrl = row.happ_subscription_url ?? null;
       const happBackfillKey = `telegram:${row.id}`;
-      if (active && !happUrl && canAttemptLazyHappBackfill(happBackfillKey)) {
-        try {
-          const happPanel = await getHappPanelServer();
-          if (happPanel) {
-            const clientName = getTelegramClientName(user.id, user.username);
-            const daysLeft = expiredAt
-              ? Math.max(1, Math.ceil((expiredAt.getTime() - Date.now()) / 86_400_000))
-              : 30;
-            const durationCode =
-              daysLeft > 180 ? "6m" : daysLeft > 60 ? "3m" : daysLeft > 25 ? "1m" : `${daysLeft}d`;
-            const result = await provisionHapp(happPanel, clientName, durationCode);
-            happUrl = result.url;
-            await updateUserHappUrl(row.id, happUrl);
-            recordLazyHappBackfillSuccess(happBackfillKey);
+      if (active && !happUrl) {
+        if (!canAttemptLazyHappBackfill(happBackfillKey)) {
+          console.info(`Lazy HAPP backfill skipped: retry cooldown for ${happBackfillKey}`);
+        } else {
+          try {
+            const happPanel = await getHappPanelServer();
+            if (!happPanel) {
+              console.info(`Lazy HAPP backfill skipped: no enabled supports_happ server for ${happBackfillKey}`);
+            } else {
+              const clientName = getTelegramClientName(user.id, user.username);
+              const daysLeft = expiredAt
+                ? Math.max(1, Math.ceil((expiredAt.getTime() - Date.now()) / 86_400_000))
+                : 30;
+              const durationCode =
+                daysLeft > 180 ? "6m" : daysLeft > 60 ? "3m" : daysLeft > 25 ? "1m" : `${daysLeft}d`;
+              console.info(`Lazy HAPP backfill started for ${happBackfillKey} (${clientName}, ${durationCode})`);
+              const result = await provisionHapp(happPanel, clientName, durationCode);
+              happUrl = result.url;
+              await updateUserHappUrl(row.id, happUrl);
+              recordLazyHappBackfillSuccess(happBackfillKey);
+              console.info(`Lazy HAPP backfill succeeded for ${happBackfillKey}`);
+            }
+          } catch (err) {
+            recordLazyHappBackfillFailure(happBackfillKey, "Lazy HAPP backfill failed", err);
           }
-        } catch (err) {
-          recordLazyHappBackfillFailure(happBackfillKey, "Lazy HAPP backfill failed", err);
         }
       }
 

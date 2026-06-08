@@ -5,6 +5,7 @@ import { BRAND_NAME } from "../../../shared/texts";
 import { StatusBadge } from "../components/StatusBadge";
 import { useTelegramUser } from "../hooks/useTelegramUser";
 import { useVpnConfig } from "../hooks/useVpnConfig";
+import { waitForTelegramInitData } from "../utils/telegramInitData";
 import styles from "./ProfilePage.module.css";
 
 interface SubscriptionInfo {
@@ -61,11 +62,14 @@ export function ProfilePage({ active = true, onOpenSync, onOpenInstructions }: P
   useEffect(() => {
     if (!active) return;
     let alive = true;
-    fetch("/api/subscription", {
-      headers: { "X-Telegram-Init-Data": WebApp.initData },
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+    (async () => {
+      const initData = await waitForTelegramInitData();
+      const data = initData
+        ? await fetch("/api/subscription", {
+            headers: { "X-Telegram-Init-Data": initData },
+          }).then((r) => (r.ok ? r.json() : null))
+        : null;
+
         if (!alive) return;
         if (data) {
           setSub(data);
@@ -74,8 +78,7 @@ export function ProfilePage({ active = true, onOpenSync, onOpenInstructions }: P
           setSub({ active: false, expired_at: null, config: null });
         }
         setLoaded(true);
-      })
-      .catch(() => {
+    })().catch(() => {
         if (alive) {
           setSub({ active: false, expired_at: null, config: null });
           setLoaded(true);
@@ -100,17 +103,19 @@ export function ProfilePage({ active = true, onOpenSync, onOpenInstructions }: P
 
   useEffect(() => {
     let alive = true;
-    fetch("/api/sync/status", {
-      headers: { "X-Telegram-Init-Data": WebApp.initData },
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+    (async () => {
+      const initData = await waitForTelegramInitData();
+      const data = initData
+        ? await fetch("/api/sync/status", {
+            headers: { "X-Telegram-Init-Data": initData },
+          }).then((r) => (r.ok ? r.json() : null))
+        : null;
+
         if (!alive) return;
         setIsSynced(Boolean(data?.synced));
         setSyncedLogin(data?.login ?? null);
         setSyncChecked(true);
-      })
-      .catch(() => {
+    })().catch(() => {
         if (!alive) return;
         setSyncChecked(true);
       });
