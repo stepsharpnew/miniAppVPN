@@ -55,7 +55,8 @@ import {
 } from "./security";
 import { getServerBaseUrl } from "./panel-url";
 import {
-  canAttemptLazyHappBackfill,
+  claimLazyHappBackfill,
+  releaseLazyHappBackfill,
   recordLazyHappBackfillFailure,
   recordLazyHappBackfillSuccess,
 } from "./happ-backfill";
@@ -540,12 +541,16 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     let happUrl = user.happ_subscription_url ?? null;
     const happBackfillKey = `web:${user.id}`;
     if (active && !happUrl) {
-      if (!canAttemptLazyHappBackfill(happBackfillKey)) {
+      const backfillClaim = claimLazyHappBackfill(happBackfillKey);
+      if (backfillClaim === "cooldown") {
         console.info(`Lazy web HAPP backfill skipped: retry cooldown for ${happBackfillKey}`);
+      } else if (backfillClaim === "in_progress") {
+        console.info(`Lazy web HAPP backfill skipped: already in progress for ${happBackfillKey}`);
       } else {
         try {
           const happPanel = await getHappPanelServer();
           if (!happPanel) {
+            releaseLazyHappBackfill(happBackfillKey);
             console.info(`Lazy web HAPP backfill skipped: no enabled supports_happ server for ${happBackfillKey}`);
           } else {
             const durationCode = getHappDurationCodeForExpiry(expiredAt);

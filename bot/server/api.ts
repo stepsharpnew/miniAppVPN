@@ -83,7 +83,8 @@ import { sendReferralRewardNotifications } from "./referral-notifications";
 import { sendGiftPromoAdminNotification } from "./promo-notifications";
 import { getServerBaseUrl } from "./panel-url";
 import {
-  canAttemptLazyHappBackfill,
+  claimLazyHappBackfill,
+  releaseLazyHappBackfill,
   recordLazyHappBackfillFailure,
   recordLazyHappBackfillSuccess,
 } from "./happ-backfill";
@@ -589,12 +590,16 @@ export function createApiServer(api: Api, botToken: string) {
       let happUrl = row.happ_subscription_url ?? null;
       const happBackfillKey = `telegram:${row.id}`;
       if (active && !happUrl) {
-        if (!canAttemptLazyHappBackfill(happBackfillKey)) {
+        const backfillClaim = claimLazyHappBackfill(happBackfillKey);
+        if (backfillClaim === "cooldown") {
           console.info(`Lazy HAPP backfill skipped: retry cooldown for ${happBackfillKey}`);
+        } else if (backfillClaim === "in_progress") {
+          console.info(`Lazy HAPP backfill skipped: already in progress for ${happBackfillKey}`);
         } else {
           try {
             const happPanel = await getHappPanelServer();
             if (!happPanel) {
+              releaseLazyHappBackfill(happBackfillKey);
               console.info(`Lazy HAPP backfill skipped: no enabled supports_happ server for ${happBackfillKey}`);
             } else {
               const clientName = getTelegramClientName(user.id, user.username);
