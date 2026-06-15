@@ -4,7 +4,6 @@ import {
   getAllEnabledServers,
   getHappPanelServer,
   getPool,
-  getRandomEnabledServer,
   incrementServerUserCount,
   type ReferralRewardParty,
   type ReferralRewardResult,
@@ -26,6 +25,87 @@ function getDurationCode(months: number): string {
   const plan = PRICING.find((p) => p.months === months);
   if (!plan) throw new Error(`Unsupported promo duration: ${months}`);
   return plan.durationCode;
+}
+
+function shuffledServers(servers: ServerRow[]): ServerRow[] {
+  const result = [...servers];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function describeServer(server: ServerRow): string {
+  return `${server.name_server ?? server.server_id} (${server.domain_server_name ?? "no-domain"})`;
+}
+
+export async function provisionVpnClientOnAnyEnabledServer(
+  clientName: string,
+  durationCode: string,
+): Promise<{ config: string; server: ServerRow }> {
+  const servers = shuffledServers(await getAllEnabledServers());
+  if (servers.length === 0) {
+    throw new Error("No enabled VPN servers in DB");
+  }
+
+  const errors: string[] = [];
+  for (const server of servers) {
+    if (!server.server_id) {
+      errors.push(`${describeServer(server)}: missing server_id`);
+      continue;
+    }
+
+    try {
+      const config = await provisionVpnClient(
+        clientName,
+        durationCode,
+        server.server_id,
+        getServerBaseUrl(server),
+      );
+      return { config, server };
+    } catch (err) {
+      errors.push(`${describeServer(server)}: ${errorMessage(err)}`);
+    }
+  }
+
+  throw new Error(`VPN provisioning failed on all enabled servers: ${errors.join(" | ")}`);
+}
+
+export async function provisionVpnClientUntilExpiryOnAnyEnabledServer(
+  clientName: string,
+  expiredAt: Date,
+): Promise<{ config: string; server: ServerRow }> {
+  const servers = shuffledServers(await getAllEnabledServers());
+  if (servers.length === 0) {
+    throw new Error("No enabled VPN servers in DB");
+  }
+
+  const errors: string[] = [];
+  for (const server of servers) {
+    if (!server.server_id) {
+      errors.push(`${describeServer(server)}: missing server_id`);
+      continue;
+    }
+
+    try {
+      const config = await provisionVpnClientUntilExpiry(
+        clientName,
+        expiredAt,
+        server.server_id,
+        getServerBaseUrl(server),
+      );
+      return { config, server };
+    } catch (err) {
+      errors.push(`${describeServer(server)}: ${errorMessage(err)}`);
+    }
+  }
+
+  throw new Error(`VPN provisioning until expiry failed on all enabled servers: ${errors.join(" | ")}`);
 }
 
 export function getTelegramClientName(
@@ -77,20 +157,11 @@ export async function syncVpnForPromoRedemption(
     return { config };
   }
 
-  const server = await getRandomEnabledServer();
-  if (!server?.server_id) {
-    throw new Error("No enabled VPN servers in DB");
-  }
-
-  config = await provisionVpnClient(
-    clientName,
-    durationCode,
-    server.server_id,
-    getServerBaseUrl(server),
-  );
+  const issued = await provisionVpnClientOnAnyEnabledServer(clientName, durationCode);
+  config = issued.config;
   saveConfig(user.id, config);
   await updateUserVpnConfig(user.id, config);
-  await incrementServerUserCount(server.server_id).catch(() => {});
+  await incrementServerUserCount(issued.server.server_id).catch(() => {});
 
   return { config };
 }

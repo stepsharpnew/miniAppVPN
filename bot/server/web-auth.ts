@@ -11,13 +11,13 @@ import {
   createWebUser,
   getPool,
   extendSubscriptionById,
-  getRandomEnabledServer,
   getAllEnabledServers,
   getUserReferralInfoForWeb,
   getHappPanelServer,
   incrementServerUserCount,
   markPaymentProcessed,
   updateUserHappUrl,
+  updateUserVpnConfig,
   type UserRow,
   type ServerRow,
 } from "./db";
@@ -27,7 +27,7 @@ import {
   sendSupportTextMessage,
 } from "./support-service";
 import { getConfig, saveConfig } from "./config-store";
-import { provisionVpnClient, extendVpnClient } from "./vpn";
+import { extendVpnClient } from "./vpn";
 import {
   getPendingPayment,
   markPaymentCanceled,
@@ -41,6 +41,8 @@ import { sendReferralRewardNotifications } from "./referral-notifications";
 import { sendGiftPromoAdminNotification } from "./promo-notifications";
 import {
   getWebClientName,
+  provisionVpnClientOnAnyEnabledServer,
+  provisionVpnClientUntilExpiryOnAnyEnabledServer,
   reissueVpnConfig,
   syncVpnForPromoRedemption,
   syncVpnForReferralReward,
@@ -60,6 +62,12 @@ import {
   recordLazyHappBackfillFailure,
   recordLazyHappBackfillSuccess,
 } from "./happ-backfill";
+import {
+  claimLazyVpnBackfill,
+  recordLazyVpnBackfillFailure,
+  recordLazyVpnBackfillSuccess,
+  releaseLazyVpnBackfill,
+} from "./vpn-backfill";
 
 const ACCESS_TTL = "15m";
 const REFRESH_TTL = "7d";
@@ -296,13 +304,14 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
 
   if (!config) {
     try {
-      const server = await getRandomEnabledServer();
-      if (!server?.server_id) throw new Error("No enabled VPN servers");
-      const baseUrl = getServerBaseUrl(server);
-      config = await provisionVpnClient(clientName, pending.durationCode, server.server_id, baseUrl);
+      const issued = await provisionVpnClientOnAnyEnabledServer(
+        clientName,
+        pending.durationCode,
+      );
+      config = issued.config;
       provisionOk = true;
       saveConfig(userId, config);
-      await incrementServerUserCount(server.server_id).catch(() => {});
+      await incrementServerUserCount(issued.server.server_id).catch(() => {});
     } catch (err) {
       console.error("VPN provisioning (web) failed:", err);
     }
@@ -538,6 +547,36 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
     const referralInfo = await getUserReferralInfoForWeb(user.id);
     const expiredAt = user.expired_at ? new Date(user.expired_at) : null;
     const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
+    let config = user.vpn_config ?? null;
+    const clientName = getWebClientName(user);
+    const vpnBackfillKey = `web:${user.id}`;
+    if (active && !config && expiredAt) {
+      const backfillClaim = claimLazyVpnBackfill(vpnBackfillKey);
+      if (backfillClaim === "cooldown") {
+        console.info(`Lazy web VPN backfill skipped: retry cooldown for ${vpnBackfillKey}`);
+      } else if (backfillClaim === "in_progress") {
+        console.info(`Lazy web VPN backfill skipped: already in progress for ${vpnBackfillKey}`);
+      } else {
+        try {
+          console.info(`Lazy web VPN backfill started for ${vpnBackfillKey} (${clientName})`);
+          const issued = await provisionVpnClientUntilExpiryOnAnyEnabledServer(
+            clientName,
+            expiredAt,
+          );
+          config = issued.config;
+          saveConfig(user.id, config);
+          await updateUserVpnConfig(user.id, config);
+          await incrementServerUserCount(issued.server.server_id).catch(() => {});
+          recordLazyVpnBackfillSuccess(vpnBackfillKey);
+          console.info(`Lazy web VPN backfill succeeded for ${vpnBackfillKey}`);
+        } catch (err) {
+          recordLazyVpnBackfillFailure(vpnBackfillKey, "Lazy web VPN backfill failed", err);
+        }
+      }
+    } else if (!active || config) {
+      releaseLazyVpnBackfill(vpnBackfillKey);
+    }
+
     let happUrl = user.happ_subscription_url ?? null;
     const happBackfillKey = `web:${user.id}`;
     if (active && !happUrl) {
@@ -554,7 +593,6 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
             console.info(`Lazy web HAPP backfill skipped: no enabled supports_happ server for ${happBackfillKey}`);
           } else {
             const durationCode = getHappDurationCodeForExpiry(expiredAt);
-            const clientName = getWebClientName(user);
             console.info(`Lazy web HAPP backfill started for ${happBackfillKey} (${clientName}, ${durationCode})`);
             const result = await provisionHapp(happPanel, clientName, durationCode);
             happUrl = result.url;
@@ -571,7 +609,7 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       active,
       expired_at: user.expired_at,
       is_blocked: user.is_blocked,
-      config: active ? user.vpn_config : null,
+      config: active ? config : null,
       happ_subscription_url: active ? happUrl : null,
       created_at: user.created_at,
       login: user.login,

@@ -38,7 +38,7 @@ import {
 } from "../shared/texts";
 import { type PaymentMetadata, PRICING } from "../shared/plans";
 import { getConfig, saveConfig } from "./config-store";
-import { extendVpnClient, provisionVpnClient } from "./vpn";
+import { extendVpnClient } from "./vpn";
 import {
   getPendingPayment,
   markPaymentCanceled,
@@ -56,16 +56,18 @@ import {
   type UserRow,
   getAllEnabledServers,
   getHappPanelServer,
-  getRandomEnabledServer,
   getUserSubscription,
   extendSubscriptionById,
   incrementServerUserCount,
   markPaymentProcessed,
   updateUserHappUrl,
+  updateUserVpnConfig,
   upsertUserSubscription,
 } from "./db";
 import {
   getTelegramClientName,
+  provisionVpnClientOnAnyEnabledServer,
+  provisionVpnClientUntilExpiryOnAnyEnabledServer,
   reissueVpnConfig,
   syncVpnForPromoRedemption,
   syncVpnForReferralReward,
@@ -88,6 +90,12 @@ import {
   recordLazyHappBackfillFailure,
   recordLazyHappBackfillSuccess,
 } from "./happ-backfill";
+import {
+  claimLazyVpnBackfill,
+  recordLazyVpnBackfillFailure,
+  recordLazyVpnBackfillSuccess,
+  releaseLazyVpnBackfill,
+} from "./vpn-backfill";
 
 interface TelegramUser {
   id: number;
@@ -586,6 +594,37 @@ export function createApiServer(api: Api, botToken: string) {
       const expiredAt = row.expired_at ? new Date(row.expired_at) : null;
       const active = expiredAt ? expiredAt.getTime() > Date.now() : false;
 
+      // ── Lazy AmneziaWG backfill for active users without a config ──
+      let config = row.vpn_config ?? null;
+      const vpnBackfillKey = `telegram:${row.id}`;
+      const clientName = getTelegramClientName(user.id, user.username);
+      if (active && !config && expiredAt) {
+        const backfillClaim = claimLazyVpnBackfill(vpnBackfillKey);
+        if (backfillClaim === "cooldown") {
+          console.info(`Lazy VPN backfill skipped: retry cooldown for ${vpnBackfillKey}`);
+        } else if (backfillClaim === "in_progress") {
+          console.info(`Lazy VPN backfill skipped: already in progress for ${vpnBackfillKey}`);
+        } else {
+          try {
+            console.info(`Lazy VPN backfill started for ${vpnBackfillKey} (${clientName})`);
+            const issued = await provisionVpnClientUntilExpiryOnAnyEnabledServer(
+              clientName,
+              expiredAt,
+            );
+            config = issued.config;
+            saveConfig(user.id, config);
+            await updateUserVpnConfig(row.id, config);
+            await incrementServerUserCount(issued.server.server_id).catch(() => {});
+            recordLazyVpnBackfillSuccess(vpnBackfillKey);
+            console.info(`Lazy VPN backfill succeeded for ${vpnBackfillKey}`);
+          } catch (err) {
+            recordLazyVpnBackfillFailure(vpnBackfillKey, "Lazy VPN backfill failed", err);
+          }
+        }
+      } else if (!active || config) {
+        releaseLazyVpnBackfill(vpnBackfillKey);
+      }
+
       // ── Lazy HAPP backfill for active users without a subscription URL ──
       let happUrl = row.happ_subscription_url ?? null;
       const happBackfillKey = `telegram:${row.id}`;
@@ -602,7 +641,6 @@ export function createApiServer(api: Api, botToken: string) {
               releaseLazyHappBackfill(happBackfillKey);
               console.info(`Lazy HAPP backfill skipped: no enabled supports_happ server for ${happBackfillKey}`);
             } else {
-              const clientName = getTelegramClientName(user.id, user.username);
               const daysLeft = expiredAt
                 ? Math.max(1, Math.ceil((expiredAt.getTime() - Date.now()) / 86_400_000))
                 : 30;
@@ -626,7 +664,7 @@ export function createApiServer(api: Api, botToken: string) {
         expired_at: row.expired_at,
         is_blocked: row.is_blocked,
         telegram_nickname: row.telegram_nickname,
-        config: active ? row.vpn_config : null,
+        config: active ? config : null,
         happ_subscription_url: active ? happUrl : null,
         created_at: row.created_at,
         my_referral_code: referralInfo.my_referral_code,
@@ -1022,14 +1060,15 @@ export function createApiServer(api: Api, botToken: string) {
 
     if (!config) {
       try {
-        const server = await getRandomEnabledServer();
-        if (!server?.server_id) throw new Error("No enabled VPN servers in DB");
-        const baseUrl = getServerBaseUrl(server);
         const clientName = pending.username || `tg_${userId}`;
-        config = await provisionVpnClient(clientName, pending.durationCode, server.server_id, baseUrl);
+        const issued = await provisionVpnClientOnAnyEnabledServer(
+          clientName,
+          pending.durationCode,
+        );
+        config = issued.config;
         provisionOk = true;
         saveConfig(userId, config);
-        await incrementServerUserCount(server.server_id).catch(() => {});
+        await incrementServerUserCount(issued.server.server_id).catch(() => {});
       } catch (err) {
         console.error("VPN provisioning (status poll) failed:", err);
       }
@@ -1311,18 +1350,14 @@ export function createApiServer(api: Api, botToken: string) {
 
     if (!config) {
       try {
-        const server = await getRandomEnabledServer();
-        if (!server?.server_id) throw new Error("No enabled VPN servers in DB");
-        const baseUrl = getServerBaseUrl(server);
-        config = await provisionVpnClient(
+        const issued = await provisionVpnClientOnAnyEnabledServer(
           clientName,
           durationCode,
-          server.server_id,
-          baseUrl,
         );
+        config = issued.config;
         provisionOk = true;
         saveConfig(configKey, config);
-        await incrementServerUserCount(server.server_id).catch(() => {});
+        await incrementServerUserCount(issued.server.server_id).catch(() => {});
       } catch (err) {
         console.error("VPN provisioning after webhook failed:", err);
       }

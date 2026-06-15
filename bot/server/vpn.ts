@@ -2,6 +2,74 @@ const VPN_USER = process.env.VPN_API_USER ?? "";
 const VPN_PASS = process.env.VPN_API_PASSWORD ?? "";
 
 const authHeader = `Basic ${Buffer.from(`${VPN_USER}:${VPN_PASS}`).toString("base64")}`;
+const DEFAULT_VPN_FETCH_TIMEOUT_MS = 15_000;
+
+function getVpnFetchTimeoutMs(): number {
+  const timeoutMs = Number(process.env.VPN_FETCH_TIMEOUT_MS);
+  return Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : DEFAULT_VPN_FETCH_TIMEOUT_MS;
+}
+
+function describeErrorDetails(value: unknown): string | null {
+  if (!value) return null;
+
+  if (value instanceof Error) {
+    const error = value as Error & {
+      address?: unknown;
+      code?: unknown;
+      hostname?: unknown;
+      port?: unknown;
+      syscall?: unknown;
+    };
+    const details = [
+      error.code ? `code=${String(error.code)}` : null,
+      error.syscall ? `syscall=${String(error.syscall)}` : null,
+      error.hostname ? `hostname=${String(error.hostname)}` : null,
+      error.address ? `address=${String(error.address)}` : null,
+      error.port ? `port=${String(error.port)}` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    return `${value.name}: ${value.message}${details ? ` (${details})` : ""}`;
+  }
+
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  return String(value);
+}
+
+function describeFetchFailure(err: unknown): string {
+  const main = describeErrorDetails(err) ?? "unknown error";
+  const cause = err instanceof Error
+    ? (err as Error & { cause?: unknown }).cause
+    : undefined;
+  const causeText = describeErrorDetails(cause);
+  return causeText ? `${main}; cause=${causeText}` : main;
+}
+
+async function vpnFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const timeoutMs = getVpnFetchTimeoutMs();
+  const method = init.method ?? "GET";
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (err) {
+    throw new Error(
+      `VPN request ${method} ${url} failed after ${timeoutMs}ms: ${describeFetchFailure(err)}`,
+    );
+  }
+}
 
 interface Client {
   id: string;
@@ -55,10 +123,14 @@ async function findExistingClient(
   name: string,
   baseUrl: string,
 ): Promise<{ id: string; config: string; serverId: string } | null> {
-  const resp = await fetch(`${baseUrl}/api/servers`, {
+  const url = `${baseUrl}/api/servers`;
+  const resp = await vpnFetch(url, {
     headers: { Authorization: authHeader },
   });
-  if (!resp.ok) return null;
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "unknown");
+    throw new Error(`VPN servers API ${resp.status} ${url}: ${text}`);
+  }
 
   const servers: Server[] = await resp.json();
   for (const server of servers) {
@@ -111,7 +183,8 @@ export async function provisionVpnClient(
     if (existing) return existing.config;
   }
 
-  const resp = await fetch(`${baseUrl}/api/servers/${serverId}/clients`, {
+  const url = `${baseUrl}/api/servers/${serverId}/clients`;
+  const resp = await vpnFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -122,7 +195,7 @@ export async function provisionVpnClient(
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "unknown");
-    throw new Error(`VPN API ${resp.status}: ${text}`);
+    throw new Error(`VPN API ${resp.status} ${url}: ${text}`);
   }
 
   const json = await resp.json();
@@ -170,17 +243,15 @@ export async function deleteVpnClient(
   const existing = await findExistingClient(clientName, baseUrl);
   if (!existing) return null;
 
-  const resp = await fetch(
-    `${baseUrl}/api/servers/${existing.serverId}/clients/${existing.id}`,
-    {
-      method: "DELETE",
-      headers: { Authorization: authHeader },
-    },
-  );
+  const url = `${baseUrl}/api/servers/${existing.serverId}/clients/${existing.id}`;
+  const resp = await vpnFetch(url, {
+    method: "DELETE",
+    headers: { Authorization: authHeader },
+  });
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "unknown");
-    throw new Error(`VPN delete API ${resp.status}: ${text}`);
+    throw new Error(`VPN delete API ${resp.status} ${url}: ${text}`);
   }
 
   return existing.serverId;
@@ -201,20 +272,18 @@ export async function extendVpnClient(
     throw new Error(`VPN client not found: ${clientName}`);
   }
 
-  const resp = await fetch(
-    `${baseUrl}/api/servers/${existing.serverId}/clients/${existing.id}/extend`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: authHeader,
-      },
-      body: JSON.stringify({ duration: durationCode }),
+  const url = `${baseUrl}/api/servers/${existing.serverId}/clients/${existing.id}/extend`;
+  const resp = await vpnFetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: authHeader,
     },
-  );
+    body: JSON.stringify({ duration: durationCode }),
+  });
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "unknown");
-    throw new Error(`VPN extend API ${resp.status}: ${text}`);
+    throw new Error(`VPN extend API ${resp.status} ${url}: ${text}`);
   }
 }
