@@ -18,6 +18,13 @@ loadEnv({ path: parentEnv });
 loadEnv({ path: cwdEnv, override: true });
 import { closeDb, initDb } from "./db";
 import { runSubscriptionExpiryRemindersOnce } from "./subscription-reminders";
+import {
+  getAppEnv,
+  getTelegramOutboundMode,
+  installTelegramLogRedaction,
+} from "./telegram-outbound";
+
+installTelegramLogRedaction();
 
 function resolvedMiniAppUrl(): string | undefined {
   const webappUrl = (process.env.WEBAPP_URL ?? "").trim();
@@ -67,7 +74,9 @@ void (async () => {
     process.exit(1);
   }
 
-  console.log("Запуск runSubscriptionExpiryRemindersOnce…");
+  console.log(
+    `Запуск runSubscriptionExpiryRemindersOnce… (APP_ENV=${getAppEnv()}, TELEGRAM_OUTBOUND_MODE=${getTelegramOutboundMode()})`,
+  );
   try {
     await runSubscriptionExpiryRemindersOnce(bot.api, () =>
       webAppKeyboard("🛒 Продлить подписку", { hash: "purchase" }),

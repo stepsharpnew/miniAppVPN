@@ -1,6 +1,5 @@
 import { schedule, type ScheduledTask } from "node-cron";
 import type { Api, InlineKeyboard } from "grammy";
-import { GrammyError } from "grammy";
 import {
   fetchUsersForExpiryReminderD1,
   fetchUsersForExpiryReminderD3,
@@ -21,6 +20,12 @@ import {
   SUBSCRIPTION_CANCELLED_USER,
   SUBSCRIPTION_REMINDER_SEND_FAIL_ADMIN,
 } from "../shared/texts";
+import {
+  isPermanentTelegramSendFailure,
+  sendErrorDetail,
+  sendTelegramMessage,
+  shouldRecordPermanentTelegramFailure,
+} from "./telegram-outbound";
 
 function formatExpiryMsk(iso: string): string {
   const d = new Date(iso);
@@ -31,14 +36,6 @@ function formatExpiryMsk(iso: string): string {
       timeZone: "Europe/Moscow",
     }).format(d) + " (МСК)"
   );
-}
-
-function sendErrorDetail(error: unknown): string {
-  if (error instanceof GrammyError) {
-    return `${error.error_code}: ${error.description}`;
-  }
-  if (error instanceof Error) return error.message;
-  return String(error);
 }
 
 async function notifyAdminSendFailure(
@@ -56,12 +53,12 @@ async function notifyAdminSendFailure(
     sendErrorDetail(error),
   );
   try {
-    await api.sendMessage(admin.chatId, text, {
+    await sendTelegramMessage(api, admin.chatId, text, {
       parse_mode: "HTML",
       ...(admin.topicId !== undefined
         ? { message_thread_id: admin.topicId }
         : {}),
-    });
+    }, "subscriptionReminderAdminFailure");
   } catch (e) {
     console.error("subscription-reminder: admin notify failed", e);
   }
@@ -92,16 +89,17 @@ async function sendReminderBatch(
     const showKeyboard = kind !== "cancelled";
 
     try {
-      await api.sendMessage(row.telegram_id, text, {
+      const result = await sendTelegramMessage(api, row.telegram_id, text, {
         parse_mode: "HTML",
         ...(showKeyboard && kb ? { reply_markup: kb } : {}),
-      });
+      }, `subscriptionReminder:${kind}`);
+      if (result.status !== "sent") continue;
       await mark(row.id);
     } catch (error) {
-      // 403 == user blocked the bot. Flip is_blocked so subsequent reminder
-      // queries skip them; otherwise we keep retrying daily forever and the
-      // reminder flag is never set (mark*Sent only runs on success).
-      if (error instanceof GrammyError && error.error_code === 403) {
+      if (
+        shouldRecordPermanentTelegramFailure() &&
+        isPermanentTelegramSendFailure(error)
+      ) {
         try {
           await markUserBlockedBot(row.id);
         } catch (e) {

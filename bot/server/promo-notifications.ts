@@ -1,6 +1,7 @@
 import { type Api } from "grammy";
 import { escapeHtml } from "../shared/texts";
 import { resolveAdminChat } from "./store";
+import { sendTelegramMessage } from "./telegram-outbound";
 
 function formatRuDateTime(value: string | null | undefined): string {
   if (!value) return "не было";
@@ -30,7 +31,8 @@ export async function sendGiftPromoAdminNotification(
     p.telegramId != null ? `<code>${p.telegramId}</code>` : "нет";
 
   try {
-    await api.sendMessage(
+    await sendTelegramMessage(
+      api,
       admin.chatId,
       `🎟 <b>Промокод активирован</b>\n\n` +
         `👤 ${escapeHtml(p.userName)} (${escapeHtml(p.userTag)})\n` +
@@ -43,6 +45,7 @@ export async function sendGiftPromoAdminNotification(
         parse_mode: "HTML",
         ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
       },
+      "giftPromoAdminNotification",
     );
   } catch {
     /* best-effort */

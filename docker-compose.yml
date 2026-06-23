@@ -36,6 +36,9 @@ services:
     env_file:
       - .env
     environment:
+      APP_ENV: production
+      TELEGRAM_OUTBOUND_MODE: live
+      SUBSCRIPTION_REMINDERS_AUTORUN: "true"
       DATABASE_URL: "postgresql://${POSTGRES_USER:-meme}:${POSTGRES_PASSWORD:-meme_secret}@postgres:5432/${POSTGRES_DB:-meme_db}"
     expose:
       - "3001"
@@ -49,7 +52,9 @@ services:
 
   # ── Telegram Bot (preprod, test.memeinternet.site) ───────────
   # Тот же образ и общая БД с prod. Отличается env-файлом (свой
-  # BOT_TOKEN и WEBAPP_URL=https://test.memeinternet.site).
+  # BOT_TOKEN, WEBAPP_URL=https://test.memeinternet.site и
+  # TELEGRAM_OUTBOUND_ALLOWLIST). Telegram-отправки в preprod зажаты whitelist,
+  # а фоновые reminders не автозапускаются.
   bot-preprod:
     build:
       context: ./bot
@@ -63,6 +68,9 @@ services:
       - path: .env.preprod
         required: false
     environment:
+      APP_ENV: preprod
+      TELEGRAM_OUTBOUND_MODE: whitelist
+      SUBSCRIPTION_REMINDERS_AUTORUN: "false"
       DATABASE_URL: "postgresql://${POSTGRES_USER:-meme}:${POSTGRES_PASSWORD:-meme_secret}@postgres:5432/${POSTGRES_DB:-meme_db}"
     expose:
       - "3001"

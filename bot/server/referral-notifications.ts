@@ -2,6 +2,7 @@ import { type Api } from "grammy";
 import { escapeHtml } from "../shared/texts";
 import { type ReferralRewardParty, type ReferralRewardResult } from "./db";
 import { resolveAdminChat } from "./store";
+import { sendTelegramMessage } from "./telegram-outbound";
 
 function formatPartyIdentity(party: ReferralRewardParty | null): string {
   if (!party) return "не найден";
@@ -26,10 +27,12 @@ export async function sendReferralRewardNotifications(
 
   if (reward.isFirstPaidConversion && reward.referrerUser.telegramId) {
     try {
-      await api.sendMessage(
+      await sendTelegramMessage(
+        api,
         reward.referrerUser.telegramId,
         `ваш реферальный код сработал 🎁\nначислено <b>+${reward.referrerBonusDays} дней</b>`,
         { parse_mode: "HTML" },
+        "referralRewardUserNotification",
       );
     } catch (err) {
       console.error(
@@ -47,7 +50,8 @@ export async function sendReferralRewardNotifications(
 
   const admin = resolveAdminChat(rawBuyChat);
   try {
-    await api.sendMessage(
+    await sendTelegramMessage(
+      api,
       admin.chatId,
       `🎁 <b>Реферальное начисление</b>\n\n` +
         `👤 Покупатель: ${formatPartyIdentity(reward.invitedUser)}\n` +
@@ -59,6 +63,7 @@ export async function sendReferralRewardNotifications(
         parse_mode: "HTML",
         ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
       },
+      "referralRewardAdminNotification",
     );
   } catch (err) {
     console.error(

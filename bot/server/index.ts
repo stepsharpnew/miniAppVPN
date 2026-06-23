@@ -47,6 +47,19 @@ import {
   runSubscriptionExpiryRemindersOnce,
   scheduleSubscriptionExpiryReminders,
 } from "./subscription-reminders";
+import {
+  canProcessIncomingTelegramChat,
+  copyTelegramMessage,
+  getAppEnv,
+  getTelegramOutboundMode,
+  installTelegramLogRedaction,
+  sendTelegramDocument,
+  sendTelegramMessage,
+  sendTelegramPhoto,
+  shouldAutorunSubscriptionReminders,
+} from "./telegram-outbound";
+
+installTelegramLogRedaction();
 
 const botToken = (process.env.BOT_TOKEN ?? "").trim();
 if (!botToken) throw new Error("BOT_TOKEN is not set");
@@ -120,6 +133,17 @@ const bot = new Bot<MemeContext>(botToken);
 
 const initialSession = (): SessionData => ({});
 bot.use(session({ initial: initialSession }));
+
+bot.use(async (ctx, next) => {
+  const chatId = ctx.chat?.id ?? ctx.from?.id;
+  if (chatId !== undefined && !canProcessIncomingTelegramChat(chatId)) {
+    console.info(
+      `telegram-inbound: skipped update from ${chatId} (${getTelegramOutboundMode()}, APP_ENV=${getAppEnv()})`,
+    );
+    return;
+  }
+  await next();
+});
 
 function webAppKeyboard(buttonText: string, opts?: { hash?: string }) {
   const url = resolvedMiniAppUrl();
@@ -430,12 +454,16 @@ bot.on("message:web_app_data", async (ctx) => {
     );
 
     try {
-      const sent = await ctx.api.sendMessage(chatId, adminText, {
+      const sent = await sendTelegramMessage(ctx.api, chatId, adminText, {
         parse_mode: "HTML",
         ...(topicId !== undefined ? { message_thread_id: topicId } : {}),
-      });
+      }, "miniAppPurchaseAdmin");
+      if (sent.status !== "sent") {
+        await ctx.reply("⚠️ Отправка заявки сейчас недоступна в этом окружении.");
+        return;
+      }
       if (userChatId) {
-        saveForwardedMessage(chatId, sent.message_id, userChatId);
+        saveForwardedMessage(chatId, sent.value.message_id, userChatId);
         setActiveDialog(userChatId, { chatId, topicId });
       }
       await ctx.reply(
@@ -465,12 +493,16 @@ bot.on("message:web_app_data", async (ctx) => {
     );
 
     try {
-      const sent = await ctx.api.sendMessage(chatId, adminText, {
+      const sent = await sendTelegramMessage(ctx.api, chatId, adminText, {
         parse_mode: "HTML",
         ...(topicId !== undefined ? { message_thread_id: topicId } : {}),
-      });
+      }, "miniAppSupportAdmin");
+      if (sent.status !== "sent") {
+        await ctx.reply("⚠️ Отправка сообщения сейчас недоступна в этом окружении.");
+        return;
+      }
       if (userChatId) {
-        saveForwardedMessage(chatId, sent.message_id, userChatId);
+        saveForwardedMessage(chatId, sent.value.message_id, userChatId);
         setActiveDialog(userChatId, { chatId, topicId });
         addMessage(userChatId, {
           from: "user",
@@ -544,10 +576,10 @@ if (adminChats.length > 0) {
     // Send notification to user via bot message
     try {
       const keyboard = webAppKeyboard("💬 Открыть чат", { hash: "support" });
-      await ctx.api.sendMessage(replyUserChatId, SUPPORT_NEW_REPLY_NOTIFICATION, {
+      await sendTelegramMessage(ctx.api, replyUserChatId, SUPPORT_NEW_REPLY_NOTIFICATION, {
         parse_mode: "HTML",
         ...(keyboard ? { reply_markup: keyboard } : {}),
-      });
+      }, "supportReplyUserNotification");
     } catch (error) {
       console.error("Ошибка отправки уведомления:", error);
       await ctx.reply(SUPPORT_REPLY_FAILED);
@@ -576,11 +608,12 @@ bot.on("message", async (ctx) => {
         userId,
         ctx.message.text,
       );
-      const sent = await ctx.api.sendMessage(dialog.chatId, text, {
+      const sent = await sendTelegramMessage(ctx.api, dialog.chatId, text, {
         parse_mode: "HTML",
         ...topicOpts,
-      });
-      saveForwardedMessage(dialog.chatId, sent.message_id, userChatId);
+      }, "supportFallbackUserText");
+      if (sent.status !== "sent") return;
+      saveForwardedMessage(dialog.chatId, sent.value.message_id, userChatId);
       addMessage(userChatId, {
         from: "user",
         type: "text",
@@ -595,12 +628,13 @@ bot.on("message", async (ctx) => {
         userId,
         ctx.message.caption,
       );
-      const sent = await ctx.api.sendPhoto(dialog.chatId, fileId, {
+      const sent = await sendTelegramPhoto(ctx.api, dialog.chatId, fileId, {
         caption,
         parse_mode: "HTML",
         ...topicOpts,
-      });
-      saveForwardedMessage(dialog.chatId, sent.message_id, userChatId);
+      }, "supportFallbackUserPhoto");
+      if (sent.status !== "sent") return;
+      saveForwardedMessage(dialog.chatId, sent.value.message_id, userChatId);
       addMessage(userChatId, {
         from: "user",
         type: "photo",
@@ -613,12 +647,15 @@ bot.on("message", async (ctx) => {
         userId,
         ctx.message.caption,
       );
-      const sent = await ctx.api.sendDocument(
+      const sent = await sendTelegramDocument(
+        ctx.api,
         dialog.chatId,
         ctx.message.document.file_id,
         { caption, parse_mode: "HTML", ...topicOpts },
+        "supportFallbackUserDocument",
       );
-      saveForwardedMessage(dialog.chatId, sent.message_id, userChatId);
+      if (sent.status !== "sent") return;
+      saveForwardedMessage(dialog.chatId, sent.value.message_id, userChatId);
       addMessage(userChatId, {
         from: "user",
         type: "document",
@@ -627,18 +664,22 @@ bot.on("message", async (ctx) => {
       });
     } else {
       const header = SUPPORT_MEDIA_HEADER_ADMIN(userName, userTag, userId);
-      const sent = await ctx.api.sendMessage(dialog.chatId, header, {
+      const sent = await sendTelegramMessage(ctx.api, dialog.chatId, header, {
         parse_mode: "HTML",
         ...topicOpts,
-      });
-      saveForwardedMessage(dialog.chatId, sent.message_id, userChatId);
-      const copied = await ctx.api.copyMessage(
+      }, "supportFallbackUserMediaHeader");
+      if (sent.status !== "sent") return;
+      saveForwardedMessage(dialog.chatId, sent.value.message_id, userChatId);
+      const copied = await copyTelegramMessage(
+        ctx.api,
         dialog.chatId,
         userChatId,
         ctx.message.message_id,
         topicOpts,
+        "supportFallbackUserMediaCopy",
       );
-      saveForwardedMessage(dialog.chatId, copied.message_id, userChatId);
+      if (copied.status !== "sent") return;
+      saveForwardedMessage(dialog.chatId, copied.value.message_id, userChatId);
     }
   } catch (error) {
     console.error("Ошибка пересылки ответа юзера в админ-чат:", error);
@@ -720,19 +761,24 @@ void (async () => {
   const getRenewKeyboard = () =>
     webAppKeyboard("🛒 Продлить подписку", { hash: "purchase" });
 
-  // Catch-up прогон сразу после старта: если процесс рестартовал в час, когда
-  // cron должен был сработать, без этого окно `d1`/`expired` могло пропасть.
-  void runSubscriptionExpiryRemindersOnce(bot.api, getRenewKeyboard).catch(
-    (e) => console.error("subscription-reminder: startup run failed", e),
-  );
-
-  const subscriptionReminderTask = scheduleSubscriptionExpiryReminders(
-    bot.api,
-    getRenewKeyboard,
-  );
+  const remindersAutorun = shouldAutorunSubscriptionReminders();
+  const subscriptionReminderTask = remindersAutorun
+    ? scheduleSubscriptionExpiryReminders(bot.api, getRenewKeyboard)
+    : null;
+  if (remindersAutorun) {
+    // Catch-up прогон сразу после старта: если процесс рестартовал в час, когда
+    // cron должен был сработать, без этого окно `d1`/`expired` могло пропасть.
+    void runSubscriptionExpiryRemindersOnce(bot.api, getRenewKeyboard).catch(
+      (e) => console.error("subscription-reminder: startup run failed", e),
+    );
+  } else {
+    console.log(
+      `subscription-reminder: autorun disabled (APP_ENV=${getAppEnv()}, TELEGRAM_OUTBOUND_MODE=${getTelegramOutboundMode()})`,
+    );
+  }
 
   const shutdown = async () => {
-    subscriptionReminderTask.stop();
+    subscriptionReminderTask?.stop();
     await bot.stop();
     await closeDb();
     process.exit(0);

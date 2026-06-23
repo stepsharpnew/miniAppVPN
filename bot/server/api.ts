@@ -96,6 +96,11 @@ import {
   recordLazyVpnBackfillSuccess,
   releaseLazyVpnBackfill,
 } from "./vpn-backfill";
+import {
+  sendTelegramDocument,
+  sendTelegramMessage,
+  sendTelegramPhoto,
+} from "./telegram-outbound";
 
 interface TelegramUser {
   id: number;
@@ -387,7 +392,17 @@ export function createApiServer(api: Api, botToken: string) {
     }
 
     try {
-      await api.sendMessage(user.id, instructionText);
+      const sent = await sendTelegramMessage(
+        api,
+        user.id,
+        instructionText,
+        undefined,
+        "instructionSend",
+      );
+      if (sent.status !== "sent") {
+        res.status(403).json({ error: "telegram_outbound_blocked" });
+        return;
+      }
       res.json({ ok: true });
     } catch (error) {
       console.error("Instruction send error:", error);
@@ -421,6 +436,10 @@ export function createApiServer(api: Api, botToken: string) {
     } catch (error) {
       if (error instanceof Error && error.message === "support_unavailable") {
         res.status(503).json({ error: "Support unavailable" });
+        return;
+      }
+      if (error instanceof Error && error.message === "support_outbound_skipped") {
+        res.status(403).json({ error: "telegram_outbound_blocked" });
         return;
       }
       console.error("API send error:", error);
@@ -463,20 +482,25 @@ export function createApiServer(api: Api, botToken: string) {
         let sent;
 
         if (isImage) {
-          sent = await api.sendPhoto(chatId, inputFile, {
+          sent = await sendTelegramPhoto(api, chatId, inputFile, {
             caption,
             parse_mode: "HTML",
             ...topicOpts,
-          });
+          }, "supportUploadPhoto");
         } else {
-          sent = await api.sendDocument(chatId, inputFile, {
+          sent = await sendTelegramDocument(api, chatId, inputFile, {
             caption,
             parse_mode: "HTML",
             ...topicOpts,
-          });
+          }, "supportUploadDocument");
         }
 
-        saveForwardedMessage(chatId, sent.message_id, user.id);
+        if (sent.status !== "sent") {
+          res.status(403).json({ error: "telegram_outbound_blocked" });
+          return;
+        }
+
+        saveForwardedMessage(chatId, sent.value.message_id, user.id);
         setActiveDialog(user.id, { chatId, topicId });
 
         const message = addMessage(user.id, {
@@ -571,9 +595,13 @@ export function createApiServer(api: Api, botToken: string) {
 
     try {
       const file = new InputFile(Buffer.from(config, "utf-8"), "meme-vpn.conf");
-      await api.sendDocument(user.id, file, {
+      const sent = await sendTelegramDocument(api, user.id, file, {
         caption: "🔑 Ваш VPN-конфиг. Откройте файл в приложении AmneziaWG.",
-      });
+      }, "paymentConfigSendFile");
+      if (sent.status !== "sent") {
+        res.status(403).json({ error: "telegram_outbound_blocked" });
+        return;
+      }
       res.json({ ok: true });
     } catch (err) {
       console.error("Send config file error:", err);
@@ -1131,9 +1159,13 @@ export function createApiServer(api: Api, botToken: string) {
         : "без @ника";
 
     try {
-      await api.sendMessage(userId, PAYMENT_SUCCESS_USER(planLabel, amountStr, pending.isRenewal), {
-        parse_mode: "HTML",
-      });
+      await sendTelegramMessage(
+        api,
+        userId,
+        PAYMENT_SUCCESS_USER(planLabel, amountStr, pending.isRenewal),
+        { parse_mode: "HTML" },
+        "paymentSuccessUserNotification",
+      );
     } catch (err) {
       console.error("User payment notification failed:", userId, err);
     }
@@ -1142,13 +1174,15 @@ export function createApiServer(api: Api, botToken: string) {
     if (rawBuyChat) {
       const admin = resolveAdminChat(rawBuyChat);
       try {
-        await api.sendMessage(
+        await sendTelegramMessage(
+          api,
           admin.chatId,
           PAYMENT_ADMIN_NOTIFY(pending.firstName, userTag, userId, planLabel, amountStr, provisionOk, pending.isRenewal),
           {
             parse_mode: "HTML",
             ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
           },
+          "paymentAdminNotification",
         );
       } catch (err) {
         console.error(
@@ -1422,10 +1456,12 @@ export function createApiServer(api: Api, botToken: string) {
 
     if (isTelegramId) {
       try {
-        await api.sendMessage(
+        await sendTelegramMessage(
+          api,
           telegramId,
           PAYMENT_SUCCESS_USER(planLabel, amountStr, isRenewal),
           { parse_mode: "HTML" },
+          "paymentWebhookSuccessUserNotification",
         );
       } catch (err) {
         console.error("User payment notification (webhook) failed:", telegramId, err);
@@ -1437,7 +1473,8 @@ export function createApiServer(api: Api, botToken: string) {
       const admin = resolveAdminChat(rawBuyChat);
       const notifyUserId = isTelegramId ? telegramId : webUserId!;
       try {
-        await api.sendMessage(
+        await sendTelegramMessage(
+          api,
           admin.chatId,
           PAYMENT_ADMIN_NOTIFY(
             firstName,
@@ -1452,6 +1489,7 @@ export function createApiServer(api: Api, botToken: string) {
             parse_mode: "HTML",
             ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
           },
+          "paymentWebhookAdminNotification",
         );
       } catch (err) {
         console.error(

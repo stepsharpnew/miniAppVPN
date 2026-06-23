@@ -39,6 +39,7 @@ import { BRAND_NAME, PAYMENT_ADMIN_NOTIFY } from "../shared/texts";
 import { resolveAdminChat } from "./store";
 import { sendReferralRewardNotifications } from "./referral-notifications";
 import { sendGiftPromoAdminNotification } from "./promo-notifications";
+import { sendTelegramMessage } from "./telegram-outbound";
 import {
   getWebClientName,
   provisionVpnClientOnAnyEnabledServer,
@@ -367,7 +368,8 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
   if (api && rawBuyChat) {
     const admin = resolveAdminChat(rawBuyChat);
     try {
-      await api.sendMessage(
+      await sendTelegramMessage(
+        api,
         admin.chatId,
         PAYMENT_ADMIN_NOTIFY(
           userName,
@@ -382,6 +384,7 @@ export async function processWebPaymentFromWebhook(paymentId: string, api?: Api)
           parse_mode: "HTML",
           ...(admin.topicId !== undefined ? { message_thread_id: admin.topicId } : {}),
         },
+        "webPaymentAdminNotification",
       );
     } catch (err) {
       console.error(
@@ -1034,6 +1037,10 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       }
       if (err instanceof Error && err.message === "empty_message") {
         res.status(400).json({ error: "Empty message" });
+        return;
+      }
+      if (err instanceof Error && err.message === "support_outbound_skipped") {
+        res.status(403).json({ error: "telegram_outbound_blocked" });
         return;
       }
       console.error("Web support send error:", err);

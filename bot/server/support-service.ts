@@ -10,6 +10,7 @@ import {
   SUPPORT_USER_TEXT_ADMIN,
 } from "../shared/texts";
 import { type UserRow } from "./db";
+import { sendTelegramMessage } from "./telegram-outbound";
 
 export interface SupportActor {
   dialogUserId: number;
@@ -102,11 +103,6 @@ export async function sendSupportTextMessage(
   }
 
   const isNew = !hasMessages(actor.dialogUserId);
-  const message = addMessage(actor.dialogUserId, {
-    from: "user",
-    type: "text",
-    text: trimmed,
-  });
 
   const adminText = isNew
     ? SUPPORT_TICKET_ADMIN(
@@ -122,14 +118,24 @@ export async function sendSupportTextMessage(
         trimmed,
       );
 
-  const sent = await api.sendMessage(adminChat.chatId, adminText, {
+  const sent = await sendTelegramMessage(api, adminChat.chatId, adminText, {
     parse_mode: "HTML",
     ...(adminChat.topicId !== undefined
       ? { message_thread_id: adminChat.topicId }
       : {}),
+  }, "supportUserText");
+
+  if (sent.status !== "sent") {
+    throw new Error("support_outbound_skipped");
+  }
+
+  const message = addMessage(actor.dialogUserId, {
+    from: "user",
+    type: "text",
+    text: trimmed,
   });
 
-  saveForwardedMessage(adminChat.chatId, sent.message_id, actor.dialogUserId);
+  saveForwardedMessage(adminChat.chatId, sent.value.message_id, actor.dialogUserId);
   setActiveDialog(actor.dialogUserId, adminChat);
 
   return message;
