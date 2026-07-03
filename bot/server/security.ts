@@ -70,6 +70,14 @@ export const paymentCreateRateLimiter = rateLimit({
   message: { error: "Слишком много попыток оплаты. Попробуйте позже." },
 });
 
+export const healthzRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "too many requests",
+});
+
 export const webhookRateLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 120,

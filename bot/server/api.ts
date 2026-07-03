@@ -18,6 +18,7 @@ import {
 import {
   getCachedChannelMembership,
   getCorsAllowedOrigins,
+  healthzRateLimiter,
   isAllowedSupportUploadMime,
   isValidPaymentId,
   paymentCreateRateLimiter,
@@ -258,11 +259,15 @@ export function createApiServer(api: Api, botToken: string) {
       crossOriginEmbedderPolicy: false,
     }),
   );
-  app.use(express.json({ limit: "64kb" }));
 
-  app.get("/healthz", (_req, res) => {
-    res.json({ ok: true });
+  app.get(["/healthz", "/api/healthz"], healthzRateLimiter, (_req, res) => {
+    res.type("text/plain").set("Cache-Control", "no-store").send("ok");
   });
+  app.all(["/healthz", "/api/healthz"], (_req, res) => {
+    res.type("text/plain").set("Allow", "GET, HEAD").status(405).send("method not allowed");
+  });
+
+  app.use(express.json({ limit: "64kb" }));
 
   const uploadDir = path.join(os.tmpdir(), "meme-support-uploads");
   fs.mkdirSync(uploadDir, { recursive: true });
