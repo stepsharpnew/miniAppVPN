@@ -450,13 +450,22 @@ export async function createWebUser(
   login: string,
   passwordHash: string,
 ): Promise<UserRow> {
-  const { rows } = await getPool().query<UserRow>(
-    `INSERT INTO users (login, password_hash, auth_source)
-     VALUES ($1, $2, 'web')
-     RETURNING *`,
-    [login, passwordHash],
-  );
-  return rows[0];
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      const { rows } = await getPool().query<UserRow>(
+        `INSERT INTO users (login, password_hash, auth_source, referral_code)
+         VALUES ($1, $2, 'web', $3)
+         RETURNING *`,
+        [login, passwordHash, generateReferralCode()],
+      );
+      return rows[0];
+    } catch (error) {
+      if (isUniqueViolation(error, "users_referral_code_unique")) continue;
+      throw error;
+    }
+  }
+
+  throw new Error(`Failed to assign referral code for web user ${login}`);
 }
 
 /**
@@ -938,9 +947,8 @@ export async function getUserReferralInfo(userId: string): Promise<ReferralInfo>
   };
 }
 
-/** Для сайта: не создаёт referral_code (выдача только через Mini App). */
 export async function getUserReferralInfoForWeb(userId: string): Promise<ReferralInfo> {
-  const myReferralCode = await getUserReferralCode(userId);
+  const myReferralCode = await getOrCreateUserReferralCode(userId);
   const { rows } = await getPool().query<{
     referred_by_user_id: string | null;
     referred_by_code: string | null;
@@ -948,7 +956,7 @@ export async function getUserReferralInfoForWeb(userId: string): Promise<Referra
   }>(
     `SELECT u.referred_by_user_id,
             ref.referral_code AS referred_by_code,
-            ref.telegram_nickname AS referred_by_nickname
+            COALESCE(ref.telegram_nickname, ref.login) AS referred_by_nickname
      FROM users u
      LEFT JOIN users ref ON ref.id = u.referred_by_user_id
      WHERE u.id = $1`,

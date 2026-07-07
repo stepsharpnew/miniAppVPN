@@ -1,0 +1,42 @@
+import styles from "./BottomNav.module.css";
+
+export type TabId = "profile" | "purchase" | "referral" | "instructions" | "support";
+
+interface Tab {
+  id: TabId;
+  label: string;
+  icon: string;
+}
+
+const tabs: Tab[] = [
+  { id: "profile", label: "Профиль", icon: "👤" },
+  { id: "purchase", label: "Покупка", icon: "🛒" },
+  { id: "referral", label: "Реферал", icon: "🎁" },
+  { id: "instructions", label: "Инструкции", icon: "📖" },
+  { id: "support", label: "Поддержка", icon: "💬" },
+];
+
+interface BottomNavProps {
+  activeTab: TabId;
+  onTabChange: (tab: TabId) => void;
+}
+
+export function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
+  return (
+    <nav className={styles.nav} aria-label="Основная навигация">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          className={`${styles.tab} ${activeTab === tab.id ? styles.active : ""}`}
+          onClick={() => onTabChange(tab.id)}
+        >
+          <span className={styles.icon} aria-hidden>
+            {tab.icon}
+          </span>
+          <span className={styles.label}>{tab.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}

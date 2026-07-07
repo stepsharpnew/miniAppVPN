@@ -12,6 +12,7 @@ import {
   getPool,
   extendSubscriptionById,
   getAllEnabledServers,
+  getReferralStats,
   getUserReferralInfoForWeb,
   getHappPanelServer,
   incrementServerUserCount,
@@ -616,8 +617,10 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       happ_subscription_url: active ? happUrl : null,
       created_at: user.created_at,
       login: user.login,
+      my_referral_code: referralInfo.my_referral_code,
       referred_by_applied: referralInfo.referred_by_applied,
       referred_by_code: referralInfo.referred_by_code,
+      referred_by_nickname: referralInfo.referred_by_nickname,
       referral_message: referralInfo.referral_message,
     });
   });
@@ -733,8 +736,10 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
             config: active ? (userRow.vpn_config ?? config ?? null) : null,
             happ_subscription_url: active ? (userRow.happ_subscription_url ?? null) : null,
             login: userRow.login,
+            my_referral_code: referralInfo.my_referral_code,
             referred_by_applied: referralInfo.referred_by_applied,
             referred_by_code: referralInfo.referred_by_code,
+            referred_by_nickname: referralInfo.referred_by_nickname,
             referral_message: referralInfo.referral_message,
           },
         });
@@ -746,9 +751,11 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
         res.json({
           ok: true,
           kind: "referral" as const,
+          my_referral_code: referralInfo.my_referral_code,
           referral_message: redeemed.referral_message,
           referred_by_applied: referralInfo.referred_by_applied,
           referred_by_code: referralInfo.referred_by_code,
+          referred_by_nickname: referralInfo.referred_by_nickname,
         });
         return;
       }
@@ -786,13 +793,25 @@ export function mountWebAuthRoutes(app: express.Express, api?: Api) {
       const referralInfo = await getUserReferralInfoForWeb(user.id);
       res.json({
         ok: true,
+        my_referral_code: referralInfo.my_referral_code,
         referral_message: result.referral_message,
         referred_by_applied: referralInfo.referred_by_applied,
         referred_by_code: referralInfo.referred_by_code,
+        referred_by_nickname: referralInfo.referred_by_nickname,
       });
     } catch (err) {
       console.error("Apply web referral code failed:", err);
       res.status(500).json({ error: "Не удалось применить реферальный код" });
+    }
+  });
+
+  app.get("/api/web/referral/stats", webAuth, async (req, res) => {
+    try {
+      const stats = await getReferralStats(getWebUserId(req));
+      res.json(stats);
+    } catch (err) {
+      console.error("Get web referral stats failed:", err);
+      res.status(500).json({ error: "Не удалось загрузить статистику" });
     }
   });
 

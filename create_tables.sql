@@ -164,17 +164,10 @@ RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
-  -- Web users do not receive DB-generated referral codes.
-  IF NEW.auth_source = 'web' THEN
-    IF NEW.referral_code IS NOT NULL THEN
-      NEW.referral_code := UPPER(BTRIM(NEW.referral_code::TEXT))::CHAR(8);
-    END IF;
-    RETURN NEW;
-  END IF;
   IF NEW.referral_code IS NULL THEN
     NEW.referral_code := generate_referral_code();
   ELSE
-    NEW.referral_code := UPPER(BTRIM(NEW.referral_code));
+    NEW.referral_code := UPPER(BTRIM(NEW.referral_code::TEXT))::CHAR(8);
   END IF;
   RETURN NEW;
 END;
@@ -201,7 +194,7 @@ DECLARE
   generated_code CHAR(8);
 BEGIN
   FOR target_user_id IN
-    SELECT id FROM users WHERE referral_code IS NULL AND auth_source <> 'web'
+    SELECT id FROM users WHERE referral_code IS NULL
   LOOP
     LOOP
       generated_code := generate_referral_code();

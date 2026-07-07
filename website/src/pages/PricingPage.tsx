@@ -99,7 +99,7 @@ export function PricingPage({ user, onPaymentSuccess }: PricingPageProps) {
       <div className={styles.header}>
         <div className={styles.headerIcon}>🛒</div>
         <div>
-          <div className={styles.headerTitle}>Тарифы</div>
+          <div className={styles.headerTitle}>Покупка</div>
           <div className={styles.headerSubtitle}>
             Выберите устройство и срок подписки
           </div>

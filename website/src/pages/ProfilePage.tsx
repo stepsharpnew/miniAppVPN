@@ -6,13 +6,10 @@ import { BRAND_NAME } from "../data/plans";
 import { StatusBadge } from "../components/StatusBadge";
 import styles from "./ProfilePage.module.css";
 
-const REFERRAL_INVITER_SUCCESS =
-  "Промокод успешно применен, при покупке вам будет в подарок 1 месяц";
-
 interface ProfilePageProps {
   user: WebUser | null;
   onLogout: () => void;
-  onNavigate: (tab: "pricing") => void;
+  onNavigate: (tab: "purchase") => void;
 }
 
 interface SubData {
@@ -54,10 +51,6 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   const [loaded, setLoaded] = useState(false);
   const [configCopied, setConfigCopied] = useState(false);
   const [happCopied, setHappCopied] = useState(false);
-  const [promoCode, setPromoCode] = useState("");
-  const [promoLoading, setPromoLoading] = useState(false);
-  const [promoMessage, setPromoMessage] = useState<string | null>(null);
-  const [promoError, setPromoError] = useState<string | null>(null);
   const [clientKind, setClientKind] = useState<VpnClientKind>("amneziawg");
   const [reissuing, setReissuing] = useState(false);
   const [reissueOk, setReissueOk] = useState(false);
@@ -146,65 +139,6 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
     }
   }, [reissuing]);
 
-  const handleApplyPromo = useCallback(async () => {
-    const code = promoCode.trim().toUpperCase();
-    if (!code || promoLoading) return;
-
-    setPromoLoading(true);
-    setPromoError(null);
-    setPromoMessage(null);
-
-    try {
-      const data = await apiFetch<{
-        kind?: "gift" | "referral";
-        months?: number;
-        subscription?: SubData;
-        referral_message?: string | null;
-        referred_by_applied?: boolean;
-        referred_by_code?: string | null;
-      }>("/api/web/promocode", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-
-      setPromoCode("");
-
-      if (data.kind === "gift" && data.subscription) {
-        setSub(data.subscription);
-        setPromoMessage(
-          `Подарочный промокод активирован. Подписка +${data.months ?? 0} мес.`,
-        );
-        return;
-      }
-
-      if (data.kind === "referral") {
-        setSub((prev) =>
-          prev
-            ? {
-                ...prev,
-                referred_by_applied: Boolean(data.referred_by_applied),
-                referred_by_code: data.referred_by_code ?? code,
-                referral_message: data.referral_message ?? prev.referral_message,
-              }
-            : prev,
-        );
-        setPromoMessage(data.referral_message ?? REFERRAL_INVITER_SUCCESS);
-        return;
-      }
-
-      throw new Error("Не удалось активировать промокод");
-    } catch (err) {
-      setPromoError(
-        err instanceof Error && err.message
-          ? err.message
-          : "Не удалось активировать промокод",
-      );
-    } finally {
-      setPromoLoading(false);
-    }
-  }, [promoCode, promoLoading]);
-
   const handleCopyHappUrl = useCallback(() => {
     if (!sub?.happ_subscription_url) return;
     navigator.clipboard.writeText(sub.happ_subscription_url).then(() => {
@@ -222,8 +156,6 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
   }, [sub?.happ_subscription_url]);
 
   if (!user) return null;
-  const isTelegramLinked =
-    user.auth_source === "both" || user.auth_source === "telegram";
   const happUrl = sub?.happ_subscription_url ?? null;
 
   return (
@@ -245,52 +177,6 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
                 {formatExpiry(sub.expired_at)}
               </div>
             )}
-          </div>
-        </div>
-
-        <div className={styles.compactGrid}>
-          <div className={styles.telegramSyncBlock}>
-            <div className={styles.sectionHeader}>Telegram</div>
-            <div
-              className={`${styles.syncStatus} ${isTelegramLinked ? styles.syncLinked : styles.syncNotLinked}`}
-            >
-              {isTelegramLinked ? "Привязан" : "Не привязан"}
-            </div>
-          </div>
-
-          <div className={styles.promoBlock}>
-            <div className={styles.sectionHeader}>Промокод</div>
-            <div className={styles.promoRow}>
-              <input
-                type="text"
-                value={promoCode}
-                onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
-                className={styles.promoInput}
-                placeholder="Подарочный или реферальный"
-                disabled={promoLoading}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void handleApplyPromo();
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className={styles.promoBtn}
-                disabled={!promoCode.trim() || promoLoading}
-                onClick={() => void handleApplyPromo()}
-              >
-                {promoLoading ? "..." : "OK"}
-              </button>
-            </div>
-            {sub?.referred_by_applied && sub.referred_by_code ? (
-              <div className={styles.referralHint}>
-                Реферальный код применён: {sub.referred_by_code}
-              </div>
-            ) : null}
-            {promoMessage ? <div className={styles.promoSuccess}>{promoMessage}</div> : null}
-            {promoError ? <div className={styles.promoError}>{promoError}</div> : null}
           </div>
         </div>
 
@@ -395,7 +281,7 @@ export function ProfilePage({ user, onLogout, onNavigate }: ProfilePageProps) {
       </div>
 
       {!sub?.active && (
-        <button className={styles.buyBtn} onClick={() => onNavigate("pricing")}>
+        <button className={styles.buyBtn} onClick={() => onNavigate("purchase")}>
           Купить подписку
         </button>
       )}

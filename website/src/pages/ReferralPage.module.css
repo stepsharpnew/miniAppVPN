@@ -1,0 +1,326 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ringsCard {
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ringsRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.ringsWrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.ringssvg {
+  display: block;
+}
+
+.ringsCenter {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.ringsCenterCount {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--text-primary);
+}
+
+.ringsCenterLabel {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.tierList {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tierRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.45;
+  transition: opacity 0.25s ease;
+}
+
+.tierRowActive {
+  opacity: 1;
+}
+
+.tierRowDone {
+  opacity: 0.65;
+}
+
+.tierDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tierInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tierRange {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.2;
+}
+
+.tierDays {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.tierCheck {
+  margin-left: auto;
+  font-size: 12px;
+  color: #88f0b3;
+}
+
+.statsRow {
+  display: flex;
+  gap: 10px;
+}
+
+.statCard {
+  flex: 1;
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  padding: 14px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.statNum {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.statLabel {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.card {
+  background: var(--bg-card);
+  border-radius: var(--border-radius);
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.codeRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.codeValue {
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-align: center;
+}
+
+.iconBtn {
+  width: 46px;
+  height: 46px;
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.iconBtn:active {
+  transform: scale(0.96);
+}
+
+.iconBtn:disabled {
+  opacity: 0.35;
+}
+
+.appliedBadge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #88f0b3;
+  background: rgba(136, 240, 179, 0.08);
+  border: 1px solid rgba(136, 240, 179, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  line-height: 1.4;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.appliedInviter {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.promoRow {
+  display: flex;
+  gap: 8px;
+}
+
+.promoInput {
+  flex: 1;
+  min-width: 0;
+  padding: 13px 12px;
+  border-radius: var(--border-radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  font-size: 14px;
+  text-transform: uppercase;
+  outline: none;
+}
+
+.promoInput::placeholder {
+  color: var(--text-secondary);
+  text-transform: none;
+}
+
+.promoInput:focus {
+  border-color: var(--accent-blue);
+}
+
+.promoBtn {
+  padding: 0 16px;
+  border-radius: var(--border-radius-sm);
+  background: var(--btn-gradient);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.promoBtn:disabled {
+  opacity: 0.5;
+}
+
+.promoSuccess {
+  font-size: 12px;
+  color: #7df5ab;
+  line-height: 1.5;
+}
+
+.promoError {
+  font-size: 12px;
+  color: #ff8e8e;
+  line-height: 1.5;
+}
+
+.inviteeList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inviteeRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.inviteeRow:last-child {
+  border-bottom: none;
+}
+
+.inviteeIcon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.inviteeName {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inviteeStatus {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+@media (max-width: 430px) {
+  .ringsRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ringsWrap {
+    align-self: center;
+  }
+}
