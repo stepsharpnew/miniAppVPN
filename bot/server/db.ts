@@ -811,6 +811,21 @@ export async function mergeAccounts(
       [webUserId, telegramUserId],
     );
     await client.query(
+      `DELETE FROM promo_redemptions pr
+       WHERE pr.user_id = $2
+         AND EXISTS (
+           SELECT 1
+           FROM promo_redemptions existing
+           WHERE existing.user_id = $1
+             AND existing.promo_code_id = pr.promo_code_id
+         )`,
+      [webUserId, telegramUserId],
+    );
+    await client.query(
+      "UPDATE promo_redemptions SET user_id = $1 WHERE user_id = $2",
+      [webUserId, telegramUserId],
+    );
+    await client.query(
       "UPDATE referral_rewards SET invited_user_id = $1 WHERE invited_user_id = $2",
       [webUserId, telegramUserId],
     );
