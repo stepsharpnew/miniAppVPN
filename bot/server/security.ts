@@ -86,16 +86,29 @@ export const webhookRateLimiter = rateLimit({
   message: { error: "Too many requests" },
 });
 
-const CHANNEL_CACHE_TTL_MS = 60_000;
+const CHANNEL_MEMBERSHIP_CACHE_TTL_MS = 60_000;
+const CHANNEL_MEMBERSHIP_STALE_TTL_MS = 6 * 60 * 60 * 1000;
 const channelMemberCache = new Map<
   number,
-  { subscribed: boolean; expiresAt: number }
+  { subscribed: boolean; freshUntil: number; staleUntil: number }
 >();
 
 export function getCachedChannelMembership(userId: number): boolean | null {
   const entry = channelMemberCache.get(userId);
   if (!entry) return null;
-  if (Date.now() > entry.expiresAt) {
+  if (Date.now() > entry.staleUntil) {
+    channelMemberCache.delete(userId);
+    return null;
+  }
+  if (Date.now() > entry.freshUntil) return null;
+  return entry.subscribed;
+}
+
+/** Last known result, used only as a fallback when Telegram is unavailable. */
+export function getStaleCachedChannelMembership(userId: number): boolean | null {
+  const entry = channelMemberCache.get(userId);
+  if (!entry) return null;
+  if (Date.now() > entry.staleUntil) {
     channelMemberCache.delete(userId);
     return null;
   }
@@ -106,9 +119,11 @@ export function setCachedChannelMembership(
   userId: number,
   subscribed: boolean,
 ): void {
+  const now = Date.now();
   channelMemberCache.set(userId, {
     subscribed,
-    expiresAt: Date.now() + CHANNEL_CACHE_TTL_MS,
+    freshUntil: now + CHANNEL_MEMBERSHIP_CACHE_TTL_MS,
+    staleUntil: now + CHANNEL_MEMBERSHIP_STALE_TTL_MS,
   });
 }
 

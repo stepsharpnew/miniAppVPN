@@ -209,9 +209,18 @@ socketio = SocketIO(
     path='/socket.io'  # Explicitly set the path
 )
 
+@app.after_request
+def advertise_happ_idempotency(response):
+    """Lets clients safely enable mutation retries after rolling upgrades."""
+    response.headers['X-HAPP-Idempotency'] = '1'
+    return response
+
 class AmneziaManager:
     def __init__(self):
         self.config_lock = threading.RLock()
+        # Serializes idempotent mutations so a retry cannot overtake the first
+        # request while it is still provisioning/renewing remote clients.
+        self.idempotency_lock = threading.RLock()
         self.stop_expiration_worker = threading.Event()
         self.config = self.load_config()
         self.ensure_directories()
@@ -966,6 +975,54 @@ class AmneziaManager:
         with self.config_lock:
             with open(CONFIG_FILE, 'w') as f:
                 json.dump(self.config, f, indent=2)
+
+    def execute_idempotent(self, scope, idempotency_key, operation):
+        """Execute a mutating API operation at most once for a request key.
+
+        Successful responses are persisted in web_config.json, so retries after
+        a lost HTTP response (or even a container restart) replay the original
+        result instead of extending the user a second time.
+        """
+        key = str(idempotency_key or '').strip()
+        if not key:
+            return operation()
+        if len(key) > 128 or not re.fullmatch(r'[A-Za-z0-9._:@-]+', key):
+            raise ValueError("Invalid Idempotency-Key")
+
+        storage_key = f"{scope}:{key}"
+        with self.idempotency_lock:
+            now_ts = time.time()
+            results = self.config.setdefault("idempotency_results", {})
+
+            # Keep one week of results and cap the persisted cache size.
+            cutoff = now_ts - 7 * 24 * 60 * 60
+            expired = [
+                item_key for item_key, item in results.items()
+                if float(item.get("created_at", 0)) < cutoff
+            ]
+            for item_key in expired:
+                results.pop(item_key, None)
+            if len(results) > 2000:
+                oldest = sorted(
+                    results,
+                    key=lambda item_key: float(results[item_key].get("created_at", 0)),
+                )[:len(results) - 2000]
+                for item_key in oldest:
+                    results.pop(item_key, None)
+
+            cached = results.get(storage_key)
+            if cached is not None:
+                return cached["response"], int(cached.get("status", 200))
+
+            response, status = operation()
+            if 200 <= status < 300:
+                results[storage_key] = {
+                    "created_at": now_ts,
+                    "status": status,
+                    "response": response,
+                }
+                self.save_config()
+            return response, status
 
     def execute_command(self, command):
         """Execute shell command and return result"""
@@ -4612,44 +4669,73 @@ def provision_user_route(user_id):
     duration = data.get('duration', '1m')
     server_ids = data.get('server_ids')  # list of ids, or omitted for all
     name = data.get('name')
+
+    def operation():
+        try:
+            record, provisioned, sub_path = amnezia_manager.provision_user(
+                user_id, duration_code=duration, server_ids=server_ids, name=name
+            )
+        except ValueError as e:
+            return {"error": str(e)}, 400
+        return {
+            "status": "ok",
+            "user_id": record["user_id"],
+            "name": record.get("name"),
+            "subscription_url_path": sub_path,
+            "subscription_token": record["token"],
+            "provisioned": provisioned,
+        }, 200
+
     try:
-        record, provisioned, sub_path = amnezia_manager.provision_user(
-            user_id, duration_code=duration, server_ids=server_ids, name=name
+        body, status = amnezia_manager.execute_idempotent(
+            f"provision:{user_id}", request.headers.get("Idempotency-Key"), operation
         )
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    return jsonify({
-        "status": "ok",
-        "user_id": record["user_id"],
-        "name": record.get("name"),
-        "subscription_url_path": sub_path,
-        "subscription_token": record["token"],
-        "provisioned": provisioned,
-    })
+    return jsonify(body), status
 
 
 @app.route('/api/users/<user_id>/extend', methods=['POST'])
 def extend_user_route(user_id):
     data = request.json or {}
     duration = data.get('duration', '1m')
+
+    def operation():
+        try:
+            extended = amnezia_manager.extend_user(user_id, duration)
+        except ValueError as e:
+            return {"error": str(e)}, 400
+        if not extended:
+            return {"error": "User has no live clients to extend"}, 404
+        return {"status": "extended", "user_id": user_id, "extended": extended}, 200
+
     try:
-        extended = amnezia_manager.extend_user(user_id, duration)
+        body, status = amnezia_manager.execute_idempotent(
+            f"extend:{user_id}", request.headers.get("Idempotency-Key"), operation
+        )
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    if not extended:
-        return jsonify({"error": "User has no live clients to extend"}), 404
-    return jsonify({"status": "extended", "user_id": user_id, "extended": extended})
+    return jsonify(body), status
 
 
 @app.route('/api/users/<user_id>', methods=['DELETE'])
 def delete_user_route(user_id):
+    def operation():
+        try:
+            result = amnezia_manager.delete_user(user_id)
+        except ValueError as e:
+            return {"error": str(e)}, 400
+        if not result.get("user_existed"):
+            return {"error": "User not found"}, 404
+        return {"status": "deleted", "user_id": user_id, **result}, 200
+
     try:
-        result = amnezia_manager.delete_user(user_id)
+        body, status = amnezia_manager.execute_idempotent(
+            f"delete:{user_id}", request.headers.get("Idempotency-Key"), operation
+        )
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    if not result.get("user_existed"):
-        return jsonify({"error": "User not found"}), 404
-    return jsonify({"status": "deleted", "user_id": user_id, **result})
+    return jsonify(body), status
 
 
 @app.route('/api/users/broadcast', methods=['POST'])

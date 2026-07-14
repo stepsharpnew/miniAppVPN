@@ -17,6 +17,7 @@ import {
 } from "./chat-store";
 import {
   getCachedChannelMembership,
+  getStaleCachedChannelMembership,
   getCorsAllowedOrigins,
   healthzRateLimiter,
   isAllowedSupportUploadMime,
@@ -312,6 +313,27 @@ export function createApiServer(api: Api, botToken: string) {
     return (req as any).tgUser;
   }
 
+  async function getChannelMemberWithRetry(chatId: string, userId: number) {
+    const attempts = 2;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await api.getChatMember(chatId, userId);
+      } catch (err) {
+        lastError = err;
+        if (attempt < attempts) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+      }
+    }
+    throw lastError;
+  }
+
+  function logChannelCheckFallback(context: string, userId: number, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`${context}: Telegram unavailable for user ${userId}; ${message}`);
+  }
+
   const requireChannelSubscription: express.RequestHandler = async (
     req,
     res,
@@ -338,7 +360,7 @@ export function createApiServer(api: Api, botToken: string) {
 
     const chatId = ch.startsWith("@") ? ch : `@${ch}`;
     try {
-      const member = await api.getChatMember(chatId, user.id);
+      const member = await getChannelMemberWithRetry(chatId, user.id);
       const subscribed = isChannelMemberStatus(member.status);
       setCachedChannelMembership(user.id, subscribed);
       if (!subscribed) {
@@ -350,7 +372,14 @@ export function createApiServer(api: Api, botToken: string) {
       }
       next();
     } catch (err) {
-      console.error("getChatMember (API guard):", err);
+      // Fail open only for a user whose membership was positively confirmed
+      // recently. Unknown users and known non-members remain blocked.
+      if (getStaleCachedChannelMembership(user.id) === true) {
+        logChannelCheckFallback("getChatMember (API guard)", user.id, err);
+        next();
+        return;
+      }
+      logChannelCheckFallback("getChatMember (API guard)", user.id, err);
       res.status(503).json({ error: "channel_check_failed" });
     }
   };
@@ -367,13 +396,21 @@ export function createApiServer(api: Api, botToken: string) {
     const chatId = ch.startsWith("@") ? ch : `@${ch}`;
     const channelUrl = `https://t.me/${ch.replace(/^@/, "")}`;
     try {
-      const member = await api.getChatMember(chatId, user.id);
+      const member = await getChannelMemberWithRetry(chatId, user.id);
+      const subscribed = isChannelMemberStatus(member.status);
+      setCachedChannelMembership(user.id, subscribed);
       res.json({
-        subscribed: isChannelMemberStatus(member.status),
+        subscribed,
         channelUrl,
       });
     } catch (err) {
-      console.error("getChatMember (/api/channel-subscription):", err);
+      const stale = getStaleCachedChannelMembership(user.id);
+      if (stale === true) {
+        logChannelCheckFallback("getChatMember (/api/channel-subscription)", user.id, err);
+        res.json({ subscribed: true, channelUrl, degraded: true });
+        return;
+      }
+      logChannelCheckFallback("getChatMember (/api/channel-subscription)", user.id, err);
       res.json({ subscribed: false, channelUrl });
     }
   });
